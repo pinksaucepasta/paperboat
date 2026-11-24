@@ -994,7 +994,7 @@ func (s *NetworkService) regionalCandidates(rows []relayNodeRow, accountID, endp
 		if i == peernetwork.MaxRegionalCandidates {
 			break
 		}
-		n := peernetwork.RegionalNode{NodeID: r.id, NodeGeneration: uint64(r.nodeGeneration), ProcessEpoch: r.processEpoch, Region: r.region, FailureDomain: r.failureDomain, EndpointHost: r.host, State: r.state, CapacityLimit: r.capacityLimit, CapacityUsed: r.capacityUsed}
+		n := peernetwork.RegionalNode{NodeID: r.id, NodeGeneration: uint64(r.nodeGeneration), ProcessEpoch: r.processEpoch, Region: r.region, FailureDomain: r.failureDomain, EndpointHost: r.host, State: r.state, CapacityUsed: r.capacityUsed}
 		roles, transports, pin, tcpPort, quicPort := r.roles, r.transports, r.pin, r.tcpPort, r.quicPort
 		observed, expires, capacityAt, drain, selfHosted := r.observed, r.expires, r.capacityAt, r.drain, r.selfHosted
 		// A node whose row clients would refuse is left out; it never withholds the other relays.

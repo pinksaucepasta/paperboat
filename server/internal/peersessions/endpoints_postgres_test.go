@@ -344,7 +344,7 @@ func TestHomeRelayReachesPeersOnPostgres(t *testing.T) {
 		if strings.HasPrefix(node, "relay_other_") {
 			allowed = "someone_else_" + f.suffix
 		}
-		if _, err := f.store.SQL().ExecContext(f.ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'default','v1',$1,'relay.example.test',443,444,'ready',true,$2,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,20,$2,$3,ARRAY[$4])`, node, now, now.Add(time.Minute), allowed); err != nil {
+		if _, err := f.store.SQL().ExecContext(f.ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'default','v1',$1,'relay.example.test',443,444,'ready',true,$2,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],20,$2,$3,ARRAY[$4])`, node, now, now.Add(time.Minute), allowed); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {

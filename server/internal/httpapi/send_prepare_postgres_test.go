@@ -164,7 +164,7 @@ func (f *sendPrepareFixture) route(env, machineID string) {
 	edge := "edge_" + env
 	epoch := "epoch_" + env
 	key := "prepare-key-" + machineID
-	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,transports,registry_expires_at,region,failure_domain,capacity_limit,capacity_observed_at) VALUES($1,'development','1.0',$2,'ready',true,now(),ARRAY['edge'],ARRAY['http2','http3'],now()+interval '1 hour','test-region','test-domain',100,now()) ON CONFLICT DO NOTHING`, edge, epoch)
+	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,transports,registry_expires_at,region,failure_domain,capacity_observed_at) VALUES($1,'development','1.0',$2,'ready',true,now(),ARRAY['edge'],ARRAY['http2','http3'],now()+interval '1 hour','test-region','test-domain',now()) ON CONFLICT DO NOTHING`, edge, epoch)
 	f.exec(`INSERT INTO paperboat.control_connector_generations(environment_id,machine_id,generation,edge_pool,edge_node_id,state) VALUES($1,$2,1,'development',$3,'admitted') ON CONFLICT DO NOTHING`, env, machineID, edge)
 	f.exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port,desired_revision,applied_revision,applied_node_id,applied_generation) VALUES($1,$2,'runtime_https_wss','workspace.invalid.test','127.0.0.1',8080,1,1,$3,1) ON CONFLICT DO NOTHING`, "route_"+env, env, edge)
 	var owner string

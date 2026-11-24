@@ -304,7 +304,7 @@ func TestEveryRegionalCandidateSetTheServerBuildsIsAcceptedByClients(t *testing.
 	var nodes []peernetwork.RegionalNode
 	for i := range peernetwork.MaxRegionalCandidates {
 		n := peernetwork.RegionalNode{NodeID: fmt.Sprint("node_", i), NodeGeneration: 1, ProcessEpoch: "epoch", Region: "region", FailureDomain: "domain", Roles: []string{"relay"}, Transports: []string{"derp_quic"},
-			EndpointHost: "relay.example.test", EndpointTCPPort: 443, EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityObservedAt: now.Unix()}
+			EndpointHost: "relay.example.test", EndpointTCPPort: 443, EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityObservedAt: now.Unix()}
 		if i%2 == 0 {
 			n.Hosting, n.TLSSPKISHA256 = peernetwork.HostingSelfHosted, contractKey(i)
 		}

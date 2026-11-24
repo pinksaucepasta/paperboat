@@ -38,7 +38,6 @@ type RegionalNode struct {
 	State              string   `json:"state"`
 	ObservedAt         int64    `json:"observed_at"`
 	ExpiresAt          int64    `json:"expires_at"`
-	CapacityLimit      uint64   `json:"capacity_limit"`
 	CapacityUsed       uint64   `json:"capacity_used"`
 	CapacityObservedAt int64    `json:"capacity_observed_at"`
 	DrainDeadline      *int64   `json:"drain_deadline,omitempty"`

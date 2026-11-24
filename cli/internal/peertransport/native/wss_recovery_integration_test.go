@@ -138,7 +138,7 @@ func TestNativeSessionRecoversQUICToWSSAndBack(t *testing.T) {
 	}()
 	_, tcpPortText, _ := net.SplitHostPort(httpServer.Listener.Addr().String())
 	tcpPort, _ := strconv.Atoi(tcpPortText)
-	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-a", Roles: []string{"relay"}, Transports: []string{"derp_quic", "derp_wss"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(udp.LocalAddr().(*net.UDPAddr).Port), EndpointTCPPort: uint16(tcpPort), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(2 * time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
+	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-a", Roles: []string{"relay"}, Transports: []string{"derp_quic", "derp_wss"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(udp.LocalAddr().(*net.UDPAddr).Port), EndpointTCPPort: uint16(tcpPort), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(2 * time.Minute).Unix(), CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	nodes := []tailnet.RegionalNode{node}
 	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
 	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, nodes)

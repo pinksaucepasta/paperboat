@@ -58,7 +58,7 @@ func TestRegionalRecoveryIdleFiveMinutes(t *testing.T) {
 		if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
 			t.Fatal(err)
 		}
-		node := RegionalNode{NodeID: "relay_idle", NodeGeneration: 1, ProcessEpoch: "epoch_idle", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+		node := RegionalNode{NodeID: "relay_idle", NodeGeneration: 1, ProcessEpoch: "epoch_idle", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityUsed: 1, CapacityObservedAt: now}
 		a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 600, Nodes: []RegionalNode{node}}
 		a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 600}}
 		e := &idleRegionalEngine{}
@@ -183,7 +183,7 @@ func TestParkedListenerNoticesAHomeCarrierThatEnded(t *testing.T) {
 		if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
 			t.Fatal(err)
 		}
-		node := RegionalNode{NodeID: "relay_idle", NodeGeneration: 1, ProcessEpoch: "epoch_idle", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+		node := RegionalNode{NodeID: "relay_idle", NodeGeneration: 1, ProcessEpoch: "epoch_idle", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityUsed: 1, CapacityObservedAt: now}
 		a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 600, Nodes: []RegionalNode{node}}
 		a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 600}}
 		e := &carrierEngine{}

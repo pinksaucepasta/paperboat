@@ -517,9 +517,9 @@ except (OSError,subprocess.CalledProcessError,KeyError):
     sql(f"INSERT INTO operator_regions(id,display_name,enabled) VALUES('{REGION}','Staging',true) "
         "ON CONFLICT(id) DO UPDATE SET enabled=true")
     sql(f"INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,region,failure_domain,"
-        f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},'{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
-        f"'registered','{REGION}','{failure_domain}',ARRAY['edge'],ARRAY['http2','http3'],2048,now(),now()+interval '1 hour',decode('{pin}','hex')) "
-        "ON CONFLICT(id) DO UPDATE SET capacity_limit=excluded.capacity_limit,"
+        f"roles,transports,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},'{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
+        f"'registered','{REGION}','{failure_domain}',ARRAY['edge'],ARRAY['http2','http3'],now(),now()+interval '1 hour',decode('{pin}','hex')) "
+        "ON CONFLICT(id) DO UPDATE SET "
         "failure_domain=excluded.failure_domain,carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
         "carrier_endpoint_quic_port=excluded.carrier_endpoint_quic_port")
     # Paperboat's own edge = a global installation (what an admin-panel claim of pbh install records).
@@ -586,8 +586,8 @@ def relay(image):
     sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging' AND capability='relay'")
     sql("UPDATE paperboat.control_tunnel_nodes SET state='draining',registry_expires_at=now() WHERE id LIKE 'stg_relay_%' AND id NOT LIKE 'stg_relay_install_%'")
     sql(f"INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,"
-        f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{RELAY_TCP_PORT},{RELAY_QUIC_PORT},"
-        f"'registered','{REGION}','{REGION}',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],256,now(),now()+interval '1 hour',decode('{pin}','hex'))")
+        f"roles,transports,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{RELAY_TCP_PORT},{RELAY_QUIC_PORT},"
+        f"'registered','{REGION}','{REGION}',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],now(),now()+interval '1 hour',decode('{pin}','hex'))")
     sql(f"INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) "
         f"VALUES('{install}','{node}',decode('{raw_pub.hex()}','hex'),decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),"
         f"'{RELAY_NAME}','relay','account','usr_staging','{install}',true)")

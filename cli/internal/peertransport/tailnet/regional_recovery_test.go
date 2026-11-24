@@ -150,7 +150,7 @@ func TestRegionalStatusDoesNotExposePreparationErrorText(t *testing.T) {
 	node := RegionalNode{
 		NodeID: "relay_test", NodeGeneration: 1, ProcessEpoch: "epoch_test", Region: "test", FailureDomain: "domain_test",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now,
+		State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityUsed: 1, CapacityObservedAt: now,
 	}
 	a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
 	a.relay.mu.Lock()
@@ -386,7 +386,7 @@ func TestRegionalRecoveryTriesRefusedRelaysAgainWithoutANewGrant(t *testing.T) {
 	node := RegionalNode{
 		NodeID: "relay_test", NodeGeneration: 1, ProcessEpoch: "epoch_test", Region: "test", FailureDomain: "domain_test",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now,
+		State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityUsed: 1, CapacityObservedAt: now,
 	}
 	a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 600, Nodes: []RegionalNode{node}}
 	a.relay.mu.Lock()

@@ -5,7 +5,7 @@ Everything here is after launch unless its group says otherwise (user decision 2
 ## Soon: right after the smoke
 
 ### Drop control_tunnel_nodes.capacity_limit
-Do not drop `control_tunnel_nodes.capacity_limit`: it is in use. Overload protection: `node_load_percent` (migration 487) takes the worse of sustained CPU and connections as a share of this declared size, and the load rule takes a node out of rotation (wildcard DNS, relay candidate list) at `load_out_percent`; the registry check also requires it > 0. Keep it. (A removal on 2026-11-25 was dropped for exactly this.)
+No server code names `control_tunnel_nodes.capacity_limit` any more (node load is the sustained CPU: migration 509; the registry check no longer needs it: 510, 511); the column stays NOT NULL DEFAULT 0 for the previous server. The deploy after the one that ships this: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_tunnel_nodes DROP COLUMN capacity_limit;` (`-- contract-after: 510`, forward-only Down), then `make generate` (the sqlc `RETURNING *` lists still name it).
 
 ### Global edges: verify without an own hostname (2026-11-24)
 Customer edges are verified by their pinned node identity, so they need no hostname or public certificate. Only a global (operator) edge must serve a

@@ -65,8 +65,8 @@ func TestListHostedRelaysReturnsRegions(t *testing.T) {
 		{"f1", "rf", "ready", "relay", now.Add(-16 * time.Second)}, // silent
 		{"g1", "rg", "ready", "edge", now},                         // an edge-only region
 	} {
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256)
-VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,$6,'domain',ARRAY[$4]::text[],ARRAY['derp_quic']::text[],100,0,$3,$3::timestamptz+interval '1 hour',$5)`, prefix+item.suffix, item.state, item.heartbeat, item.role, make([]byte, 32), prefix+item.region)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256)
+VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,$6,'domain',ARRAY[$4]::text[],ARRAY['derp_quic']::text[],0,$3,$3::timestamptz+interval '1 hour',$5)`, prefix+item.suffix, item.state, item.heartbeat, item.role, make([]byte, 32), prefix+item.region)
 	}
 	exec(`UPDATE paperboat.control_tunnel_nodes SET allowed_account_ids=ARRAY['different_account'] WHERE id=$1`, prefix+"d1")
 	for index, own := range []struct{ suffix, scope string }{{"b1", account}, {"c1", other}} {

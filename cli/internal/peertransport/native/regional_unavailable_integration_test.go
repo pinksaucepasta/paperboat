@@ -70,7 +70,7 @@ func TestNativeDialTriesTheNextRegionalRelayWhenTheFirstRefusesAuthorization(t *
 		go func() { served <- relay.Serve(relayCtx, packetConn, relayTLS) }()
 		t.Cleanup(func() { stop(); _ = relay.Close(); _ = packetConn.Close(); <-served; relay.Wait() })
 		port := packetConn.LocalAddr().(*net.UDPAddr).Port
-		return tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-" + id, Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
+		return tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-" + id, Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	}
 	refusing, healthy := start("a-refusing", otherPub), start("b-healthy", pub)
 	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, []tailnet.RegionalNode{refusing, healthy})

@@ -73,7 +73,7 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 	exec(`UPDATE paperboat.runtime_carrier_attachments SET expires_at=$1 WHERE machine_id=$2 AND edge_node_id=$3`, now.Add(time.Hour), machine, node)
 	exec(`UPDATE paperboat.tunnel_routes SET origin_address=$1 WHERE id=$2`, origin, route)
 	exec(`UPDATE paperboat.tunnels SET created_by_host_id=$1 WHERE id=$2`, machine, tunnel)
-	exec(`UPDATE paperboat.control_tunnel_nodes SET registry_expires_at=$1,region='test',failure_domain='test',roles=ARRAY['edge'],transports=ARRAY['http3','http2'],capacity_limit=10,capacity_observed_at=now() WHERE id=$2`, now.Add(time.Hour), node)
+	exec(`UPDATE paperboat.control_tunnel_nodes SET registry_expires_at=$1,region='test',failure_domain='test',roles=ARRAY['edge'],transports=ARRAY['http3','http2'],capacity_observed_at=now() WHERE id=$2`, now.Add(time.Hour), node)
 	operation, jti := "mc_ir_"+suffix, "mcc_ir_"+suffix
 	exec(`INSERT INTO paperboat.machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$3,$4,$5,1)`, operation, machine, jti, now, now.Add(time.Hour))
 	exec(`INSERT INTO paperboat.machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) VALUES($1,1,1,$2,$3,$4,$5)`, machine, operation, jti, now, now.Add(time.Hour))

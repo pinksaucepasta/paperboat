@@ -156,7 +156,7 @@ func TestOperatorActionsRelayDrainResumeAndAuthority(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','operations')`, actor); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,roles,transports,version,region,failure_domain,capacity_limit,capacity_observed_at,registry_expires_at) VALUES($1,'default','1.0',$2,'ready',true,ARRAY['relay'],ARRAY['derp_quic','derp_wss'],1,'test','test-domain',100,now(),now()+interval '1 minute')`, node, "epoch_"+x); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,roles,transports,version,region,failure_domain,capacity_observed_at,registry_expires_at) VALUES($1,'default','1.0',$2,'ready',true,ARRAY['relay'],ARRAY['derp_quic','derp_wss'],1,'test','test-domain',now(),now()+interval '1 minute')`, node, "epoch_"+x); err != nil {
 		t.Fatal(err)
 	}
 	s := NewService(store)

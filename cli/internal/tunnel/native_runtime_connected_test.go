@@ -272,7 +272,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	}
 	now := time.Now().Unix()
 	port := relaySocket.LocalAddr().(*net.UDPAddr).Port
-	node := tailnet.RegionalNode{NodeID: "relay_connected", NodeGeneration: 1, ProcessEpoch: "epoch_connected", Region: "test", FailureDomain: "local", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now, ExpiresAt: now + 90, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+	node := tailnet.RegionalNode{NodeID: "relay_connected", NodeGeneration: 1, ProcessEpoch: "epoch_connected", Region: "test", FailureDomain: "local", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now, ExpiresAt: now + 90, CapacityUsed: 1, CapacityObservedAt: now}
 	if forcedWSS {
 		node.Transports = append(node.Transports, "derp_wss")
 		node.EndpointTCPPort = tcpPort

@@ -8169,7 +8169,6 @@
           "node_generation",
           "process_epoch",
           "expires_at",
-          "capacity_limit",
           "revocations"
         ],
         "properties": {
@@ -8190,11 +8189,6 @@
           },
           "expires_at": {
             "type": "integer"
-          },
-          "capacity_limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 256
           },
           "revocations": {
             "type": "array",
@@ -13597,7 +13591,6 @@
           "endpoint_quic_port",
           "roles",
           "transports",
-          "capacity_limit",
           "revision",
           "node_generation",
           "registry_expires_at",
@@ -13644,10 +13637,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "capacity_limit": {
-            "type": "integer",
-            "format": "int64"
           },
           "revision": {
             "type": "integer",
@@ -19841,10 +19830,6 @@
             "format": "int64"
           },
           "connections": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "connection_limit": {
             "type": "integer",
             "format": "int64"
           },

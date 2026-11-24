@@ -12,7 +12,7 @@ func TestEligibleToleratesAClockBehindTheServer(t *testing.T) {
 	node := func(observed time.Time) RegionalNode {
 		return RegionalNode{NodeID: "relay_clock", NodeGeneration: 1, ProcessEpoch: "epoch_clock", Region: "test", FailureDomain: "rack",
 			Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-			State: "ready", ObservedAt: observed.Unix(), CapacityObservedAt: observed.Unix(), ExpiresAt: server.Add(time.Minute).Unix(), CapacityLimit: 10}
+			State: "ready", ObservedAt: observed.Unix(), CapacityObservedAt: observed.Unix(), ExpiresAt: server.Add(time.Minute).Unix()}
 	}
 	for name, tc := range map[string]struct {
 		behind   time.Duration

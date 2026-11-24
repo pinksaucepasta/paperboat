@@ -10,8 +10,7 @@
         "tcp_port": 7272,
         "quic_port": 7273,
         "region": "test",
-        "failure_domain": "test-host",
-        "capacity_limit": 128
+        "failure_domain": "test-host"
       }
     ],
     "browser_login_origin": "https://console.example.test"

@@ -64,8 +64,8 @@ func TestTrafficRollupSumsRetentionAndPagesOnPostgres(t *testing.T) {
 	exec(`INSERT INTO operator_accounts(id,email,password_hash,status,role) VALUES($1,$2,'unused test login','active','operations')`, actor, actor+"@example.test")
 	now := time.Now().UTC()
 	for _, n := range []struct{ id, role string }{{relay, "relay"}, {edge, "edge"}, {silent, "relay"}, {selfRelay, "relay"}} {
-		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,site)
- VALUES($1,'default','1.0','e',$1||'.example.test',443,444,'ready',true,$2,1,'hel','hel-a',ARRAY[$3],ARRAY['http3'],1000,0,$2,$4,'Helsinki')`, n.id, now, n.role, now.Add(time.Hour))
+		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,site)
+ VALUES($1,'default','1.0','e',$1||'.example.test',443,444,'ready',true,$2,1,'hel','hel-a',ARRAY[$3],ARRAY['http3'],0,$2,$4,'Helsinki')`, n.id, now, n.role, now.Add(time.Hour))
 	}
 	runtimeHash := sha256.Sum256([]byte(stamp)) // unique per run: runtime_hash is unique across the database
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'fixture','customer relay','relay','account','acct',$1,true)`, "tr_inst_"+stamp, selfRelay, runtimeHash[:])

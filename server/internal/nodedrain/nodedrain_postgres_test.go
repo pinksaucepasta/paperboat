@@ -48,7 +48,7 @@ func (f *fixture) exec(query string, args ...any) {
 
 func (f *fixture) node(name, roles string) string {
 	id := "nd_" + name + "_" + f.stamp
-	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at) VALUES($1,'test','1.0','epoch','ready',true,now(),$2::text[],now()+interval '1 hour','test','test',ARRAY['http3','http2'],100,0,now())`, id, roles)
+	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_used,capacity_observed_at) VALUES($1,'test','1.0','epoch','ready',true,now(),$2::text[],now()+interval '1 hour','test','test',ARRAY['http3','http2'],0,now())`, id, roles)
 	f.t.Cleanup(func() { f.exec(`DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id) })
 	return id
 }

@@ -80,7 +80,7 @@ func (f *wildcardFixture) exec(query string, args ...any) {
 // node adds a ready, verified managed edge named n<name>; mutate then changes it with a SQL SET clause.
 func (f *wildcardFixture) node(name, v4, v6, region, mutate string) string {
 	id := "nwc_" + name + "_" + f.stamp
-	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at,public_ingress_ipv4,public_ingress_ipv6,public_ingress_verified_at) VALUES($1,'test','1.0','epoch','ready',true,now(),ARRAY['edge'],now()+interval '1 hour','test','test',ARRAY['http3','http2'],100,0,now(),nullif($2,'')::inet,nullif($3,'')::inet,now())`, id, v4, v6)
+	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_used,capacity_observed_at,public_ingress_ipv4,public_ingress_ipv6,public_ingress_verified_at) VALUES($1,'test','1.0','epoch','ready',true,now(),ARRAY['edge'],now()+interval '1 hour','test','test',ARRAY['http3','http2'],0,now(),nullif($2,'')::inet,nullif($3,'')::inet,now())`, id, v4, v6)
 	if region != "" {
 		f.exec(`UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, id, region) // the serving set ranks by this column
 		f.exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),decode(md5($1)||md5($1),'hex'),'\x00','managed fixture','tunnel','global','global',$1,true)`, id)
@@ -277,9 +277,11 @@ func TestWildcardLoadStatePersistsAcrossWorkers(t *testing.T) {
 	}
 }
 
-func TestNodeLoadPercentUsesTheWorstReportedFigure(t *testing.T) {
+// A node's load is its sustained CPU: a relay or edge has no connection limit, so the connection count (which the node
+// reports for the capacity page) is not a share of anything.
+func TestNodeLoadPercentIsTheSustainedCPU(t *testing.T) {
 	f := newWildcardFixture(t)
-	id := f.node("a", "203.0.113.1", "", "wc_on_"+f.stamp, "capacity_limit=100,capacity_used=20")
+	id := f.node("a", "203.0.113.1", "", "wc_on_"+f.stamp, "capacity_used=20")
 	load := func() *float64 {
 		f.t.Helper()
 		var v *float64
@@ -291,17 +293,13 @@ func TestNodeLoadPercentUsesTheWorstReportedFigure(t *testing.T) {
 	if load() != nil {
 		t.Fatal("a node with no report has a load")
 	}
-	f.setLoad(id, 30, 60, 0)
-	if v := load(); v == nil || *v != 60 {
-		t.Fatalf("connections 60 of 100 against cpu 30: %v", v)
-	}
-	f.setLoad(id, 30, -1, 0) // no connection count: the node's own capacity_used (20)
+	f.setLoad(id, 30, 6000, 0)
 	if v := load(); v == nil || *v != 30 {
-		t.Fatalf("cpu 30 against capacity_used 20: %v", v)
+		t.Fatalf("cpu 30 with 6000 connections: %v", v)
 	}
 	f.setLoad(id, 5, 90, 0)
-	if v := load(); v == nil || *v != 90 {
-		t.Fatalf("connections 90: %v", v)
+	if v := load(); v == nil || *v != 5 {
+		t.Fatalf("cpu 5 with 90 connections: %v", v)
 	}
 	f.setLoad(id, 99, 90, 3*time.Minute)
 	if load() != nil {
@@ -374,6 +372,20 @@ func TestRelayLoadNeverLeavesARegionEmpty(t *testing.T) {
 	}
 	if got := f.outNodes(); !slices.Equal(got, []string{b, c}) {
 		t.Fatalf("second round held out %v, want %v: the survivor is %s (79), not %s (80)", got, []string{b, c}, a, c)
+	}
+}
+
+// A relay has no connection limit, so many connections at low CPU keep it in rotation; only sustained CPU takes it out.
+func TestRelayLoadIgnoresConnectionCount(t *testing.T) {
+	f := newWildcardFixture(t)
+	on := "wc_on_" + f.stamp
+	busy, hot := f.relay("busy", on, 5), f.relay("hot", on, 95)
+	f.exec(`UPDATE paperboat.node_capacity SET connections=5000 WHERE node_id=$1`, busy)
+	if err := f.relayLoad().Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.outNodes(); !slices.Equal(got, []string{hot}) {
+		t.Fatalf("held out %v, want only %s: %s has 5000 connections at 5%% CPU and stays", got, hot, busy)
 	}
 }
 

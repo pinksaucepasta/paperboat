@@ -201,8 +201,8 @@ func TestLoadPeerPolicy(t *testing.T) {
 		teamstest.SetMachineAccess(t, store, team, host, "", "terminal", "exec")
 	}
 	relay := "load_relay_" + run
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at)
- VALUES($1,'load','v1','epoch','relay.example.test',443,444,'ready',true,now(),1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100000,1,now(),now()+interval '1 day')`, relay)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at)
+ VALUES($1,'load','v1','epoch','relay.example.test',443,444,'ready',true,now(),1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],1,now(),now()+interval '1 day')`, relay)
 	go func() { // the relay's heartbeat, as a live node writes it
 		for runCtx.Err() == nil {
 			_, _ = store.SQL().ExecContext(runCtx, `UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id=$1`, relay)

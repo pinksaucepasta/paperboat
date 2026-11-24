@@ -95,7 +95,7 @@ func newUnlistedRelayFixture(t *testing.T) *unlistedRelayFixture {
 	}
 	now := time.Now().Unix()
 	f := &unlistedRelayFixture{a: a}
-	f.relay = RegionalNode{NodeID: "relay_a", NodeGeneration: 1, ProcessEpoch: "epoch_a", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+	f.relay = RegionalNode{NodeID: "relay_a", NodeGeneration: 1, ProcessEpoch: "epoch_a", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityUsed: 1, CapacityObservedAt: now}
 	f.region = regionForNode(f.relay)
 	recovery := a.newRegionalRecoveryLocked()
 	f.list = func(t *testing.T, listed bool) {

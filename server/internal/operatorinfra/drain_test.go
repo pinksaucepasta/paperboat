@@ -32,7 +32,7 @@ func drainFixture(t *testing.T) (s *Service, store *db.DB, admin string, node No
 		t.Fatal(err)
 	}
 	nodeID := "managed_" + x
-	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", nodeID, region.ID, "managed:"+region.ID, "zone-a", "edge.example.test", []string{"edge"}, []string{"http3"}, 8)
+	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", nodeID, region.ID, "managed:"+region.ID, "zone-a", "edge.example.test", []string{"edge"}, []string{"http3"})
 	page, err := s.ListNodes(ctx, admin, region.ID, "", 10)
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("read managed node %+v %v", page, err)
@@ -163,7 +163,7 @@ func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
 		}
 	}
 	second := node.ID + "_b"
-	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", second, node.RegionID, "managed:"+node.RegionID, "zone-b", "edge-b.example.test", []string{"edge"}, []string{"http3"}, 8)
+	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", second, node.RegionID, "managed:"+node.RegionID, "zone-b", "edge-b.example.test", []string{"edge"}, []string{"http3"})
 	serve(second)
 	if _, err := s.MutateNode(ctx, admin, "drain-with-replacement-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); err != nil {
 		t.Fatalf("drain with another serving edge in the region: %v", err)
@@ -270,7 +270,7 @@ func TestOperatorRegionDisableMovesWorkspacesAndWakesOnce(t *testing.T) {
 	var others []string
 	for _, name := range []string{"a", "b"} {
 		id := "regionmove_" + name + "_" + x
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region_'||$1,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region_'||$1,$1,ARRAY['edge'],ARRAY['http3','http2'],0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
 		t.Cleanup(func() {
 			store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
 		})

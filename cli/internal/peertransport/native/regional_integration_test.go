@@ -117,7 +117,7 @@ func testNativeRegionalFailover(t *testing.T, expiry bool) {
 			r.Wait()
 		}
 		port := pc.LocalAddr().(*net.UDPAddr).Port
-		return &regionalRelay{addr: fmt.Sprintf("127.0.0.1:%d", port), stop: shutdown, node: tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: domain, Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}}
+		return &regionalRelay{addr: fmt.Sprintf("127.0.0.1:%d", port), stop: shutdown, node: tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: domain, Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityUsed: 1, CapacityObservedAt: now.Unix()}}
 	}
 	a, b := start("regional-a", "rack-a", "127.0.0.1:0"), start("regional-b", "rack-b", "127.0.0.1:0")
 	defer func() { a.stop(); b.stop() }()

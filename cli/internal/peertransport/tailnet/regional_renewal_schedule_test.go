@@ -48,7 +48,7 @@ func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T
 	a.regional = &RegionalCandidates{IssuedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{{
 		NodeID: "relay_renewal", NodeGeneration: 1, ProcessEpoch: "epoch_renewal", Region: "test", FailureDomain: "rack",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,
+		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(),
 	}}}
 	a.mu.Lock()
 	a.relay.mu.Lock()
@@ -166,7 +166,7 @@ func TestBoundPairWithAWorkingPathRenewsOnTheIdleCadence(t *testing.T) {
 	a.regional = &RegionalCandidates{IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(), Nodes: []RegionalNode{{
 		NodeID: "relay_bound", NodeGeneration: 1, ProcessEpoch: "epoch_bound", Region: "test", FailureDomain: "rack",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now.Unix(), CapacityObservedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(), CapacityLimit: 10,
+		State: "ready", ObservedAt: now.Unix(), CapacityObservedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(),
 	}}}
 	a.mu.Lock()
 	a.relay.mu.Lock()

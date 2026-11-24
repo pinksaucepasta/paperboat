@@ -629,7 +629,7 @@ func (f platformAcceptanceFixture) edgeTuples() []platformAcceptanceEdge {
 func (f platformAcceptanceFixture) insertEdges(t *testing.T, database *db.DB, now time.Time) {
 	t.Helper()
 	for _, edge := range f.edgeTuples() {
-		if _, err := database.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES ($1,'default','v1',$2,'ready',true,$3,1,'test-region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http2']::text[],10,0,$3,$3::timestamptz+interval '1 hour')`, edge.nodeID, edge.processEpoch, now); err != nil {
+		if _, err := database.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at) VALUES ($1,'default','v1',$2,'ready',true,$3,1,'test-region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http2']::text[],0,$3,$3::timestamptz+interval '1 hour')`, edge.nodeID, edge.processEpoch, now); err != nil {
 			t.Fatal(err)
 		}
 	}

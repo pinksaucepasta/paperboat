@@ -134,12 +134,12 @@ func (n *fakeClaimNode) claim(w http.ResponseWriter, r *http.Request) {
 }
 
 func fakeRelay(region string) Component {
-	return Component{Capability: "relay", TCPPort: 443, QUICPort: 3478, Region: region, FailureDomain: "rack-a", CapacityLimit: 100}
+	return Component{Capability: "relay", TCPPort: 443, QUICPort: 3478, Region: region, FailureDomain: "rack-a"}
 }
 
 func fakeEdge(region string) Component {
 	_, usage, _ := ed25519.GenerateKey(rand.Reader)
-	return Component{Capability: "tunnel", TCPPort: 8444, QUICPort: 8445, Region: region, FailureDomain: "rack-a", CapacityLimit: 100,
+	return Component{Capability: "tunnel", TCPPort: 8444, QUICPort: 8445, Region: region, FailureDomain: "rack-a",
 		UsagePublicKey: base64.RawURLEncoding.EncodeToString(usage.Public().(ed25519.PublicKey))}
 }
 

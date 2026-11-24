@@ -29,7 +29,6 @@ type NodeCapacity struct {
 	CPUSustainedPercent *float64      `json:"cpu_sustained_percent,omitempty"`
 	RSSBytes            *int64        `json:"rss_bytes,omitempty"`
 	Connections         *int64        `json:"connections,omitempty"`
-	ConnectionLimit     int64         `json:"connection_limit,omitempty"`
 	BytesToday          *int64        `json:"bytes_today,omitempty"`
 	BytesMonth          *int64        `json:"bytes_month,omitempty"`
 	AllowanceUsed       *float64      `json:"allowance_used,omitempty"` // fraction of the monthly allowance
@@ -130,7 +129,7 @@ func (s *Service) readCapacity(ctx context.Context, tx *db.Tx, after string, lim
    sum(bytes_in+bytes_out) FILTER (WHERE day=$1::date) AS today, sum(bytes_in+bytes_out) AS month
   FROM paperboat.node_capacity_daily WHERE day>=$2::date AND node_id IN (SELECT id FROM p) GROUP BY node_id)
  SELECT coalesce(n.id,c.node_id), coalesce(n.roles,'{}'), coalesce(c.role,''), coalesce(n.state,''), coalesce(n.region,''), coalesce(n.site,''),
-   coalesce(c.version,''), c.cpu_percent, c.cpu_sustained_percent, c.rss_bytes, coalesce(c.connections, n.capacity_used), coalesce(n.capacity_limit,0),
+   coalesce(c.version,''), c.cpu_percent, c.cpu_sustained_percent, c.rss_bytes, coalesce(c.connections, n.capacity_used),
    coalesce(d.today,0), coalesce(d.month,0), n.last_heartbeat_at, c.reported_at, (c.node_id IS NOT NULL)
  FROM paperboat.control_tunnel_nodes n
  FULL JOIN paperboat.node_capacity c ON c.node_id=n.id
@@ -150,7 +149,7 @@ func (s *Service) readCapacity(ctx context.Context, tx *db.Tx, after string, lim
 		var today, month int64
 		var heartbeat, reported sql.NullTime
 		var reports bool
-		if err := rows.Scan(&v.ID, &roles, &role, &v.State, &v.Region, &v.Site, &v.Version, &cpu, &sustained, &rss, &connections, &v.ConnectionLimit, &today, &month, &heartbeat, &reported, &reports); err != nil {
+		if err := rows.Scan(&v.ID, &roles, &role, &v.State, &v.Region, &v.Site, &v.Version, &cpu, &sustained, &rss, &connections, &today, &month, &heartbeat, &reported, &reports); err != nil {
 			return page, err
 		}
 		v.Kind = role

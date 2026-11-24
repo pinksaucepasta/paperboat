@@ -25,7 +25,6 @@ type Component struct {
 	QUICPort       int    `json:"quic_port"`
 	Region         string `json:"region"`
 	FailureDomain  string `json:"failure_domain"`
-	CapacityLimit  int64  `json:"capacity_limit"`
 	UsagePublicKey string `json:"usage_public_key,omitempty"`
 }
 type InspectRequest struct {

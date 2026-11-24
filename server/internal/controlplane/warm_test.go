@@ -13,7 +13,7 @@ func TestWarmRunsTheIngressProjectionAndOpensConnections(t *testing.T) {
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	node := "node_warm_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES ($1,'default','1.0',$2,'test','test',ARRAY['edge'],ARRAY['http2'],10,0,now(),now()+interval '1 hour',now())`, node, "process_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES ($1,'default','1.0',$2,'test','test',ARRAY['edge'],ARRAY['http2'],0,now(),now()+interval '1 hour',now())`, node, "process_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

@@ -31,7 +31,7 @@ func TestManagedNodeRestartAfterGracefulDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A global pbh edge as the claim leaves it: its installation id is its pool, its TLS key is pinned.
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$1,'1.0','old_epoch','edge.example.test',7272,7273,'edge.example.test',7272,7273,'draining',false,$2,'test',ARRAY['edge'],ARRAY['http3','http2'],10,0,now(),now(),decode(lpad('1',64,'0'),'hex'))`, node, region); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$1,'1.0','old_epoch','edge.example.test',7272,7273,'edge.example.test',7272,7273,'draining',false,$2,'test',ARRAY['edge'],ARRAY['http3','http2'],0,now(),now(),decode(lpad('1',64,'0'),'hex'))`, node, region); err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256([]byte(node))
@@ -59,7 +59,7 @@ func TestManagedNodeRestartAfterGracefulDrain(t *testing.T) {
 
 // addManagedNode makes a managed node the way production does: a registered node row in region plus a global pbh
 // installation claimed for it. It returns the installation's runtime credential; key is the Service's encryption key.
-func addManagedNode(t *testing.T, store *db.DB, key, id, region, pool, domain, host string, roles, transports []string, capacity int64) string {
+func addManagedNode(t *testing.T, store *db.DB, key, id, region, pool, domain, host string, roles, transports []string) string {
 	t.Helper()
 	ctx := context.Background()
 	raw := make([]byte, 32)
@@ -78,7 +78,7 @@ func addManagedNode(t *testing.T, store *db.DB, key, id, region, pool, domain, h
 		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
 	})
 	now := time.Now().UTC()
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,$2,'1.0','',$3,24443,24444,$3,24443,24444,'registered',false,NULL,1,$4,$5,$6,$7,$8,0,$9,$9)`, id, pool, host, region, domain, roles, transports, capacity, now); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,$2,'1.0','',$3,24443,24444,$3,24443,24444,'registered',false,NULL,1,$4,$5,$6,$7,0,$8,$8)`, id, pool, host, region, domain, roles, transports, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),$2,$3,'managed fixture',$4,'global','global',$1,true)`, id, hash[:], cipher, map[bool]string{true: "relay", false: "tunnel"}[len(roles) == 1 && roles[0] == "relay"]); err != nil {

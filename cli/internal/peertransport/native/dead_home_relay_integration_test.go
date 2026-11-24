@@ -114,7 +114,7 @@ func testDeadRelayFallback(t *testing.T, deadID string, silentPeer bool) {
 	}
 	defer silent.Close()
 	node := func(id string, port int) tailnet.RegionalNode {
-		return tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: "test", FailureDomain: id, Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(2 * time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
+		return tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: "test", FailureDomain: id, Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(2 * time.Minute).Unix(), CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	}
 	nodes := []tailnet.RegionalNode{node(liveID, udp.LocalAddr().(*net.UDPAddr).Port), node(deadID, silent.LocalAddr().(*net.UDPAddr).Port)}
 	if nodes[0].NodeID > nodes[1].NodeID {

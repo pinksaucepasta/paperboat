@@ -227,10 +227,10 @@ func TestRuntimeAttachmentAuthorityOnPostgres(t *testing.T) {
 	exec(`INSERT INTO user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation,worker_generation,configured_capabilities) VALUES ($1,$2,$3,'runtime-test','linux','amd64','/workspace','online','occupied',$4,1,1,ARRAY['terminal_host']::text[])`, machine, account, env, key)
 	exec(`INSERT INTO control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',38080)`, route, env, machine+".runtime.example.test")
 	exec(`INSERT INTO control_connector_generations(environment_id,machine_id,connector_id,generation,edge_pool,state) VALUES($1,$2,'runtime',1,'default','pending')`, env, machine)
-	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
-VALUES($1,'default','1.0','epoch_runtime','ready',true,now(),'first-region','first-domain',ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour','edge.example.test',7272,7273,$2,'fixture certificate')`, node, "sha256:"+strings.Repeat("1", 64))
-	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
-VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','second-domain',ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour','backup.example.test',7272,7273,$2,'fixture certificate')`, backupNode, "sha256:"+strings.Repeat("2", 64))
+	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
+VALUES($1,'default','1.0','epoch_runtime','ready',true,now(),'first-region','first-domain',ARRAY['edge']::text[],ARRAY['http3','http2']::text[],0,now(),now()+interval '1 hour','edge.example.test',7272,7273,$2,'fixture certificate')`, node, "sha256:"+strings.Repeat("1", 64))
+	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
+VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','second-domain',ARRAY['edge']::text[],ARRAY['http3','http2']::text[],0,now(),now()+interval '1 hour','backup.example.test',7272,7273,$2,'fixture certificate')`, backupNode, "sha256:"+strings.Repeat("2", 64))
 	exec(`UPDATE control_tunnel_nodes SET public_ingress_ipv4=CASE WHEN id=$1 THEN '192.0.2.10'::inet ELSE '192.0.2.11'::inet END,public_ingress_verified_at=now() WHERE id IN ($1,$2)`, node, backupNode)
 	service := &Service{DB: database}
 	proof := previewattachment.MachineProof{UserID: account, MachineID: machine, OperationID: "operation_runtime", InstallationGeneration: 1}
@@ -580,13 +580,13 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if err := database.SQL().QueryRowContext(ctx, `SELECT primary_node_id,secondary_node_id FROM machine_edge_placements WHERE machine_id=$1`, machine).Scan(&primary, &secondary); err != nil || primary != backupNode || secondary != node {
 		t.Fatalf("stored placement primary=%q secondary=%q error=%v", primary, secondary, err)
 	}
-	// An edge has no capacity limit: one reporting itself at its declared size is still selected.
-	exec(`UPDATE control_tunnel_nodes SET capacity_used=capacity_limit WHERE id=$1`, backupNode)
+	// An edge has no capacity limit: one reporting a very large connection count is still selected.
+	exec(`UPDATE control_tunnel_nodes SET capacity_used=1000000 WHERE id=$1`, backupNode)
 	capacityRequest := request
 	capacityRequest.EdgePreference = nil
 	retained, err := service.Attach(ctx, proof, capacityRequest)
 	if err != nil || retained.Binding.EdgeNodeID != backupNode || retained.ActiveEdgeNodeID != backupNode {
-		t.Fatalf("an edge at its declared size was not selected: primary=%q active=%q err=%v", retained.Binding.EdgeNodeID, retained.ActiveEdgeNodeID, err)
+		t.Fatalf("an edge with a large connection count was not selected: primary=%q active=%q err=%v", retained.Binding.EdgeNodeID, retained.ActiveEdgeNodeID, err)
 	}
 	exec(`UPDATE control_tunnel_nodes SET capacity_used=0 WHERE id=$1`, backupNode)
 	// A managed runtime hostname cannot use a customer's edge, even when that

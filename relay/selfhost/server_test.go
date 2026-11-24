@@ -23,9 +23,9 @@ func testInstallation(t *testing.T, both bool) (string, string, *http.Client, *h
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	c := Config{Name: "native-test", EndpointHost: "127.0.0.1", Listen: "127.0.0.1:18443", Components: []Component{{Capability: "relay", TCPPort: 7274, QUICPort: 7275, Region: "test", FailureDomain: "test-host", CapacityLimit: 256}}}
+	c := Config{Name: "native-test", EndpointHost: "127.0.0.1", Listen: "127.0.0.1:18443", Components: []Component{{Capability: "relay", TCPPort: 7274, QUICPort: 7275, Region: "test", FailureDomain: "test-host"}}}
 	if both {
-		c.Components = append(c.Components, Component{Capability: "tunnel", TCPPort: 7272, QUICPort: 7273, Region: "test", FailureDomain: "test-host", CapacityLimit: 128})
+		c.Components = append(c.Components, Component{Capability: "tunnel", TCPPort: 7272, QUICPort: 7273, Region: "test", FailureDomain: "test-host"})
 	}
 	if err := Initialize(dir, c); err != nil {
 		t.Fatal(err)
@@ -271,7 +271,7 @@ func TestServeCancellationReleasesListener(t *testing.T) {
 	address := listener.Addr().String()
 	dir := t.TempDir()
 	os.Chmod(dir, 0700)
-	if err := Initialize(dir, Config{Name: "cancel", EndpointHost: "127.0.0.1", Listen: address, Components: []Component{{Capability: "relay", TCPPort: 7274, QUICPort: 7275, Region: "test", FailureDomain: "test", CapacityLimit: 1}}}); err != nil {
+	if err := Initialize(dir, Config{Name: "cancel", EndpointHost: "127.0.0.1", Listen: address, Components: []Component{{Capability: "relay", TCPPort: 7274, QUICPort: 7275, Region: "test", FailureDomain: "test"}}}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

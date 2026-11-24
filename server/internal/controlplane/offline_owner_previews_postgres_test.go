@@ -36,7 +36,7 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
 	})
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,'owner@test.invalid',false,'active')`, owner)
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',now())`, node)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http3','http2'],0,now(),now()+interval '1 hour',now())`, node)
 	for name, id := range machines {
 		state, online := "offline", false
 		if name == "online" || name == "dropped" {

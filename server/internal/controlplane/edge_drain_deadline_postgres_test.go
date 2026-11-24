@@ -40,7 +40,7 @@ func newDrainHeartbeatFixture(t *testing.T) *drainHeartbeatFixture {
 		t.Fatal(err)
 	}
 	f := &drainHeartbeatFixture{t: t, store: store, service: NewEdgeService(store, "credential"), node: fmt.Sprintf("drain_hb_%d", time.Now().UnixNano())}
-	if _, err = store.SQL().ExecContext(t.Context(), `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain',ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour')`, f.node); err != nil {
+	if _, err = store.SQL().ExecContext(t.Context(), `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain',ARRAY['edge'],ARRAY['http3','http2'],0,now(),now()+interval '1 hour')`, f.node); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

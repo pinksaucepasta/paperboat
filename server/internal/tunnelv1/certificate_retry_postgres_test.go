@@ -161,8 +161,8 @@ INSERT INTO paperboat.tunnel_routes
  (id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id,created_at,updated_at)
 VALUES ($1,$2,'web','http','exact',$3,'http','127.0.0.1:3000',$4,$4,$5,$5)`, route, tunnel, blockedHost, account, now)
 	exec(`INSERT INTO paperboat.tunnel_config_generations(tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,retained_until) VALUES($1,1,$2,$3,'pending',$4,$5)`, tunnel, identity[:], []byte(`{}`), account, now.Add(24*time.Hour))
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,roles,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at)
-VALUES($1,'default','v1',$2,'ready',true,$3,1,ARRAY['edge']::text[],'test','domain',ARRAY['http2','http3']::text[],100,0,$3,$3::timestamptz+interval '1 hour')`, edge, epoch, now)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,roles,region,failure_domain,transports,capacity_used,capacity_observed_at,registry_expires_at)
+VALUES($1,'default','v1',$2,'ready',true,$3,1,ARRAY['edge']::text[],'test','domain',ARRAY['http2','http3']::text[],0,$3,$3::timestamptz+interval '1 hour')`, edge, epoch, now)
 	// The edge serves the route on the agent's carrier: the endpoint's assignment, observed ready.
 	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, account, host)
 	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,$3,'http',$1)`, route, tunnel, blockedHost)

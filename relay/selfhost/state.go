@@ -82,8 +82,8 @@ func validateConfig(c Config) error {
 			return errors.New("invalid or duplicate capability")
 		}
 		seen[v.Capability] = true
-		if v.CapacityLimit < 1 || v.Region == "" || v.FailureDomain == "" {
-			return errors.New("invalid capacity, region, or failure domain")
+		if v.Region == "" || v.FailureDomain == "" {
+			return errors.New("invalid region or failure domain")
 		}
 		for _, p := range []int{v.TCPPort, v.QUICPort} {
 			if p < 1 || p > 65535 || ports[p] || reserved[p] {

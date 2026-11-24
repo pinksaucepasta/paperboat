@@ -61,8 +61,8 @@ func TestNetworkLatencyIsPerRegion(t *testing.T) {
 		id, region, role string
 		rtt              int
 	}{{"latr-e1-" + suffix, r1, "edge", 30}, {"latr-e2-" + suffix, r1, "edge", 9}, {"latr-e3-" + suffix, r2, "edge", 50}, {"latr-r1-" + suffix, r1, "relay", 20}} {
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at)
-VALUES($1,'p','v1','epoch_1',$2,'fd-1',ARRAY[$3],ARRAY['http2'],10,0,now(),now()+interval '1 hour')`, node.id, node.region, node.role)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at)
+VALUES($1,'p','v1','epoch_1',$2,'fd-1',ARRAY[$3],ARRAY['http2'],0,now(),now()+interval '1 hour')`, node.id, node.region, node.role)
 		exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,$3,$4,now())`, machine, node.id, node.role, node.rtt)
 	}
 	items, err := (&machinelatency.Service{DB: store.SQL()}).List(ctx, machine)

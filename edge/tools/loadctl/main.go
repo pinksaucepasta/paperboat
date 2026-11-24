@@ -408,7 +408,7 @@ func (c *controller) relayLease(w http.ResponseWriter, r *http.Request) {
 	c.relay = map[string]any{"node_id": request.NodeID, "generation": generation, "epoch": request.Epoch}
 	c.mu.Unlock()
 	reply(w, http.StatusOK, map[string]any{"node_id": request.NodeID, "node_generation": generation, "process_epoch": request.Epoch,
-		"expires_at": time.Now().Add(15 * time.Second).Unix(), "capacity_limit": 16384, "revocations": []any{}, "account_mbit": 10.0, "jwks": json.RawMessage(jwks)})
+		"expires_at": time.Now().Add(15 * time.Second).Unix(), "revocations": []any{}, "account_mbit": 10.0, "jwks": json.RawMessage(jwks)})
 }
 
 func (c *controller) file(w http.ResponseWriter, name string) {

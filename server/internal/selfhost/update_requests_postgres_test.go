@@ -55,8 +55,8 @@ func TestSelfhostUpdateRequestOnPostgres(t *testing.T) {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,endpoint_host)
-VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['relay'],ARRAY['derp_quic'],100,0,now(),now()+interval '1 hour','relay.example.test')`, node)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,endpoint_host)
+VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['relay'],ARRAY['derp_quic'],0,now(),now()+interval '1 hour','relay.example.test')`, node)
 	hash := sha256.Sum256([]byte(credential))
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,decode(md5($1||'k')||md5($1||'kk'),'hex'),$3,'fixture','Relay','relay','account',$4,$1,true)`, installation, node, hash[:], owner)
 	service := New(store, "selfhost-update-test-encryption-key-32-by")

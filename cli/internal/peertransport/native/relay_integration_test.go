@@ -83,7 +83,7 @@ func TestNativeSessionOverAuthenticatedDERPQUIC(t *testing.T) {
 	})
 
 	port := relaySocket.LocalAddr().(*net.UDPAddr).Port
-	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: processEpoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
+	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: processEpoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node)
 	_ = applyConfiguredRelay(t, clientAuthority, clientTLS, relayRoots, node)
 	applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node)

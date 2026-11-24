@@ -62,7 +62,7 @@ func TestEmptyRegionalRegistryPreservesDirectAdmissionAndLaterRelayRecovery(t *t
 	}
 
 	recovery := a.relay.recovery
-	node := RegionalNode{NodeID: "relay_later", NodeGeneration: 1, ProcessEpoch: "epoch_later", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+	node := RegionalNode{NodeID: "relay_later", NodeGeneration: 1, ProcessEpoch: "epoch_later", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityUsed: 1, CapacityObservedAt: now}
 	candidates.Generation++
 	candidates.Nodes = []RegionalNode{node}
 	token := regionalToken(t, signer, candidates)

@@ -22,7 +22,7 @@ import (
 func TestNarrowedRelayGrantWaitsForTheWithdrawalGrace(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	now := time.Now().Unix()
-	node := RegionalNode{NodeID: "relay_withdrawal", NodeGeneration: 1, ProcessEpoch: "epoch_withdrawal", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+	node := RegionalNode{NodeID: "relay_withdrawal", NodeGeneration: 1, ProcessEpoch: "epoch_withdrawal", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityUsed: 1, CapacityObservedAt: now}
 	scope := derpquic.Scope{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: 443, ExpiresAt: now + 300}
 	apply := func(c NetworkConfiguration, withPeer bool) string {
 		t.Helper()

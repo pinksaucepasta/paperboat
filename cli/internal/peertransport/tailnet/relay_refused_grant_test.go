@@ -27,7 +27,7 @@ func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := func(id string) RegionalNode {
-		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityUsed: 1, CapacityObservedAt: now}
 	}
 	first := node("relay_a")
 	candidates := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: cfg.Issuer, Audience: "paperboat-regional-candidates", AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, AuthorizationGeneration: cfg.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{first}}
@@ -80,7 +80,7 @@ func TestOneBadRelayGrantDropsOnlyItsRelay(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	now := time.Now().Unix()
 	node := func(id string) RegionalNode {
-		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityUsed: 1, CapacityObservedAt: now}
 	}
 	good, bad := node("relay_good"), node("relay_bad")
 	candidates := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: cfg.Issuer, Audience: "paperboat-regional-candidates", AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, AuthorizationGeneration: cfg.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{good, bad}}

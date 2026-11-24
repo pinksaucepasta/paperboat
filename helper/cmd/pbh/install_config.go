@@ -109,10 +109,10 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode, region stri
 		if mode == "both" {
 			tcp = edgeports.RelayWSS
 		}
-		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: edgeports.RelayQUIC, Region: region, FailureDomain: failure, CapacityLimit: 256})
+		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: edgeports.RelayQUIC, Region: region, FailureDomain: failure})
 	}
 	if mode == "tunnel" || mode == "both" {
-		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: edgeports.CarrierTCP, QUICPort: edgeports.CarrierQUIC, Region: region, FailureDomain: failure, CapacityLimit: 256})
+		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: edgeports.CarrierTCP, QUICPort: edgeports.CarrierQUIC, Region: region, FailureDomain: failure})
 	}
 	return c, nil
 }

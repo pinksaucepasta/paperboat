@@ -59,7 +59,7 @@ func TestSelfhostRegisteredRelayProcessOnPostgres(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, e = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$2,'1.0','initial_fixture','relay.example.test',443,444,'registered','test','test-process',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],256,now(),now()+interval '1 hour',$3)`, installed.NodeID, installed.InstallationID, make([]byte, 32))
+	_, e = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,roles,transports,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$2,'1.0','initial_fixture','relay.example.test',443,444,'registered','test','test-process',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],now(),now()+interval '1 hour',$3)`, installed.NodeID, installed.InstallationID, make([]byte, 32))
 	if e != nil {
 		t.Fatal(e)
 	}

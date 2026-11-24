@@ -87,7 +87,6 @@ type Node struct {
 	EndpointQUICPort  int32      `json:"endpoint_quic_port"`
 	Roles             []string   `json:"roles"`
 	Transports        []string   `json:"transports"`
-	CapacityLimit     int64      `json:"capacity_limit"`
 	Revision          int64      `json:"revision"`
 	Ready             bool       `json:"ready"`
 	// Carriers counts the machines holding a live carrier attachment on the node; 0 means safe to retire.
@@ -356,7 +355,7 @@ func (s *Service) ListNodes(ctx context.Context, actor, region, after string, li
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id WHERE ($1='' OR m.region_id=$1)`, region).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL),(SELECT count(DISTINCT a.machine_id) FROM runtime_carrier_attachments a WHERE a.edge_node_id=n.id AND a.expires_at>now()),node_load_percent(n.id)::float8,(SELECT NOT w.out_for_load FROM node_load_out w WHERE w.node_id=n.id),n.public_ingress_verified_at IS NOT NULL,coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
+		rows, err := tx.Query(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL),(SELECT count(DISTINCT a.machine_id) FROM runtime_carrier_attachments a WHERE a.edge_node_id=n.id AND a.expires_at>now()),node_load_percent(n.id)::float8,(SELECT NOT w.out_for_load FROM node_load_out w WHERE w.node_id=n.id),n.public_ingress_verified_at IS NOT NULL,coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
 		if err != nil {
 			return err
 		}
@@ -364,7 +363,7 @@ func (s *Service) ListNodes(ctx context.Context, actor, region, after string, li
 		for rows.Next() {
 			var v Node
 			var forward []byte
-			if err = rows.Scan(&v.ID, &v.ProtocolVersion, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.CapacityLimit, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready, &v.Carriers, &v.LoadPercent, &v.InRotation, &v.IngressVerified, &forward); err != nil {
+			if err = rows.Scan(&v.ID, &v.ProtocolVersion, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready, &v.Carriers, &v.LoadPercent, &v.InRotation, &v.IngressVerified, &forward); err != nil {
 				rows.Close()
 				return errors.Join(err, rows.Err())
 			}
@@ -461,7 +460,7 @@ func (s *Service) mutate(ctx context.Context, actor, key, kind, target string, r
 
 func readNodeTx(ctx context.Context, tx *db.Tx, id string, out *Node) error {
 	var forward []byte
-	err := tx.QueryRow(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL),(SELECT count(DISTINCT a.machine_id) FROM runtime_carrier_attachments a WHERE a.edge_node_id=n.id AND a.expires_at>now()),node_load_percent(n.id)::float8,(SELECT NOT w.out_for_load FROM node_load_out w WHERE w.node_id=n.id),n.public_ingress_verified_at IS NOT NULL,coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.ProtocolVersion, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready, &out.Carriers, &out.LoadPercent, &out.InRotation, &out.IngressVerified, &forward)
+	err := tx.QueryRow(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL),(SELECT count(DISTINCT a.machine_id) FROM runtime_carrier_attachments a WHERE a.edge_node_id=n.id AND a.expires_at>now()),node_load_percent(n.id)::float8,(SELECT NOT w.out_for_load FROM node_load_out w WHERE w.node_id=n.id),n.public_ingress_verified_at IS NOT NULL,coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.ProtocolVersion, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready, &out.Carriers, &out.LoadPercent, &out.InRotation, &out.IngressVerified, &forward)
 	out.Forward = forwardStats(forward)
 	return err
 }

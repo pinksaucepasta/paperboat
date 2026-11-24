@@ -24,8 +24,8 @@ func TestInstallUpgradeRetainsProtectedSettingsWithoutRepeatingFlags(t *testing.
 	}
 	dir := filepath.Join(t.TempDir(), "protected")
 	cfg := selfhost.Config{Name: "original-node", EndpointHost: "203.0.113.10", Listen: "127.0.0.1:38443", PreviewDomain: "preview.example.test", TunnelDomain: "tunnel.example.test", RuntimeDomain: "runtime.example.test", Components: []selfhost.Component{
-		{Capability: "relay", TCPPort: 31445, QUICPort: 31446, Region: "original-region", FailureDomain: "original-domain", CapacityLimit: 128},
-		{Capability: "tunnel", TCPPort: 31443, QUICPort: 31444, Region: "original-region", FailureDomain: "original-domain", CapacityLimit: 128},
+		{Capability: "relay", TCPPort: 31445, QUICPort: 31446, Region: "original-region", FailureDomain: "original-domain"},
+		{Capability: "tunnel", TCPPort: 31443, QUICPort: 31444, Region: "original-region", FailureDomain: "original-domain"},
 	}}
 	if err := selfhost.Initialize(dir, cfg); err != nil {
 		t.Fatal(err)

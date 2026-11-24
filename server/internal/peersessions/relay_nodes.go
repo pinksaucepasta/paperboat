@@ -26,7 +26,7 @@ type relayNodeRow struct {
 	roles, transports, pin, peerRelayWG, peerRelayDisco  []byte
 	tcpPort, quicPort                                    int
 	observed, expires, capacityAt                        time.Time
-	capacityLimit, capacityUsed                          uint64
+	capacityUsed                                         uint64
 	drain                                                sql.NullTime
 	peerRelayAddress                                     sql.NullString
 	selfHosted, relay, peerRelay                         bool
@@ -54,7 +54,7 @@ func (s *NetworkService) relayNodes(ctx context.Context, account string, now tim
 	if ok && now.Sub(e.at) >= 0 && now.Sub(e.at) < relayNodeTTL {
 		return e.rows, nil
 	}
-	rows, err := s.store.SQL().QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256,
+	rows, err := s.store.SQL().QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256,
  EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')),
  roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[],roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address)
  FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND drain_deadline IS NULL AND NOT EXISTS (SELECT 1 FROM paperboat.node_load_out l WHERE l.node_id=control_tunnel_nodes.id AND l.out_for_load) ORDER BY region,paperboat.node_load_percent(id) NULLS LAST,id LIMIT $3`,
@@ -66,7 +66,7 @@ func (s *NetworkService) relayNodes(ctx context.Context, account string, now tim
 	out := make([]relayNodeRow, 0, 8)
 	for rows.Next() {
 		var n relayNodeRow
-		if err := rows.Scan(&n.id, &n.nodeGeneration, &n.processEpoch, &n.region, &n.failureDomain, &n.roles, &n.transports, &n.host, &n.tcpPort, &n.quicPort, &n.state, &n.observed, &n.expires, &n.capacityLimit, &n.capacityUsed, &n.capacityAt, &n.drain, &n.pin,
+		if err := rows.Scan(&n.id, &n.nodeGeneration, &n.processEpoch, &n.region, &n.failureDomain, &n.roles, &n.transports, &n.host, &n.tcpPort, &n.quicPort, &n.state, &n.observed, &n.expires, &n.capacityUsed, &n.capacityAt, &n.drain, &n.pin,
 			&n.selfHosted, &n.relay, &n.peerRelay, &n.peerRelayWG, &n.peerRelayDisco, &n.peerRelayAddress); err != nil {
 			return nil, err
 		}

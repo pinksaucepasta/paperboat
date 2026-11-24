@@ -7,7 +7,7 @@ import (
 
 // regionScore builds a candidate in region with its position in the server's list.
 func regionScore(id, region string, rtt time.Duration, order int) regionalScore {
-	return regionalScore{node: RegionalNode{NodeID: id, Region: region, FailureDomain: id, CapacityLimit: 100}, rtt: rtt, order: order}
+	return regionalScore{node: RegionalNode{NodeID: id, Region: region, FailureDomain: id}, rtt: rtt, order: order}
 }
 
 func TestRelayChoiceUsesTheServersFirstNodeWithinARegion(t *testing.T) {

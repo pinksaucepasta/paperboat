@@ -63,8 +63,8 @@ func TestWorkspaceTargetsListEveryNodeOfThePairRegions(t *testing.T) {
 	addresses := map[string]string{}
 	add := func(name, region, address, state string) {
 		id := "pubdns_" + name + "_" + stamp
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256,public_ingress_ipv4,public_ingress_verified_at)
-VALUES($1,'default','1.0','epoch',$4,$4='ready',now(),$2,'one-domain',ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',decode(repeat('ab',32),'hex'),$3::inet,now())`, id, region, address, state)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256,public_ingress_ipv4,public_ingress_verified_at)
+VALUES($1,'default','1.0','epoch',$4,$4='ready',now(),$2,'one-domain',ARRAY['edge'],ARRAY['http3','http2'],0,now(),now()+interval '1 hour',decode(repeat('ab',32),'hex'),$3::inet,now())`, id, region, address, state)
 		exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,decode(md5($1||'k')||md5($1||'kk'),'hex'),decode(md5($1||'h')||md5($1||'hh'),'hex'),'fixture',$1,'tunnel','account',$3,$1,true)`, "inst_"+id, id, account)
 		installations = append(installations, "inst_"+id)
 		addresses[name] = address

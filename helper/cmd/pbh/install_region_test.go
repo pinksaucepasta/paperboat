@@ -57,7 +57,7 @@ func TestInstallRegionPrompt(t *testing.T) {
 func TestUpgradeKeepsStoredRegion(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "protected")
 	cfg := selfhost.Config{Name: "n", EndpointHost: "203.0.113.10", Listen: "127.0.0.1:38443", Components: []selfhost.Component{
-		{Capability: "relay", TCPPort: 31445, QUICPort: 31446, Region: "eu-west", FailureDomain: "d", CapacityLimit: 128},
+		{Capability: "relay", TCPPort: 31445, QUICPort: 31446, Region: "eu-west", FailureDomain: "d"},
 	}}
 	if err := selfhost.Initialize(dir, cfg); err != nil {
 		t.Fatal(err)

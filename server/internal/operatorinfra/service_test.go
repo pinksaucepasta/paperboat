@@ -46,7 +46,7 @@ func TestOperatorInfrastructureRegionFence(t *testing.T) {
 		NodeID, EdgePool, EndpointHost    string
 		EndpointTCPPort, EndpointQUICPort int32
 	}{"managed_" + x, "managed:" + region.ID, "edge.example.test", 24443, 24444}
-	cred := addManagedNode(t, store, key, nodeInput.NodeID, region.ID, nodeInput.EdgePool, "zone-a", nodeInput.EndpointHost, []string{"edge"}, []string{"http3"}, 8)
+	cred := addManagedNode(t, store, key, nodeInput.NodeID, region.ID, nodeInput.EdgePool, "zone-a", nodeInput.EndpointHost, []string{"edge"}, []string{"http3"})
 	now := time.Now().UTC()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 		NodeID, EdgePool, EndpointHost string
 		EndpointTCPPort                int32
 	}{"managed_" + x, "managed:" + region.ID, "edge.example.test", 24443}
-	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", in.NodeID, region.ID, in.EdgePool, "zone-a", in.EndpointHost, []string{"edge"}, []string{"http3"}, 8)
+	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", in.NodeID, region.ID, in.EdgePool, "zone-a", in.EndpointHost, []string{"edge"}, []string{"http3"})
 	site := func() string {
 		var v string
 		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(site,'') FROM paperboat.control_tunnel_nodes WHERE id=$1`, in.NodeID).Scan(&v); err != nil {
@@ -169,7 +169,7 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 		t.Fatalf("site action: site=%q err=%v", site(), err)
 	}
 	// The response is the whole node (OperatorNode), read from the node row alone.
-	if n := got.Node; n.ID != in.NodeID || n.RegionID != region.ID || n.EdgePool != in.EdgePool || n.FailureDomain != "zone-a" || n.EndpointHost != in.EndpointHost || n.EndpointTCPPort != in.EndpointTCPPort || n.CapacityLimit != 8 || len(n.Roles) != 1 || n.Roles[0] != "edge" || len(n.Transports) != 1 || n.Transports[0] != "http3" || n.State == "" || n.RegistryExpiresAt.IsZero() || n.Revision != 0 {
+	if n := got.Node; n.ID != in.NodeID || n.RegionID != region.ID || n.EdgePool != in.EdgePool || n.FailureDomain != "zone-a" || n.EndpointHost != in.EndpointHost || n.EndpointTCPPort != in.EndpointTCPPort || len(n.Roles) != 1 || n.Roles[0] != "edge" || len(n.Transports) != 1 || n.Transports[0] != "http3" || n.State == "" || n.RegistryExpiresAt.IsZero() || n.Revision != 0 {
 		t.Fatalf("site action returned %+v", n)
 	}
 	if replay, replayErr := s.MutateNode(ctx, admin, "site-"+x, set); replayErr != nil || fmt.Sprint(replay.Node) != fmt.Sprint(got.Node) {
@@ -203,7 +203,7 @@ func TestOperatorNodeListShowsForwardStats(t *testing.T) {
 	var ids []string
 	for _, suffix := range []string{"a", "b", "c"} {
 		id := "managed_" + suffix + "_" + x
-		addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", id, region.ID, "managed:"+region.ID, "zone-"+suffix, suffix+".example.test", []string{"edge"}, []string{"http3"}, 8)
+		addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", id, region.ID, "managed:"+region.ID, "zone-"+suffix, suffix+".example.test", []string{"edge"}, []string{"http3"})
 		ids = append(ids, id)
 	}
 	set := func(id, observation string) {

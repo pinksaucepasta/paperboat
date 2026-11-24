@@ -42,7 +42,6 @@ type Component struct {
 	QUICPort       int    `json:"quic_port"`
 	Region         string `json:"region"`
 	FailureDomain  string `json:"failure_domain"`
-	CapacityLimit  int64  `json:"capacity_limit"`
 	UsagePublicKey string `json:"usage_public_key,omitempty"`
 }
 type Inspection struct {
@@ -435,7 +434,7 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 			roles, transports = `["edge"]`, `["http3","http2"]`
 		}
 		now := s.now().UTC()
-		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids,tls_spki_sha256) VALUES($1,$2,'1.0',$3,$4,$5,$6,'registered',false,$7,$8,ARRAY(SELECT jsonb_array_elements_text($9::jsonb)),ARRAY(SELECT jsonb_array_elements_text($10::jsonb)),$11,0,$12,$12,NULL,$13)`, r.NodeID, r.InstallationID, "", i.EndpointHost, c.TCPPort, c.QUICPort, c.Region, c.FailureDomain, roles, transports, c.CapacityLimit, now, pin)
+		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids,tls_spki_sha256) VALUES($1,$2,'1.0',$3,$4,$5,$6,'registered',false,$7,$8,ARRAY(SELECT jsonb_array_elements_text($9::jsonb)),ARRAY(SELECT jsonb_array_elements_text($10::jsonb)),0,$11,$11,NULL,$12)`, r.NodeID, r.InstallationID, "", i.EndpointHost, c.TCPPort, c.QUICPort, c.Region, c.FailureDomain, roles, transports, now, pin)
 		if e != nil {
 			return nil, "", e
 		}
@@ -462,10 +461,10 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 
 func mustPublicKey(value string) []byte { key, _ := publicKey(value); return []byte(key) }
 
-// validComponent bounds one advertised component. Its declared size has no ceiling.
+// validComponent bounds one advertised component.
 func validComponent(c Component) bool {
 	switch {
-	case c.Capability != "relay" && c.Capability != "tunnel" || c.CapacityLimit < 1:
+	case c.Capability != "relay" && c.Capability != "tunnel":
 		return false
 	case c.TCPPort < 1 || c.TCPPort > 65535 || c.QUICPort < 1 || c.QUICPort > 65535:
 		return false

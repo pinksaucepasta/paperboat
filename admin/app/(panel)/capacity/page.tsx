@@ -72,7 +72,7 @@ export default function CapacityPage() {
                       <td>{n.version ? <Mono>{n.version}</Mono> : "—"}</td>
                       <td className="tabular-nums">{percent(n.cpu_percent)} / {percent(n.cpu_sustained_percent)}</td>
                       <td className="tabular-nums">{n.rss_bytes === undefined ? "—" : memory(n.rss_bytes)}</td>
-                      <td className="tabular-nums">{n.connections === undefined ? "—" : `${n.connections}${n.connection_limit ? ` / ${n.connection_limit}` : ""}`}</td>
+                      <td className="tabular-nums">{n.connections === undefined ? "—" : n.connections}</td>
                       <td className="tabular-nums">{n.bytes_today === undefined ? "—" : formatBytes(n.bytes_today)}</td>
                       <td className="tabular-nums">
                         {n.bytes_month === undefined || n.kind === "server" ? (

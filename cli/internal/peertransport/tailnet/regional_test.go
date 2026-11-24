@@ -49,7 +49,7 @@ func TestRegionalCandidatesEligibilityExpiryAndReducedRedundancy(t *testing.T) {
 	node := func(id, region, domain, state string, used uint64) RegionalNode {
 		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch-1", Region: region, FailureDomain: domain,
 			Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: id + ".example.test", EndpointQUICPort: 443,
-			State: state, ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: used, CapacityObservedAt: now.Unix()}
+			State: state, ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityUsed: used, CapacityObservedAt: now.Unix()}
 	}
 	ready := node("ready", "hel", "hel-a", "ready", 20)
 	excluded := node("excluded", "bom", "bom-a", "ready", 20)
@@ -73,7 +73,7 @@ func TestRegionalCandidatesEligibilityExpiryAndReducedRedundancy(t *testing.T) {
 func TestRegionalCandidatesDifferentFailureDomainIsObservable(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
 	node := func(id, domain string) RegionalNode {
-		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: "hel", FailureDomain: domain, Roles: []string{"edge"}, Transports: []string{"http3"}, EndpointHost: id + ".example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10, CapacityObservedAt: now.Unix()}
+		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: "hel", FailureDomain: domain, Roles: []string{"edge"}, Transports: []string{"http3"}, EndpointHost: id + ".example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityObservedAt: now.Unix()}
 	}
 	candidates := RegionalCandidates{IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{node("a", "rack-a"), node("b", "rack-b")}}
 	got, redundancy, err := eligible(&candidates, "edge", "http3", nil, now)
@@ -156,7 +156,7 @@ func TestRegionalCandidatesNameWhoRunsEachRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Unix()
-	node := RegionalNode{NodeID: "relay_own", NodeGeneration: 1, ProcessEpoch: "epoch", Region: "test", FailureDomain: "rack", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 10, CapacityObservedAt: now}
+	node := RegionalNode{NodeID: "relay_own", NodeGeneration: 1, ProcessEpoch: "epoch", Region: "test", FailureDomain: "rack", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityObservedAt: now}
 	for generation, c := range []struct {
 		hosting    string
 		selfHosted bool
@@ -189,7 +189,7 @@ func TestRegionalCandidatesStaySelectableOfflineUntilTheSetExpires(t *testing.T)
 	node := func(id string, observedBefore time.Duration) RegionalNode {
 		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: id, FailureDomain: id, Roles: []string{"relay"}, Transports: []string{"derp_quic"},
 			EndpointHost: id + ".example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: issued.Add(-observedBefore).Unix(), ExpiresAt: issued.Add(time.Minute).Unix(),
-			CapacityLimit: 100, CapacityUsed: 20, CapacityObservedAt: issued.Add(-observedBefore).Unix()}
+			CapacityUsed: 20, CapacityObservedAt: issued.Add(-observedBefore).Unix()}
 	}
 	candidates := RegionalCandidates{IssuedAt: issued.Unix(), ExpiresAt: issued.Add(12 * time.Hour).Unix(), Nodes: []RegionalNode{node("fresh", 5*time.Second), node("late", -time.Second), node("stale", 16*time.Second)}}
 	for _, outage := range []time.Duration{2 * time.Second, 61 * time.Second, 10 * time.Minute, 11 * time.Hour} {

@@ -260,7 +260,7 @@ func testAutomaticPeerRelay(t *testing.T) {
 		})
 	}
 	defer shutdownRelay()
-	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay", "peer_relay"}, Transports: []string{"derp_quic", "peer_relay_udp"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(relaySocket.LocalAddr().(*net.UDPAddr).Port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
+	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay", "peer_relay"}, Transports: []string{"derp_quic", "peer_relay_udp"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(relaySocket.LocalAddr().(*net.UDPAddr).Port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	grant := func(selfDisco string) func(*peernetwork.RelayGrant) {
 		return func(g *peernetwork.RelayGrant) {
 			g.DiscoPublicKey = selfDisco

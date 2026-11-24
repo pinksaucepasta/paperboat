@@ -66,7 +66,7 @@ func configureInspectorNativeAuthority(t *testing.T, database *db.DB, linked *in
 	}
 	node := linked.Descriptor["EdgeNodeID"].(string) + "-native"
 	epoch := linked.Descriptor["EdgeProcessEpoch"].(string) + "-native"
-	if _, err = database.SQL().ExecContext(t.Context(), `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'inspector-native','v1',$2,$3,443,$4,'ready',true,now(),1,'test','fixture',ARRAY['relay'],ARRAY['derp_quic'],100,0,now(),now()+interval '1 hour',ARRAY[$5])`, node, epoch, host, port, linked.Descriptor["OwnerAccountID"]); err != nil {
+	if _, err = database.SQL().ExecContext(t.Context(), `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'inspector-native','v1',$2,$3,443,$4,'ready',true,now(),1,'test','fixture',ARRAY['relay'],ARRAY['derp_quic'],0,now(),now()+interval '1 hour',ARRAY[$5])`, node, epoch, host, port, linked.Descriptor["OwnerAccountID"]); err != nil {
 		t.Fatal(err)
 	}
 	life, cancel := context.WithCancel(context.Background())

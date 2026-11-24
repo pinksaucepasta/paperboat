@@ -55,8 +55,8 @@ func TestMachineLatencyPostgresLifecycle(t *testing.T) {
 			exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'p','v1','epoch_1')`, node.id)
 			continue
 		}
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids)
-VALUES($1,'p','v1','epoch_1','india','fd-1',$2,ARRAY['http2'],10,0,now(),now()+interval '1 hour',$3)`, node.id, []string{node.role}, node.allowed)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids)
+VALUES($1,'p','v1','epoch_1','india','fd-1',$2,ARRAY['http2'],0,now(),now()+interval '1 hour',$3)`, node.id, []string{node.role}, node.allowed)
 	}
 	// Paperboat's own nodes are installed with the self-host tool too (global scope); only a customer's
 	// account-scoped installation makes a node "self-hosted" in the listing.

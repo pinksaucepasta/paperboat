@@ -40,7 +40,7 @@ func TestIngressSnapshotCarriesHTTP01ResponsesPerEdgeOnPostgres(t *testing.T) {
 	edge := "http01_edge_" + stamp
 	other := "http01_other_" + stamp
 	for _, id := range []string{edge, other} {
-		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',now())`, id); err != nil {
+		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain-'||$1,ARRAY['edge']::text[],ARRAY['http3','http2'],0,now(),now()+interval '1 hour',now())`, id); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {

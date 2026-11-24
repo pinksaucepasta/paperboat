@@ -43,7 +43,7 @@ func TestInspectorRemoteAccessPostgres(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	exec(`UPDATE paperboat.control_tunnel_nodes SET registry_expires_at=$1,region='test',failure_domain='test',roles=ARRAY['edge'],transports=ARRAY['http3','http2'],capacity_limit=10,capacity_observed_at=now() WHERE id=$2`, now.Add(time.Hour), node)
+	exec(`UPDATE paperboat.control_tunnel_nodes SET registry_expires_at=$1,region='test',failure_domain='test',roles=ARRAY['edge'],transports=ARRAY['http3','http2'],capacity_observed_at=now() WHERE id=$2`, now.Add(time.Hour), node)
 	cli := "cli_ir_" + suffix
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$3,'inspector remote','desktop','test',ARRAY['machines:connect'],'active',$4,$4)`, cli, mate, "client_ir_"+suffix, now)
 	t.Cleanup(func() {

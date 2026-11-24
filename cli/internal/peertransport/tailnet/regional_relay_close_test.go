@@ -58,7 +58,7 @@ func TestRelayClosingWithOverloadMovesTheListenerToAnotherRelayAtOnce(t *testing
 	relay := func(id string) RegionalNode {
 		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, Region: "test", FailureDomain: "domain_" + id,
 			Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
-			State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+			State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityUsed: 1, CapacityObservedAt: now}
 	}
 	closing, other := relay("relay_a"), relay("relay_b")
 	drain := now + 20

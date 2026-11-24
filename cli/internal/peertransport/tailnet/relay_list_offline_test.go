@@ -20,7 +20,7 @@ func TestExpiredRelayListIsDialedOnlyInsideTheGrantWhileRenewalsFail(t *testing.
 	node := RegionalNode{
 		NodeID: "relay_test", NodeGeneration: 1, ProcessEpoch: "epoch_test", Region: "test", FailureDomain: "domain_test",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: signed, ExpiresAt: signed + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: signed,
+		State: "ready", ObservedAt: signed, ExpiresAt: signed + 60, CapacityUsed: 1, CapacityObservedAt: signed,
 	}
 	r := &regionalRecovery{authority: a}
 	relays := func(failing bool, grantExpires int64) int {

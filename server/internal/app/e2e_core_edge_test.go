@@ -122,8 +122,8 @@ func (e *e2eCore) startEdge() error {
 	config, err := json.Marshal(map[string]any{
 		"name": "e2e-edge", "endpoint_host": e.gateway, "listen": net.JoinHostPort(e.gateway, e.ports.listen),
 		"components": []map[string]any{
-			{"capability": "tunnel", "tcp_port": atoi(e.ports.tunnelTCP), "quic_port": atoi(e.ports.tunnelQUIC), "region": "e2e", "failure_domain": "e2e", "capacity_limit": 128},
-			{"capability": "relay", "tcp_port": atoi(e.ports.relayTCP), "quic_port": atoi(e.ports.relayQUIC), "region": "e2e", "failure_domain": "e2e", "capacity_limit": 128},
+			{"capability": "tunnel", "tcp_port": atoi(e.ports.tunnelTCP), "quic_port": atoi(e.ports.tunnelQUIC), "region": "e2e", "failure_domain": "e2e"},
+			{"capability": "relay", "tcp_port": atoi(e.ports.relayTCP), "quic_port": atoi(e.ports.relayQUIC), "region": "e2e", "failure_domain": "e2e"},
 		},
 		"preview_domain": "public.example.test", "tunnel_domain": "public.example.test", "runtime_domain": "runtime.example.test",
 		"control_ca":             filepath.Join(e.work, "ca.pem"),

@@ -64,8 +64,8 @@ func TestListHostedEdgesReturnsRegions(t *testing.T) {
 		{"c1", "rc", "ready", now, "edge"}, {"d1", "rd", "ready", now, "edge"}, {"e1", "re", "ready", now, "edge"},
 		{"g1", "rg", "ready", now, "relay"}, {"h1", "rh", "draining", now, "edge"},
 	} {
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,endpoint_host,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
-VALUES($1,'default','1.0','epoch', $2,$2='ready',$3,$6,'domain',ARRAY[$4]::text[],ARRAY['http3','http2']::text[],100,0,$3,$3::timestamptz+interval '1 hour',$1||'.example.test','edge.example.test',443,444,$5,'certificate')`, prefix+item.suffix, item.state, item.heartbeat, item.role, "sha256:"+strings.Repeat("0", 64), prefix+item.region)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,endpoint_host,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
+VALUES($1,'default','1.0','epoch', $2,$2='ready',$3,$6,'domain',ARRAY[$4]::text[],ARRAY['http3','http2']::text[],0,$3,$3::timestamptz+interval '1 hour',$1||'.example.test','edge.example.test',443,444,$5,'certificate')`, prefix+item.suffix, item.state, item.heartbeat, item.role, "sha256:"+strings.Repeat("0", 64), prefix+item.region)
 	}
 	exec(`UPDATE paperboat.control_tunnel_nodes SET allowed_account_ids=ARRAY['different_account'] WHERE id=$1`, prefix+"d1")
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'encrypted','test edge','tunnel','account',$4,$5,true)`, prefix+"installation", prefix+"e1", make([]byte, 32), account, prefix+"claim")

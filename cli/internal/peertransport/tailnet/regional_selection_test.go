@@ -7,7 +7,7 @@ import (
 
 func selectionScore(id, domain string, rtt time.Duration) regionalScore {
 	// Each test node is its own region, so these tests keep ranking nodes by RTT.
-	return regionalScore{node: RegionalNode{NodeID: id, Region: id, FailureDomain: domain, CapacityLimit: 100}, rtt: rtt}
+	return regionalScore{node: RegionalNode{NodeID: id, Region: id, FailureDomain: domain}, rtt: rtt}
 }
 
 func TestRegionalSelectionSustainedGainAndCommit(t *testing.T) {
@@ -132,8 +132,8 @@ func TestRegionalSelectionInvalidInputAndBackupDomains(t *testing.T) {
 
 func TestRegionalSelectionKeepsActiveNodeWithinRegion(t *testing.T) {
 	now := time.Unix(2000, 0)
-	x := regionalScore{node: RegionalNode{NodeID: "x", Region: "r", FailureDomain: "one", CapacityLimit: 100}, rtt: 50 * time.Millisecond, order: 1}
-	y := regionalScore{node: RegionalNode{NodeID: "y", Region: "r", FailureDomain: "two", CapacityLimit: 100}, rtt: 30 * time.Millisecond, order: 0}
+	x := regionalScore{node: RegionalNode{NodeID: "x", Region: "r", FailureDomain: "one"}, rtt: 50 * time.Millisecond, order: 1}
+	y := regionalScore{node: RegionalNode{NodeID: "y", Region: "r", FailureDomain: "two"}, rtt: 30 * time.Millisecond, order: 0}
 	var s regionalSelection
 	chosen, _ := s.choose(now, []regionalScore{x})
 	s.commit(chosen.node.NodeID, now)

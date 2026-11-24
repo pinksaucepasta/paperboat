@@ -23,7 +23,6 @@ type Setup struct {
 	BrowserLoginOrigin                                                            string
 	PublicHTTPSCertFile, PublicHTTPSKeyFile                                       string
 	TCPPort, QUICPort                                                             int
-	CapacityLimit                                                                 int64
 }
 type Registration struct {
 	InstallationID    string `json:"installation_id"`

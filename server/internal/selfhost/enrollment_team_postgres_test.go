@@ -249,7 +249,7 @@ func TestPackagedHelperTeamEnrollmentAndPlacementOnPostgres(t *testing.T) {
 		t.Fatalf("personal pool selecting visible team nodes: %v", err)
 	}
 	managedRelay := "team_pool_managed_" + suffix
-	sqlExec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'managed','1.0','managed_fixture','managed.example.test',443,444,'ready',true,'test','test-managed',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],256,0,now(),now()+interval '1 hour')`, managedRelay)
+	sqlExec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'managed','1.0','managed_fixture','managed.example.test',443,444,'ready',true,'test','test-managed',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],0,now(),now()+interval '1 hour')`, managedRelay)
 	t.Cleanup(func() {
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, managedRelay)
 	})
@@ -318,7 +318,7 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','target.example.test','managed','ready','ready','clear',$5)`, "placement_domain_"+suffix, owner, preview, "custom-"+endpoint+".example.test", "wsd_"+ws)
 	// A serving Paperboat edge: a global installation in an enabled operator region with verified ingress.
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1)`, "placement_"+suffix)
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_ipv4,public_ingress_verified_at,tls_spki_sha256) VALUES($1,$1,'1.0','fixture_managed','ready',true,now(),$2,'test',ARRAY['edge'],ARRAY['http3','http2'],10,0,now(),now()+interval '1 minute','198.51.100.7',now(),decode(md5($1)||md5($1),'hex'))`, managed, "placement_"+suffix)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_ipv4,public_ingress_verified_at,tls_spki_sha256) VALUES($1,$1,'1.0','fixture_managed','ready',true,now(),$2,'test',ARRAY['edge'],ARRAY['http3','http2'],0,now(),now()+interval '1 minute','198.51.100.7',now(),decode(md5($1)||md5($1),'hex'))`, managed, "placement_"+suffix)
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),decode(md5($1||'h')||md5($1||'h'),'hex'),'\x00','managed fixture','tunnel','global','global',$1,true)`, managed)
 	t.Cleanup(func() {
 		cleanup := context.Background()

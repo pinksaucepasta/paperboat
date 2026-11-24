@@ -106,8 +106,8 @@ func TestCapacityPageJoinsRegistryReportsAndDayTotalsOnPostgres(t *testing.T) {
 	exec(`INSERT INTO operator_accounts(id,email,password_hash,status,role) VALUES($1,$2,'unused test login','active','operations')`, actorID, actorID+"@example.test")
 	now := time.Now().UTC()
 	for _, node := range []struct{ id, role string }{{edgeID, "edge"}, {relayID, "relay"}, {silentID, "edge"}} {
-		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,site)
- VALUES($1,'default','1.0','e',$1||'.example.test',443,444,'ready',true,$2,1,'hel','hel-a',ARRAY[$3],ARRAY['http3'],1000,12,$2,$4,'Helsinki')`, node.id, now, node.role, now.Add(time.Hour))
+		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,site)
+ VALUES($1,'default','1.0','e',$1||'.example.test',443,444,'ready',true,$2,1,'hel','hel-a',ARRAY[$3],ARRAY['http3'],12,$2,$4,'Helsinki')`, node.id, now, node.role, now.Add(time.Hour))
 	}
 	t.Cleanup(func() {
 		bg := context.Background()

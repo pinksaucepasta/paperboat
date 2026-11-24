@@ -38,7 +38,7 @@ func TestManagedRelayRuntimeLifecycleAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodeID := "relay_" + suffix
-	cred := addManagedNode(t, store, key, nodeID, region.ID, region.ID, "zone-a", "relay.example.test", []string{"relay"}, []string{"derp_quic", "derp_wss"}, 16)
+	cred := addManagedNode(t, store, key, nodeID, region.ID, region.ID, "zone-a", "relay.example.test", []string{"relay"}, []string{"derp_quic", "derp_wss"})
 	defer func() {
 		store.Pool().Exec(ctx, `DELETE FROM operator_infrastructure_operations WHERE actor_user_id=$1`, actor)
 		store.Pool().Exec(ctx, `DELETE FROM selfhost_installations WHERE node_id=$1`, nodeID)

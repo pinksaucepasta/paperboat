@@ -64,7 +64,7 @@ VALUES ($1,$2,$3,$4,$5,'exact','dns-challenge://test','stable.example.test','gen
 		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
 		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_environments WHERE id=$1`, "env_"+host)
 	})
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at) VALUES($1,'test','1.0',$2,'ready',true,$3,ARRAY['edge'],$3::timestamptz+interval '1 hour','test','test',ARRAY['http3','http2'],100,0,$3)`, node, epoch, now)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_used,capacity_observed_at) VALUES($1,'test','1.0',$2,'ready',true,$3,ARRAY['edge'],$3::timestamptz+interval '1 hour','test','test',ARRAY['http3','http2'],0,$3)`, node, epoch, now)
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) SELECT environment_id,environment_id,user_id,'active' FROM paperboat.user_machines WHERE id=$1 ON CONFLICT DO NOTHING`, host)
 	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) SELECT $1,environment_id,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080 FROM paperboat.user_machines WHERE id=$2`, carrierRoute, host)
 	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'private','persistent',$1)`, tunnel, account, host)

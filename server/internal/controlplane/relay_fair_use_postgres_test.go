@@ -61,7 +61,7 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	for _, n := range []string{node, node2, own} {
-		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','v1',$2,'relay.example.test',443,444,'ready',true,$3,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,0,$3,$4)`, n, epoch, now, now.Add(time.Hour))
+		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','v1',$2,'relay.example.test',443,444,'ready',true,$3,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],0,$3,$4)`, n, epoch, now, now.Add(time.Hour))
 	}
 	runtimeHash := sha256.Sum256([]byte(x))
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,$2,$3,'ciphertext','own relay','relay','account',$4,$1,true)`, own, make([]byte, 32), runtimeHash[:], free12)

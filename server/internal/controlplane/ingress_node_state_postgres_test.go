@@ -37,7 +37,7 @@ func TestIngressDesiredStateIsOnlyForVerifiedEdgesOnPostgres(t *testing.T) {
 		if verified {
 			verifiedAt = "now()"
 		}
-		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain-'||$1,ARRAY[$2]::text[],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',`+verifiedAt+`)`, id, role); err != nil {
+		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region','domain-'||$1,ARRAY[$2]::text[],ARRAY['http3','http2'],0,now(),now()+interval '1 hour',`+verifiedAt+`)`, id, role); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {

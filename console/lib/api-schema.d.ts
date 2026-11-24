@@ -11779,7 +11779,6 @@ export interface components {
             node_generation: number;
             process_epoch: string;
             expires_at: number;
-            capacity_limit: number;
             revocations: components["schemas"]["NativeRelayRevocation"][];
             /** @description Only for relays that sent subjects_digest: resend the full subjects list. No revocations are given with it. */
             subjects_required?: boolean;
@@ -13234,8 +13233,6 @@ export interface components {
             endpoint_quic_port: number;
             roles: string[];
             transports: string[];
-            /** Format: int64 */
-            capacity_limit: number;
             /** Format: int64 */
             revision: number;
             /** Format: int64 */
@@ -14933,8 +14930,6 @@ export interface components {
             rss_bytes?: number;
             /** Format: int64 */
             connections?: number;
-            /** Format: int64 */
-            connection_limit?: number;
             /** Format: int64 */
             bytes_today?: number;
             /** Format: int64 */

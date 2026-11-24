@@ -99,8 +99,8 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	}
 	// An eligible relay: the configuration carries relay grants, which embed the peers' scopes.
 	relayNode := "offline_relay_" + suffix
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids)
- VALUES($1,'offline','v1','epoch','relay.example.test',443,444,'ready',true,now(),1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,1,now(),now()+interval '1 hour',ARRAY[$2,$3,$4])`, relayNode, owner, member, shellMember)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids)
+ VALUES($1,'offline','v1','epoch','relay.example.test',443,444,'ready',true,now(),1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],1,now(),now()+interval '1 hour',ARRAY[$2,$3,$4])`, relayNode, owner, member, shellMember)
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, relayNode)
 	})
