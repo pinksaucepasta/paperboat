@@ -2,6 +2,7 @@ package workspacedomain
 
 import (
 	"context"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
 const (
@@ -24,9 +26,6 @@ const (
 	dnsVerifiedEvery = time.Hour
 	// A domain that stays unproven is checked at the slowest pace until the user asks again (Check).
 	dnsFailedAfter = 8
-	// The domain renews before the hostnames' copies come due (their RenewBefore), so a copy's renewal
-	// finds a newer certificate waiting instead of retrying.
-	renewLead = 5 * 24 * time.Hour
 )
 
 // DNSLookup returns name's answers of type qtype: the CNAME target (not followed) for dns.TypeCNAME, the
@@ -46,7 +45,7 @@ type WorkerConfig struct {
 	MasterKeyReference string
 	IssuerName         string
 	OwnerID            string
-	RenewBefore        time.Duration
+	Renewals           *certrenewal.Schedule // nil: the shared fallback only
 	LockTTL            time.Duration
 	MaxLifetime        time.Duration
 }
@@ -68,9 +67,6 @@ func NewWorker(database *db.DB, cfg Config, wc WorkerConfig) (*Worker, error) {
 	}
 	if wc.Lookup == nil {
 		wc.Lookup = SystemDNS
-	}
-	if wc.RenewBefore <= 0 {
-		wc.RenewBefore = 30 * 24 * time.Hour
 	}
 	if wc.LockTTL <= 0 {
 		wc.LockTTL = 10 * time.Minute
@@ -96,8 +92,11 @@ func (w *Worker) Run(ctx context.Context, limit int) error {
 	if w.wc.Issuer == nil {
 		return nil
 	}
+	if err := w.planRenewals(ctx, now, limit); err != nil {
+		return err
+	}
 	due, err := w.db.Queries().ListDueWorkspaceDomainCertificates(ctx, dbsqlc.ListDueWorkspaceDomainCertificatesParams{
-		Now: sql.NullTime{Time: now, Valid: true}, RenewAfter: sql.NullTime{Time: now.Add(w.wc.RenewBefore + renewLead), Valid: true}, RowLimit: int32(limit)})
+		Now: sql.NullTime{Time: now, Valid: true}, RowLimit: int32(limit)})
 	if err != nil {
 		return err
 	}
@@ -106,7 +105,7 @@ func (w *Worker) Run(ctx context.Context, limit int) error {
 			continue // lost authority, not an issuer failure: no backoff once it is verified again
 		} else if err != nil {
 			code := certificateFailureCode(err)
-			retry := now.Add(certificateRetry(row.CertificateAttempts + 1))
+			retry := now.Add(certrenewal.RetryDelay(int(row.CertificateAttempts) + 1))
 			if markErr := w.db.Queries().MarkWorkspaceDomainCertificateFailure(ctx, dbsqlc.MarkWorkspaceDomainCertificateFailureParams{
 				ID: row.ID, FailureCode: sql.NullString{String: code, Valid: true}, RetryAt: sql.NullTime{Time: retry, Valid: true}, Now: w.now()}); markErr != nil {
 				return errors.Join(err, markErr)
@@ -115,6 +114,44 @@ func (w *Worker) Run(ctx context.Context, limit int) error {
 		}
 	}
 	return nil
+}
+
+// planRenewals asks the CA when the certificates whose last answer is old should be renewed.
+func (w *Worker) planRenewals(ctx context.Context, now time.Time, limit int) error {
+	rows, err := w.db.Queries().ListWorkspaceDomainsToPlanRenewal(ctx, dbsqlc.ListWorkspaceDomainsToPlanRenewalParams{
+		Now: sql.NullTime{Time: now, Valid: true}, RowLimit: int32(limit)})
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		params := dbsqlc.SetWorkspaceDomainRenewalPlanParams{ID: row.ID, CertificateFingerprint: row.CertificateFingerprint,
+			CheckAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true}}
+		leaf, err := w.leaf(ctx, row)
+		if err != nil { // a certificate that cannot be opened can only be replaced
+			workers.IterationFailure(ctx, "workspace_domain_certificate", "certificate_unreadable", err)
+			params.RenewalAt = sql.NullTime{Time: now, Valid: true}
+		} else {
+			plan := w.wc.Renewals.Plan(ctx, leaf, now)
+			params.CheckAt.Time = plan.CheckAt
+			if plan.FromCA || !row.CertificateRenewalAt.Valid {
+				params.RenewalAt = sql.NullTime{Time: plan.RenewAt, Valid: true}
+			}
+		}
+		if err := w.db.Queries().SetWorkspaceDomainRenewalPlan(ctx, params); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// leaf is the domain's stored certificate.
+func (w *Worker) leaf(ctx context.Context, row dbsqlc.WorkspaceDomain) (*x509.Certificate, error) {
+	bundle, err := tunnelcert.OpenParts(ctx, w.wc.Keys, row.MasterKeyReference.String, row.CertificateCiphertext, row.PrivateKeyCiphertext)
+	if err != nil {
+		return nil, err
+	}
+	clear(bundle.PrivateKeyPEM)
+	return certrenewal.Leaf(bundle.CertificatePEM)
 }
 
 func (w *Worker) checkDNS(ctx context.Context, row dbsqlc.WorkspaceDomain, now time.Time) error {
@@ -176,14 +213,6 @@ func dnsBackoff(attempts int32) time.Duration {
 	return min(delay, dnsRetryMax)
 }
 
-func certificateRetry(attempts int32) time.Duration {
-	delay := time.Minute
-	for i := int32(1); i < attempts && delay < 6*time.Hour; i++ {
-		delay *= 2
-	}
-	return min(delay, 6*time.Hour)
-}
-
 // issue orders the domain's certificate for the domain and *.domain through the delegated _acme-challenge
 // CNAME (the record that verified it), seals it with the certificate master key and stores it.
 func (w *Worker) issue(ctx context.Context, row dbsqlc.WorkspaceDomain) error {
@@ -215,6 +244,9 @@ func (w *Worker) issue(ctx context.Context, row dbsqlc.WorkspaceDomain) error {
 	} else if len(verified) == 0 {
 		return ErrNotVerified
 	}
+	if row.MasterKeyReference.Valid {
+		domain.Replaces, _ = w.leaf(ctx, row) // without it the order only loses its rate-limit exemption
+	}
 	bundle, err := w.wc.Issuer.IssueDNS01Names(ctx, domain, []string{wildcard, row.Hostname})
 	if err != nil {
 		return err
@@ -228,13 +260,18 @@ func (w *Worker) issue(ctx context.Context, row dbsqlc.WorkspaceDomain) error {
 	if _, err := bundle.Validate(row.Hostname, w.now(), w.wc.MaxLifetime); err != nil {
 		return err
 	}
+	leaf, err := certrenewal.Leaf(bundle.CertificatePEM)
+	if err != nil {
+		return err
+	}
 	certificate, key, err := tunnelcert.SealParts(ctx, w.wc.Keys, w.wc.MasterKeyReference, bundle)
 	if err != nil {
 		return err
 	}
 	stored, err := w.db.Queries().StoreWorkspaceDomainCertificate(ctx, dbsqlc.StoreWorkspaceDomainCertificateParams{ID: row.ID,
 		MasterKeyReference: sql.NullString{String: w.wc.MasterKeyReference, Valid: true}, CertificateCiphertext: certificate, PrivateKeyCiphertext: key,
-		CertificateFingerprint: identity.Fingerprint[:], CertificateExpiresAt: sql.NullTime{Time: identity.NotAfter, Valid: true}, Now: w.now()})
+		CertificateFingerprint: identity.Fingerprint[:], CertificateExpiresAt: sql.NullTime{Time: identity.NotAfter, Valid: true},
+		CertificateRenewalAt: sql.NullTime{Time: certrenewal.Fallback(leaf), Valid: true}, Now: w.now()})
 	if err == nil && stored == 0 {
 		return ErrNotVerified // lapsed (or removed) while the order ran: the certificate is discarded
 	}

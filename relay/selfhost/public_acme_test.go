@@ -36,6 +36,8 @@ type fakeACMECA struct {
 	profile      string
 	validated    bool
 	issued       int
+	window       []time.Time // suggested renewal window; none: the CA offers no renewal information
+	replaces     string
 	csr          *x509.CertificateRequest
 }
 
@@ -84,7 +86,7 @@ func (f *fakeACMECA) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Path {
 	case "/directory":
-		reply(200, map[string]any{"newNonce": base + "/nonce", "newAccount": base + "/acct", "newOrder": base + "/order", "meta": map[string]any{"profiles": map[string]string{"shortlived": "profile"}}})
+		reply(200, map[string]any{"newNonce": base + "/nonce", "newAccount": base + "/acct", "newOrder": base + "/order", "renewalInfo": base + "/ari", "meta": map[string]any{"profiles": map[string]string{"shortlived": "profile"}}})
 	case "/nonce":
 		w.WriteHeader(http.StatusNoContent)
 	case "/acct":
@@ -94,9 +96,10 @@ func (f *fakeACMECA) serve(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Identifiers []map[string]string
 			Profile     string
+			Replaces    string
 		}
 		_ = json.Unmarshal(payload, &request)
-		f.identifier, f.profile, f.validated = request.Identifiers[0], request.Profile, false
+		f.identifier, f.profile, f.validated, f.replaces = request.Identifiers[0], request.Profile, false, request.Replaces
 		w.Header().Set("Location", base+"/order/1")
 		reply(201, order("pending"))
 	case "/authz/1":
@@ -134,6 +137,10 @@ func (f *fakeACMECA) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/pem-certificate-chain")
 		_, _ = w.Write(append(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.ca.Raw})...))
 	default:
+		if strings.HasPrefix(r.URL.Path, "/ari/") && f.window != nil {
+			reply(200, map[string]any{"suggestedWindow": map[string]any{"start": f.window[0], "end": f.window[1]}})
+			return
+		}
 		http.NotFound(w, r)
 	}
 }
@@ -161,7 +168,7 @@ func automaticNode(t *testing.T, host string) string {
 	return dir
 }
 
-func TestRenewPublicHTTPSObtainsThenRenewsAtTwoThirdsOfLifetime(t *testing.T) {
+func TestRenewPublicHTTPSObtainsThenRenewsWhenTheCASuggests(t *testing.T) {
 	for _, host := range []string{"edge.example.test", "203.0.113.7"} {
 		t.Run(host, func(t *testing.T) {
 			dir := automaticNode(t, host)
@@ -179,7 +186,7 @@ func TestRenewPublicHTTPSObtainsThenRenewsAtTwoThirdsOfLifetime(t *testing.T) {
 			if err != nil || !renewed {
 				t.Fatalf("first issuance = %v, %v; want a new certificate", renewed, err)
 			}
-			if ca.profile != "shortlived" || (ca.identifier["value"] != host) || ca.identifier["type"] != map[bool]string{true: "ip", false: "dns"}[host == "203.0.113.7"] {
+			if ca.profile != map[bool]string{true: "shortlived"}[host == "203.0.113.7"] || (ca.identifier["value"] != host) || ca.identifier["type"] != map[bool]string{true: "ip", false: "dns"}[host == "203.0.113.7"] {
 				t.Fatalf("order = identifier %v profile %q, want %s under the short-lived profile", ca.identifier, ca.profile, host)
 			}
 			s, err := load(dir)
@@ -197,13 +204,14 @@ func TestRenewPublicHTTPSObtainsThenRenewsAtTwoThirdsOfLifetime(t *testing.T) {
 				t.Fatalf("status = %+v (%v)", status, err)
 			}
 
-			// Before two thirds of the 6-day lifetime has passed nothing is asked of the CA.
-			if renewed, err := RenewPublicHTTPS(t.Context(), dir, ca.URL+"/directory", now.Add(3*24*time.Hour)); renewed || err != nil || ca.issued != 1 {
-				t.Fatalf("renewal at half life = %v, %v, issued %d; want none", renewed, err, ca.issued)
+			// Before the CA's window nothing is ordered.
+			ca.window = []time.Time{now.Add(50 * time.Hour), now.Add(51 * time.Hour)}
+			if renewed, err := RenewPublicHTTPS(t.Context(), dir, ca.URL+"/directory", now.Add(49*time.Hour)); renewed || err != nil || ca.issued != 1 {
+				t.Fatalf("renewal before the window = %v, %v, issued %d; want none", renewed, err, ca.issued)
 			}
-			// After it, a new certificate replaces the old one.
-			if renewed, err := RenewPublicHTTPS(t.Context(), dir, ca.URL+"/directory", now.Add(5*24*time.Hour)); !renewed || err != nil || ca.issued != 2 {
-				t.Fatalf("renewal past two thirds = %v, %v, issued %d; want a second certificate", renewed, err, ca.issued)
+			// After it, earlier than the fallback would, a new certificate names the old one it replaces.
+			if renewed, err := RenewPublicHTTPS(t.Context(), dir, ca.URL+"/directory", now.Add(52*time.Hour)); !renewed || err != nil || ca.issued != 2 || ca.replaces == "" {
+				t.Fatalf("renewal in the window = %v, %v, issued %d, replaces %q; want a second certificate", renewed, err, ca.issued, ca.replaces)
 			}
 			// A key that does not belong to the certificate (a half-written renewal) is replaced before it is due.
 			other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

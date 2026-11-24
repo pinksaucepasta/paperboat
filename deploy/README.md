@@ -67,7 +67,7 @@ controls and outside the preview, tunnel and runtime base domains. The same name
 relay and the public HTTPS listener of that host. Install with `pbh install --endpoint-host <name>`: the carrier
 certificate gets the name as SAN and the node registers it; an existing installation refuses a changed
 `--endpoint-host`, so a host that advertises its IP is uninstalled and installed again. Public HTTPS for the name:
-`edge-ip-certificate.py` asks Certbot for `--domain <name>` (it still uses `--ip-address` for an IP). Check from a
+`pbh configure-tls --acme` (below) orders a certificate for that name. Check from a
 v6-only host: `getent ahostsv6 <name>` returns a `64:ff9b::` address, `pb ping` shows a path.
 
 ## Public HTTPS for enrolled IP edges
@@ -82,15 +82,12 @@ carrier certificate. These identities serve different connections; keep the
 carrier key and runtime credentials unchanged.
 
 Run `pbh configure-tls --acme` once on the node: `pbh serve` then obtains the certificate over HTTP-01 (TCP port 80,
-answered by the running edge) 30 seconds after start and renews it after two thirds of its lifetime. It checks every
-six hours and at every service start; there is no timer to install. A renewal restarts the relay and edge containers to
-load the new certificate. Each check is written to `public-acme/status.json` (`pbh status`, `pbh doctor`) and
+answered by the running edge) 30 seconds after start and renews it when the CA says so (ARI; a third of its
+lifetime left when the CA cannot be asked, half under ten days). It checks every six hours and at every service start;
+there is no timer to install. The edge loads a renewed certificate without a restart. Each check is written to `public-acme/status.json` (`pbh status`, `pbh doctor`) and
 `public-acme/renew-status.json`; the edge carries the latter in every heartbeat over its own enrolled node credential,
 so a failing renewal, or no check for a day, is an alert in the admin bell for that node. `pbh doctor` fails when a
 renewal fails, is overdue or is not being checked.
-
-Do not install `edge-ip-certificate.py` and the `paperboat-edge-certificate` units on such a node: they would be a
-second owner of the certificate, and stop the service to bind port 80.
 
 ## Managed server upgrades
 

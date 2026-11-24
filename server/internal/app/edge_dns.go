@@ -64,7 +64,7 @@ func newRegionalDNS(database *db.DB, cfg config.Config) (*servernodes.RegionalDN
 	if err != nil {
 		return nil, fmt.Errorf("regional certificate issuer: %w", err)
 	}
-	return &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Key: cfg.Secrets.EncryptionKey, Logger: slog.Default()}, nil
+	return &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Renewals: certificateRenewals(cfg), Key: cfg.Secrets.EncryptionKey, Logger: slog.Default()}, nil
 }
 
 // newRegionalDNSWorker runs only the regional loop every 10 s, for nodes without the edge certificate runtime.

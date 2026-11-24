@@ -91,7 +91,7 @@ control-plane registration, health, and tunnel ingress verification. The service
 starts component runtimes after durable claim configuration and retries runtime
 crashes (the systemd unit runs `pbh serve`; `pbh help` lists every command). `pbh status` shows service status. `pbh uninstall` stops the service,
 removes its owned containers, its host firewall rules (found by their `paperboat-edge`
-comment on iptables and nftables), the edge certificate timer and service if installed, and its helper
+comment on iptables and nftables) and its helper
 executables, and retains protected local
 identity, credentials and configuration for reinstall. To permanently delete that
 data, explicitly run `pbh uninstall --remove-data --confirm-remove-data`. Remove

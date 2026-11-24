@@ -14,11 +14,11 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
-const certificateRenewalWindow = 30 * 24 * time.Hour
-
-// Six hours: a short-lived browser certificate leaves two days between its renewal time and its end.
+// Six hours: a short-lived browser certificate leaves three days between its renewal time and its end.
 const certificateCheckInterval = 6 * time.Hour
 
 func certificatePEM(key ed25519.PrivateKey, host string, now time.Time) ([]byte, error) {
@@ -77,7 +77,7 @@ func RenewCertificate(dir string, now time.Time) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if leaf.NotAfter.Sub(now) > certificateRenewalWindow {
+	if now.Before(certrenewal.Fallback(leaf)) {
 		return false, nil
 	}
 	oldPin, err := CertificatePin(pair)

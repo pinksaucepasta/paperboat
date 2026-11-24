@@ -64,7 +64,7 @@ func validatePublicHTTPS(host, certPath, keyPath string, now time.Time) error {
 		return OperatorError("browser HTTPS certificate does not cover the enrolled endpoint hostname")
 	}
 	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
-		return OperatorError(fmt.Sprintf("browser HTTPS certificate is valid only from %s to %s; renew it (paperboat-edge-certificate.service needs TCP 80 free) and rerun pbh install", leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339)))
+		return OperatorError(fmt.Sprintf("browser HTTPS certificate is valid only from %s to %s; renew it (pbh configure-tls --acme, TCP 80 reachable) and rerun pbh install", leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339)))
 	}
 	if len(leaf.ExtKeyUsage) > 0 {
 		allowed := false

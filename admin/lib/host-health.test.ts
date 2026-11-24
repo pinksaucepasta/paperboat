@@ -58,7 +58,7 @@ test("a failing edge certificate renewal is a critical alert; a quiet healthy ed
   expect(alerts.map((a) => a.id)).toEqual(["edge-certificate:edge-7"])
   expect(alerts[0].level).toBe("critical")
   expect(alerts[0].title).toContain("Certificate renewal is failing on edge node edge-7")
-  expect(alerts[0].body).toContain("renew.log")
+  expect(alerts[0].body).toContain("pbh doctor")
   const old = "2026-11-19T09:00:00Z"
   const staleHealthy = openAlerts([report("edge-certificate:node-edge-8", { ok: true, error: "", stale_after_seconds: 86400 }, old)], now)
   expect(staleHealthy.map((a) => a.id)).toEqual(["edge-certificate-stale:edge-8"])

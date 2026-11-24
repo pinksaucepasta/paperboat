@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 	"sync"
 	"time"
 
@@ -41,10 +42,9 @@ type CertificateRuntimeConfig struct {
 	IssuerName             string
 	OwnerID                string
 
-	RenewBefore            time.Duration
+	Renewals               *certrenewal.Schedule
 	LockTTL                time.Duration
 	DistributionTimeout    time.Duration
-	ExpiryAlertWindow      time.Duration
 	MaxCertificateLifetime time.Duration
 	Now                    func() time.Time
 
@@ -154,9 +154,7 @@ func NewCertificateRuntime(config CertificateRuntimeConfig) (*CertificateRuntime
 		IssuerName:             config.IssuerName,
 		OwnerID:                config.OwnerID,
 		LockTTL:                config.LockTTL,
-		RenewBefore:            config.RenewBefore,
 		DistributionTimeout:    config.DistributionTimeout,
-		ExpiryAlertWindow:      config.ExpiryAlertWindow,
 		MaxCertificateLifetime: config.MaxCertificateLifetime,
 		Now:                    config.Now,
 	})
@@ -164,7 +162,7 @@ func NewCertificateRuntime(config CertificateRuntimeConfig) (*CertificateRuntime
 		closeHub()
 		return nil, fmt.Errorf("%w: coordinator: %w", ErrCertificateRuntimeUnavailable, err)
 	}
-	worker, err = NewCertificateWorker(config.Database, coordinator, config.RenewBefore, config.Now, config.IssuerName)
+	worker, err = NewCertificateWorker(config.Database, coordinator, config.Now, config.IssuerName)
 	if err != nil {
 		closeHub()
 		return nil, fmt.Errorf("%w: certificate worker: %w", ErrCertificateRuntimeUnavailable, err)
@@ -175,10 +173,10 @@ func NewCertificateRuntime(config CertificateRuntimeConfig) (*CertificateRuntime
 			Database: config.Database, Bases: config.PlatformBases, EdgeTargets: config.PlatformEdgeTargets,
 			Issuer: config.Issuer, CAA: config.CAA, Keys: config.Keys,
 			MasterKeyReference: config.MasterKeyReference, IssuerName: config.IssuerName,
-			OwnerID: config.OwnerID, Distributor: distributor, RenewBefore: config.RenewBefore,
+			OwnerID: config.OwnerID, Distributor: distributor, Renewals: config.Renewals,
 			LockTTL: config.LockTTL, DistributionTimeout: config.DistributionTimeout,
-			ExpiryAlertWindow: config.ExpiryAlertWindow, MaxCertificateLifetime: config.MaxCertificateLifetime,
-			Now: config.Now,
+			MaxCertificateLifetime: config.MaxCertificateLifetime,
+			Now:                    config.Now,
 		})
 		if err != nil {
 			closeHub()
