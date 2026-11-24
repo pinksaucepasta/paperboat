@@ -115,7 +115,7 @@ func TestDarwinSocketBindAndConflict(t *testing.T) {
 	if os.Getenv("PAPERBOAT_GUARD_DARWIN_TEST") != "1" || os.Geteuid() != 0 {
 		t.Skip("requires authorized Darwin loopback qualification")
 	}
-	const host = "127.123.253.72"
+	const host = "127.100.253.72"
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestDarwinSocketBindAndConflict(t *testing.T) {
 		return fd
 	}
 	fd := makeSocket()
-	listener, err := bindDarwinSocket(t.Context(), fd, address, "127.123.0.0/16")
+	listener, err := bindDarwinSocket(t.Context(), fd, address, "127.100.0.0/16")
 	if err != nil {
 		t.Fatal("valid unbound TCP socket rejected", err)
 	}
@@ -166,7 +166,7 @@ func TestDarwinSocketBindAndConflict(t *testing.T) {
 		t.Fatal("original descriptor leaked", err)
 	}
 	conflicting := makeSocket()
-	other, err := bindDarwinSocket(t.Context(), conflicting, address, "127.123.0.0/16")
+	other, err := bindDarwinSocket(t.Context(), conflicting, address, "127.100.0.0/16")
 	if other != nil {
 		other.Close()
 		t.Fatal("occupied listener accepted")

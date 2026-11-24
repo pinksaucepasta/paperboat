@@ -125,6 +125,9 @@ func uninstallDarwin(ctx context.Context, cfg darwinInstallConfig, guardCfg Conf
 	if err = applyProtection(ctx, guardCfg, nil); err != nil {
 		return result, err
 	}
+	if err = darwinRetireNow(ctx); err != nil {
+		return result, err
+	}
 	result.Retained = []string{"boot deny-only launch job and protected executable", "address/name reservations", "protected listener service account"}
 	roots, err := uninstallRoots(guardCfg.StateDir)
 	if err != nil {

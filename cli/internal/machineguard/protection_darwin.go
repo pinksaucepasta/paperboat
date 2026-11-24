@@ -172,12 +172,7 @@ const (
 
 // darwinRetireLocked ends the addresses without a listener, a batch now and the others in the background.
 func darwinRetireLocked(ctx context.Context, all bool) error {
-	var retired []string
-	for address := range darwinPlatform.aliases {
-		if !darwinPlatform.active[address] {
-			retired = append(retired, address)
-		}
-	}
+	retired := darwinInactiveAddresses()
 	if batch := darwinRetireBatch; len(retired) > batch {
 		if all { // no listener is left: end every machine connection's state at once, and remove the addresses later
 			if _, err := darwinRun(ctx, "", "/sbin/pfctl", "-k", "0.0.0.0/0", "-k", machineloopback.DefaultCIDR); err != nil {
@@ -196,44 +191,64 @@ func darwinRetireLocked(ctx context.Context, all bool) error {
 
 // darwinRetireAddresses requires darwinPlatform's lock.
 func darwinRetireAddresses(ctx context.Context, retired []string) error {
-	results := make([]error, len(retired))
+	err := darwinForEachAddress(retired, func(address string) error { return darwinRetireAddress(ctx, address) })
+	return errors.Join(err, darwinSaveAliases())
+}
+
+// darwinForEachAddress ends the addresses and forgets those that ended; it requires darwinPlatform's lock.
+func darwinForEachAddress(addresses []string, end func(string) error) error {
+	results := make([]error, len(addresses))
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, darwinRetireConcurrency)
-	for i, address := range retired {
+	for i, address := range addresses {
 		slots <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-slots }()
-			results[i] = darwinRetireAddress(ctx, address)
+			results[i] = end(address)
 		})
 	}
 	wg.Wait()
-	for i, address := range retired {
+	for i, address := range addresses {
 		if results[i] == nil {
 			delete(darwinPlatform.aliases, address)
 		}
 	}
-	return errors.Join(errors.Join(results...), darwinSaveAliases())
+	return errors.Join(results...)
 }
 
 // darwinRetireLater retires one short batch, so a listener request never waits long for the lock, and continues until
-// none is left. Addresses that stay are denied and journaled.
+// none is left. A batch that removes nothing stops it: the addresses stay denied and journaled for the next apply.
 func darwinRetireLater() {
 	darwinPlatform.Lock()
 	defer darwinPlatform.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	var retired []string
-	for address := range darwinPlatform.aliases {
-		if !darwinPlatform.active[address] {
-			retired = append(retired, address)
-		}
-	}
-	if len(retired) == 0 {
+	retired := darwinInactiveAddresses()
+	_ = darwinRetireAddresses(ctx, retired[:min(len(retired), darwinRetireConcurrency)])
+	if left := len(darwinInactiveAddresses()); left == 0 || left == len(retired) {
 		darwinPlatform.retiring = false
 		return
 	}
-	_ = darwinRetireAddresses(ctx, retired[:min(len(retired), darwinRetireConcurrency)])
 	time.AfterFunc(time.Second, darwinRetireLater)
+}
+
+// darwinInactiveAddresses requires darwinPlatform's lock.
+func darwinInactiveAddresses() []string {
+	var inactive []string
+	for address := range darwinPlatform.aliases {
+		if !darwinPlatform.active[address] {
+			inactive = append(inactive, address)
+		}
+	}
+	return inactive
+}
+
+// darwinRetireNow retires every inactive address before it returns, for a process that ends and so cannot continue
+// in the background (uninstall).
+func darwinRetireNow(ctx context.Context) error {
+	darwinPlatform.Lock()
+	defer darwinPlatform.Unlock()
+	return darwinRetireAddresses(ctx, darwinInactiveAddresses())
 }
 
 // darwinRetireAddress ends an address with no listener left. It kills only that address's states; never flush other
@@ -242,6 +257,10 @@ func darwinRetireAddress(ctx context.Context, address string) error {
 	if _, err := darwinRun(ctx, "", "/sbin/pfctl", "-k", "0.0.0.0/0", "-k", address); err != nil {
 		return err
 	}
+	return darwinRemoveAlias(ctx, address)
+}
+
+func darwinRemoveAlias(ctx context.Context, address string) error {
 	exists, err := darwinAliasExists(address)
 	if err != nil || !exists {
 		return err
@@ -290,8 +309,11 @@ func darwinStep(step string, err error) error {
 	return fmt.Errorf("machine guard could not %s: %w", step, err)
 }
 
-func retirePlatform(cfg Config) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// retirePlatform is the guard's stop: launchd kills it 20 s after SIGTERM, closeOwned included.
+func retirePlatform(cfg Config) { retirePlatformWithin(cfg, 10*time.Second) }
+
+func retirePlatformWithin(cfg Config, limit time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	darwinPlatform.Lock()
 	defer darwinPlatform.Unlock()
@@ -301,19 +323,9 @@ func retirePlatform(cfg Config) {
 	// All controller DNS and service sockets have stopped before this hook. macOS
 	// does not route unused127/8 aliases to loopback, so deleting owned aliases is
 	// an additional crash/reboot barrier independent of the retained PF denial.
-	for address := range darwinPlatform.aliases {
-		exists, err := darwinAliasExists(address)
-		if err != nil {
-			return
-		}
-		if exists {
-			if _, err = darwinRun(ctx, "", "/sbin/ifconfig", "lo0", "-alias", address); err != nil {
-				return
-			}
-		}
-		delete(darwinPlatform.aliases, address)
-	}
-	if err := darwinSaveAliases(); err != nil {
+	darwinPlatform.active = nil
+	removed := darwinForEachAddress(darwinInactiveAddresses(), func(address string) error { return darwinRemoveAlias(ctx, address) })
+	if err := errors.Join(removed, darwinSaveAliases()); err != nil {
 		return
 	}
 	tokenPath := filepath.Join(cfg.StateDir, "pf-enable-token")

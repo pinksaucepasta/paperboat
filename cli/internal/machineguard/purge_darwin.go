@@ -110,7 +110,7 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 	// Trust removal needs the retained root records, so the state directory is
 	// kept whenever it fails.
 	// Owned loopback aliases and the PF enable token are recorded in state.
-	retirePlatform(Config{StateDir: paths.StateDir})
+	retirePlatformWithin(Config{StateDir: paths.StateDir}, time.Minute)
 	result = errors.Join(result, darwinRetiredPlatformState(paths.StateDir))
 	result = errors.Join(result, p.RestoreProxy(ctx))
 	roots, err := uninstallRoots(paths.StateDir)
