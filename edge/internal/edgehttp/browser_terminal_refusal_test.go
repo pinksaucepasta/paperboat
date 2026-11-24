@@ -83,7 +83,7 @@ func TestBrowserTerminalRefusalsAreClosesTheBrowserCanRead(t *testing.T) {
 			policy, err := New(Config{
 				PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 				MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewPreviewCarrierRouteMatcher(registry),
-				RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
+				RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub,
 				OnFailure: func(_ context.Context, err error) { reported <- err },
 				BrowserTerminal: browserTerminalAdmissionFunc(func(context.Context, string, string, string) (control.BrowserTerminalAdmission, error) {
 					return tc.admit()

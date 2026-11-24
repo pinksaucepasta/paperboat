@@ -74,7 +74,6 @@ type TerminalBrowserDecision struct {
 	HostWSSURL           string              `json:"host_wss_url,omitempty"`
 	EdgeNodeID           string              `json:"-"`
 	EdgeProcessEpoch     string              `json:"-"`
-	EdgeEndpointHost     string              `json:"-"`
 	Role                 TerminalBrowserRole `json:"role"`
 	PolicyGeneration     uint64              `json:"policy_generation"`
 	TeamID               string              `json:"team_id,omitempty"`
@@ -279,7 +278,7 @@ func (s *Service) completeTerminalBrowserRoute(ctx context.Context, decision Ter
 			return TerminalBrowserDecision{}, ErrMachineCapabilityUnavailable
 		}
 		decision.EdgeNodeID = route.AppliedNodeID.String
-		if err := s.db.Pool().QueryRow(ctx, `SELECT process_epoch,endpoint_host FROM paperboat.control_tunnel_nodes WHERE id=$1 AND state='ready' AND ready=true AND public_ingress_verified_at IS NOT NULL`, decision.EdgeNodeID).Scan(&decision.EdgeProcessEpoch, &decision.EdgeEndpointHost); err != nil {
+		if err := s.db.Pool().QueryRow(ctx, `SELECT process_epoch FROM paperboat.control_tunnel_nodes WHERE id=$1 AND state='ready' AND ready=true AND public_ingress_verified_at IS NOT NULL`, decision.EdgeNodeID).Scan(&decision.EdgeProcessEpoch); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
 				return TerminalBrowserDecision{}, ErrMachineCapabilityUnavailable
 			}
@@ -313,6 +312,10 @@ func (s *Service) SnapshotTerminalForBrowser(ctx context.Context, want TerminalB
 		}
 		return TerminalBrowserRuntimeSnapshot{}, err
 	}
+	httpIngressURL, err := s.runtimeIngressURL(ctx, current.EnvironmentID, route.PublicHost)
+	if err != nil {
+		return TerminalBrowserRuntimeSnapshot{}, err
+	}
 	now := s.now().UTC()
 	token, err := s.signProcessCredential(ctx, mint.CredentialInput{
 		Issuer: s.issuer, Audience: "paperboat-machine", Subject: current.OwnerAccountID,
@@ -324,7 +327,7 @@ func (s *Service) SnapshotTerminalForBrowser(ctx context.Context, want TerminalB
 	if err != nil {
 		return TerminalBrowserRuntimeSnapshot{}, err
 	}
-	snapshot, err := s.controlRuntime.TerminalViaEdge(ctx, current.EdgeEndpointHost, route.PublicHost, token, "snapshot", current.SessionID, newID("operation"))
+	snapshot, err := s.controlRuntime.Terminal(ctx, httpIngressURL, token, "snapshot", current.SessionID, newID("operation"))
 	if err != nil {
 		return TerminalBrowserRuntimeSnapshot{}, err
 	}

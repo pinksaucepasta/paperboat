@@ -58,7 +58,7 @@ func newRuntimeHostEdge(t *testing.T) *runtimeHostEdge {
 	policy, err := New(Config{
 		PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 		MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewPreviewCarrierRouteMatcher(registry),
-		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: machineURL}, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
+		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: machineURL}, BrowserTerminalHub: hub,
 		BrowserTerminal: browserTerminalAdmissionFunc(func(_ context.Context, _, _, host string) (control.BrowserTerminalAdmission, error) {
 			e.admissions.Add(1)
 			e.admittedHost.Store(host)

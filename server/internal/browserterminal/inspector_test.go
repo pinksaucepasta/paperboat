@@ -41,7 +41,7 @@ func (r *recordingTickets) Issue(ctx context.Context, ticket Ticket) (Ticket, er
 }
 
 func inspectorDecision() Decision {
-	return Decision{WorkspaceID: "personal", UserID: "usr_1", OwnerAccountID: "usr_owner", InspectorCredentialID: "credential_1", MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeEndpointHost: "edge-one.example.test", Role: RoleInspector, PolicyGeneration: 7}
+	return Decision{WorkspaceID: "personal", UserID: "usr_1", OwnerAccountID: "usr_owner", InspectorCredentialID: "credential_1", MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Role: RoleInspector, PolicyGeneration: 7}
 }
 
 func TestGatewayIssuesInspectorTicketBoundToCredential(t *testing.T) {

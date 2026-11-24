@@ -40,7 +40,7 @@ func TestBrowserTerminalDrainAcrossUpdates(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
-	const node, epoch, runtimeHost, edgeHost = "edge_drain", "edge_epoch_drain_1", "machine.runtime.example.test", "edge.example.test"
+	const node, epoch, runtimeHost = "edge_drain", "edge_epoch_drain_1", "machine.runtime.example.test"
 	dir := t.TempDir()
 	trust, err := control.NewProcessCarrierServerTrust(node, epoch, "127.0.0.1", time.Now(), time.Hour)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestBrowserTerminalDrainAcrossUpdates(t *testing.T) {
 	policy, err := edgehttp.New(edgehttp.Config{
 		PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 		MaxHeaderBytes: 8192, MaxBodyBytes: 8192, Routes: edgehttp.NewPreviewCarrierRouteMatcher(routes),
-		RuntimeCarrierTransport: transport, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: edgeHost, BrowserTerminal: tickets,
+		RuntimeCarrierTransport: transport, BrowserTerminalHub: hub, BrowserTerminal: tickets,
 		OnFailure: func(_ context.Context, err error) { t.Logf("edge reported: %v", err) },
 	}, http.NotFoundHandler())
 	if err != nil {

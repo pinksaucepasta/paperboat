@@ -59,7 +59,7 @@ func (a MachineAuthorizer) ResolveRecording(ctx context.Context, userID, recordi
 		return Decision{}, err
 	}
 	return Decision{UserID: userID, OwnerAccountID: owner, WorkspaceID: team, RecordingID: recordingID, MachineID: route.MachineID, EnvironmentID: route.EnvironmentID,
-		HostWSSURL: route.HostWSSURL, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, EdgeEndpointHost: route.EdgeEndpointHost, Role: RoleRecording, PolicyGeneration: 1}, nil
+		HostWSSURL: route.HostWSSURL, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, Role: RoleRecording, PolicyGeneration: 1}, nil
 }
 
 // refusedReplay: the recording or its team is gone for this viewer, or their replay permission is.

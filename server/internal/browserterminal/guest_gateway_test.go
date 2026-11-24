@@ -64,7 +64,7 @@ func (s *guestTestTickets) SessionActive(context.Context, string, string) (bool,
 	return false, nil
 }
 func guestTestDecision() Decision {
-	return Decision{WorkspaceID: "personal", GuestSessionID: "guest_1", UserID: "guest_1", OwnerAccountID: "owner_1", TerminalSessionID: "term_1", MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeEndpointHost: "edge.example.test", Role: "viewer", PolicyGeneration: 1}
+	return Decision{WorkspaceID: "personal", GuestSessionID: "guest_1", UserID: "guest_1", OwnerAccountID: "owner_1", TerminalSessionID: "term_1", MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Role: "viewer", PolicyGeneration: 1}
 }
 func TestGuestGatewayUsesExplicitIdentityBranch(t *testing.T) {
 	a := &guestTestAuthorizer{decision: guestTestDecision()}

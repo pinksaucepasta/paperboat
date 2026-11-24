@@ -66,7 +66,7 @@ func TestHeldBrowserTerminalCrossesAControlPlaneCut(t *testing.T) {
 	policy, err := New(Config{
 		PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 		MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewPreviewCarrierRouteMatcher(registry),
-		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
+		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub,
 		BrowserTerminal: &control.BrowserTerminalClient{HTTP: controlHTTP, NodeID: "edge_1", ProcessEpoch: "edge_epoch_1"},
 	}, http.NotFoundHandler())
 	if err != nil {

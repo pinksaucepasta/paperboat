@@ -78,7 +78,7 @@ func TestHeldBrowserTerminalCrossesAWorkerHandover(t *testing.T) {
 			policy, err := New(Config{
 				PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 				MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewPreviewCarrierRouteMatcher(registry),
-				RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
+				RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub,
 				BrowserTerminal: browserTerminalAdmissionFunc(func(context.Context, string, string, string) (control.BrowserTerminalAdmission, error) {
 					admissions++
 					closed := make(chan struct{})
@@ -305,7 +305,7 @@ func handOverEndsBrowserTerminalsMoved(t *testing.T, mode string) {
 	policy, err := New(Config{
 		PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 		MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewPreviewCarrierRouteMatcher(registry),
-		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
+		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub,
 		BrowserTerminal: browserTerminalAdmissionFunc(func(context.Context, string, string, string) (control.BrowserTerminalAdmission, error) {
 			admissions++
 			return control.BrowserTerminalAdmission{Credential: "host-credential", TerminalSessionID: "term_1", AttachmentID: "attach_" + strconv.Itoa(admissions), Closed: revoked, Close: func() {},

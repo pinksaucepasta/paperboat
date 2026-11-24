@@ -278,7 +278,6 @@ type Service struct {
 
 type userMachineHelperRuntime interface {
 	Terminal(context.Context, string, string, string, string, string) (helperruntime.Snapshot, error)
-	TerminalViaEdge(context.Context, string, string, string, string, string, string) (helperruntime.Snapshot, error)
 }
 
 type HelperEnrollmentGrant struct {

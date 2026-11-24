@@ -44,7 +44,6 @@ type Decision struct {
 	HostWSSURL            string
 	EdgeNodeID            string
 	EdgeProcessEpoch      string
-	EdgeEndpointHost      string
 	Role                  string
 	PolicyGeneration      int64
 	TeamGeneration        int64
@@ -158,7 +157,7 @@ func validDecision(d Decision, userID, terminalSessionID string) bool {
 
 // sameDecision is sameAccess on the same route: an admission must name the edge that serves the machine now.
 func sameDecision(a, b Decision) bool {
-	return sameAccess(a, b) && a.HostWSSURL == b.HostWSSURL && a.EdgeNodeID == b.EdgeNodeID && a.EdgeProcessEpoch == b.EdgeProcessEpoch && a.EdgeEndpointHost == b.EdgeEndpointHost
+	return sameAccess(a, b) && a.HostWSSURL == b.HostWSSURL && a.EdgeNodeID == b.EdgeNodeID && a.EdgeProcessEpoch == b.EdgeProcessEpoch
 }
 
 // sameAccess reports whether b grants the access a did: who, which terminal, role and every generation that

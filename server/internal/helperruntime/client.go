@@ -141,17 +141,6 @@ func (c Client) Terminal(ctx context.Context, route, credential, action, session
 	return c.terminal(ctx, route, credential, action, sessionID, operationID, map[string]any{"action": action, "session_id": sessionID})
 }
 
-// TerminalViaEdge pins a browser snapshot to the edge selected for the
-// terminal ticket. The runtime hostname remains in the path for edge route
-// authorization; DNS for the public runtime alias cannot redirect this read.
-func (c Client) TerminalViaEdge(ctx context.Context, edgeHost, runtimeHost, credential, action, sessionID, operationID string) (Snapshot, error) {
-	if edgeHost == "" || runtimeHost == "" || strings.ContainsAny(edgeHost, "/:@?#") || strings.ContainsAny(runtimeHost, "/:@?#") {
-		return Snapshot{}, protocolError("edge_route_invalid", "invalid helper runtime edge route", nil)
-	}
-	endpoint := (&url.URL{Scheme: "wss", Host: edgeHost, Path: "/v1/runtime/" + runtimeHost}).String()
-	return c.terminalEndpoint(ctx, endpoint, credential, action, sessionID, operationID, map[string]any{"action": action, "session_id": sessionID})
-}
-
 // CreateTerminal starts the exact server-owned session on its enrolled host.
 // The host's create-or-get response makes worker retries safe after a lost ACK.
 func (c Client) CreateTerminal(ctx context.Context, route, credential, sessionID, operationID, name, cwd string) (Snapshot, error) {

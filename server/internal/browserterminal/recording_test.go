@@ -32,7 +32,7 @@ func (a *recordingTestAuthorizer) ResolveRecording(_ context.Context, userID, re
 }
 
 func recordingDecision() Decision {
-	return Decision{WorkspaceID: "team_1", UserID: "usr_1", OwnerAccountID: "usr_1", RecordingID: testRecordingID, MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeEndpointHost: "edge-one.example.test", Role: RoleRecording, PolicyGeneration: 1}
+	return Decision{WorkspaceID: "team_1", UserID: "usr_1", OwnerAccountID: "usr_1", RecordingID: testRecordingID, MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Role: RoleRecording, PolicyGeneration: 1}
 }
 
 // A recording replay channel: the ticket names one recording, the edge admission mints a recording_replay

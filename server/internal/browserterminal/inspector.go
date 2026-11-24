@@ -52,7 +52,7 @@ func (a MachineAuthorizer) ResolveInspector(ctx context.Context, userID, credent
 		}
 		return Decision{}, err
 	}
-	return Decision{UserID: userID, OwnerAccountID: credential.OwnerAccountID, WorkspaceID: credential.WorkspaceID, InspectorCredentialID: credentialID, MachineID: route.MachineID, EnvironmentID: route.EnvironmentID, HostWSSURL: route.HostWSSURL, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, EdgeEndpointHost: route.EdgeEndpointHost, Role: RoleInspector, PolicyGeneration: int64(credential.ResourceGeneration)}, nil
+	return Decision{UserID: userID, OwnerAccountID: credential.OwnerAccountID, WorkspaceID: credential.WorkspaceID, InspectorCredentialID: credentialID, MachineID: route.MachineID, EnvironmentID: route.EnvironmentID, HostWSSURL: route.HostWSSURL, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, Role: RoleInspector, PolicyGeneration: int64(credential.ResourceGeneration)}, nil
 }
 
 // admitInspectorEdge mints the inspector channel's host credential. There is

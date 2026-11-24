@@ -99,7 +99,7 @@ func TestRuntimeBrowserTerminalReplacesTicketWithHostCredential(t *testing.T) {
 	policy, err := New(Config{
 		PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
 		MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewPreviewCarrierRouteMatcher(registry),
-		RuntimeCarrierTransport: transport, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
+		RuntimeCarrierTransport: transport, BrowserTerminalHub: hub,
 		BrowserTerminal: browserTerminalAdmissionFunc(func(_ context.Context, ticket, origin, requestHost string) (control.BrowserTerminalAdmission, error) {
 			if ticket != "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" || origin != "https://dashboard.example.test" || requestHost != value.Hostname {
 				t.Fatal("wrong browser admission binding")
@@ -216,9 +216,6 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 				base, hostname = "", "machine.customer.example.test"
 			}
 			endpoint := func(path string) string {
-				if selfhost {
-					return "https://edge.customer.example.test/v1/runtime/" + hostname + path
-				}
 				return "https://" + hostname + path
 			}
 			identity := testEdgePreviewIdentity(1, 1)
@@ -254,7 +251,7 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			gateway, err := NewGatewayWithTransports(Config{SelfHosted: selfhost, BrowserTerminalEdgeHost: "edge.customer.example.test", PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: matcher, RuntimeCarrierTransport: transport, HelperAccess: helperAccessFunc(func(_ context.Context, token string) (admission.Claims, error) {
+			gateway, err := NewGatewayWithTransports(Config{SelfHosted: selfhost, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: matcher, RuntimeCarrierTransport: transport, HelperAccess: helperAccessFunc(func(_ context.Context, token string) (admission.Claims, error) {
 				if token != "runtime-test-token" {
 					return admission.Claims{}, errors.New("unauthorized")
 				}
@@ -263,7 +260,6 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			// /v1/runtime is the terminal endpoint a self-hosted descriptor issues as wss://edge/v1/runtime/<host>/v1/runtime.
 			for _, path := range []string{"/v1/browser-terminal", "/v1/runtime", "/arbitrary"} {
 				req := httptest.NewRequest("GET", endpoint(path), nil)
 				rec := httptest.NewRecorder()
@@ -274,13 +270,6 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 				}
 				if rec.Code != want {
 					t.Fatalf("unauthorized %s=%d", path, rec.Code)
-				}
-			}
-			if selfhost { // an edge published on a port other than 443 is reached as edge:port
-				rec := httptest.NewRecorder()
-				gateway.ServeHTTP(rec, httptest.NewRequest("GET", "https://edge.customer.example.test:18446/v1/runtime/"+hostname+"/v1/runtime", nil))
-				if rec.Code != http.StatusUnauthorized {
-					t.Fatalf("edge name with its published port=%d, want 401", rec.Code)
 				}
 			}
 			done := make(chan error, 1)

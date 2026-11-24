@@ -162,7 +162,7 @@ func TestEdgeControlAdmitsExactNodeAndRevokesLiveAttachment(t *testing.T) {
 	// this attachment is held on edge_1, whose carrier the old worker keeps for it. That is routing, not access: the
 	// attachment stays through two live checks (Linux test VM 2026-11-05: it was ended "revoked" mid-update, a 3.8 s pause).
 	authorizer.mu.Lock()
-	authorizer.decision.EdgeNodeID, authorizer.decision.EdgeProcessEpoch, authorizer.decision.EdgeEndpointHost = "edge_2", "epoch_2", "edge-2.example.test"
+	authorizer.decision.EdgeNodeID, authorizer.decision.EdgeProcessEpoch = "edge_2", "epoch_2"
 	authorizer.mu.Unlock()
 	for range 2 {
 		if kind, heartbeat, err := connection.Read(ctx); err != nil || kind != websocket.MessageText || string(heartbeat) != "ok" {

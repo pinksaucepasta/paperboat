@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
@@ -27,6 +30,7 @@ type terminalIdentificationRuntime struct {
 	unknown                                       bool
 	slow                                          bool
 	multiple                                      bool
+	dial                                          func(context.Context, string, string) (net.Conn, error)
 }
 
 func (r *terminalIdentificationRuntime) Terminal(ctx context.Context, route, credential, operation, session, operationID string) (helperruntime.Snapshot, error) {
@@ -34,6 +38,13 @@ func (r *terminalIdentificationRuntime) Terminal(ctx context.Context, route, cre
 	claims, err := r.signer.VerifyCredential(credential, "https://api.paperboat.test", "terminal_operation", time.Now().UTC())
 	if err != nil || operation != "snapshot" || (!r.multiple && session != r.session) || route != r.route || operationID == "" || claims.MachineID != r.machine || claims.EnvironmentID != r.environment || claims.UserID != r.account || claims.SessionID != session {
 		return helperruntime.Snapshot{}, errors.New("snapshot fixture received incorrect resource binding")
+	}
+	if r.dial != nil {
+		conn, err := r.dial(ctx, "tcp", strings.TrimPrefix(route, "https://")+":443")
+		if err != nil {
+			return helperruntime.Snapshot{}, err
+		}
+		_ = conn.Close()
 	}
 	if r.slow {
 		<-ctx.Done()
@@ -46,10 +57,6 @@ func (r *terminalIdentificationRuntime) Terminal(ctx context.Context, route, cre
 		return helperruntime.Snapshot{}, hostUnknownSession{}
 	}
 	return helperruntime.Snapshot{ID: session, Name: "runtime-launch-name", CWD: "/launch", State: "running", Generation: 1, Title: "  vim\x1b\u202e main.go ", CurrentDirectory: "/live\x00/\u2066api", ForegroundProcess: "vi\t\u200fm"}, nil
-}
-
-func (r *terminalIdentificationRuntime) TerminalViaEdge(ctx context.Context, _, route, credential, operation, session, operationID string) (helperruntime.Snapshot, error) {
-	return r.Terminal(ctx, "https://"+route, credential, operation, session, operationID)
 }
 
 // hostUnknownSession is the host's "no such session" answer (not_found_or_forbidden).
@@ -102,9 +109,9 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	if _, err = service.ResolveTerminalBrowserRole(ctx, owner, session); !errors.Is(err, ErrMachineCapabilityUnavailable) {
 		t.Fatalf("unverified edge must preserve terminal availability classification: %v", err)
 	}
-	insert(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now(),endpoint_host='edge.example.test' WHERE id=$1`, edge)
+	insert(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id=$1`, edge)
 	decision, err := service.ResolveTerminalBrowserRole(ctx, owner, session)
-	if err != nil || decision.EdgeNodeID != edge || decision.EdgeProcessEpoch != epoch || decision.EdgeEndpointHost != "edge.example.test" || decision.HostWSSURL != "wss://"+host+"/v1/browser-terminal" {
+	if err != nil || decision.EdgeNodeID != edge || decision.EdgeProcessEpoch != epoch || decision.HostWSSURL != "wss://"+host+"/v1/browser-terminal" {
 		t.Fatalf("verified browser route unavailable: %+v error=%v", decision, err)
 	}
 	if _, err = service.TerminalSessionSharing(ctx, stranger, session); !errors.Is(err, ErrTerminalSessionNotFound) {
@@ -141,6 +148,42 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	}
 	runtime.unknown, runtime.multiple = false, false
 	insert(`DELETE FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, fresh)
+	// The route's applied edge is still ready, but only another edge holds the machine's carrier: browser terminal,
+	// sharing and code access must reach the machine there, by its runtime host, never by an edge's own name.
+	holder := "ti_holder_" + suffix
+	insert(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,transports,registry_expires_at,region,failure_domain,capacity_observed_at,public_ingress_ipv4,public_ingress_verified_at) VALUES($1,'development','1.0',$2,'ready',true,now(),ARRAY['edge'],ARRAY['http2','http3'],now()+interval '1 hour','test-region','test-domain-2',now(),'192.0.2.2',now())`, holder, epoch)
+	insert(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4='192.0.2.1' WHERE id=$1`, edge)
+	insert(`UPDATE paperboat.runtime_carrier_attachments SET edge_node_id=$2 WHERE route_id=$1`, route, holder)
+	insert(`INSERT INTO paperboat.terminal_code_access(terminal_session_id,code_hash,role,enabled,generation,expires_at) VALUES($1,$2,'viewer',true,1,now()+interval '1 hour')`, session, make([]byte, 32))
+	insert(`INSERT INTO paperboat.terminal_guest_sessions(id,terminal_session_id,token_hash,display_name,code_generation,expires_at) VALUES($1,$2,$3,'guest',1,now()+interval '1 hour')`, "guest_"+suffix, session, make([]byte, 32))
+	dialer := runtimeattachment.EdgeDialer{DB: store, Dial: func(_ context.Context, _, address string) (net.Conn, error) {
+		if address != "192.0.2.2:443" {
+			return nil, fmt.Errorf("dialed %s, not the edge holding the carrier", address)
+		}
+		near, far := net.Pipe()
+		_ = far.Close()
+		return near, nil
+	}}
+	runtime.dial = dialer.DialContext
+	decision, err = service.ResolveTerminalBrowserRole(ctx, owner, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SnapshotTerminalForBrowser(ctx, decision); err != nil {
+		t.Fatalf("browser terminal snapshot: %v", err)
+	}
+	insert(`UPDATE paperboat.users SET email_verified=true WHERE id=$1`, stranger)
+	insert(`UPDATE paperboat.terminal_browser_access_policies SET audience='specific_emails',allowed_emails=ARRAY[$2::text] WHERE terminal_session_id=$1`, session, stranger+"@invalid.test")
+	if item, err = service.TerminalSessionSharing(ctx, stranger, session); err != nil || !item.BrowserOnly || item.Title != "vim main.go" {
+		t.Fatalf("sharing: %+v %v", item, err)
+	}
+	if item, err = service.TerminalBrowserSession(ctx, "", "guest_"+suffix, session); err != nil || item.Title != "vim main.go" {
+		t.Fatalf("code access: %+v %v", item, err)
+	}
+	runtime.dial = nil
+	insert(`UPDATE paperboat.terminal_browser_access_policies SET audience='owner',allowed_emails='{}' WHERE terminal_session_id=$1`, session)
+	insert(`DELETE FROM paperboat.terminal_code_access WHERE terminal_session_id=$1`, session)
+	insert(`UPDATE paperboat.runtime_carrier_attachments SET edge_node_id=$2 WHERE route_id=$1`, route, edge)
 	items, err := service.ListTerminalSessions(ctx, owner, machine)
 	if err != nil || len(items) != 1 || items[0].Title != "vim main.go" || items[0].CurrentDirectory != "/live/api" || items[0].ForegroundProcess != "vim" || items[0].Name != "my-work" || items[0].StartedIn != "/launch" {
 		t.Fatalf("machine live projection=%+v error=%v", items, err)

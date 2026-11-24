@@ -222,10 +222,10 @@ type helperDialTransport func(*http.Request) (*http.Response, error)
 
 func (f helperDialTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestTerminalViaEdgeDeniedHandshakePreservesSafeStatus(t *testing.T) {
+func TestTerminalDeniedHandshakePreservesSafeStatus(t *testing.T) {
 	const private = "PRIVATE_HANDSHAKE_RESPONSE_CANARY"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/runtime/runtime.example.test" || r.Header.Get("Authorization") != "Bearer test-credential" {
+		if r.URL.Path != "/v1/runtime" || r.Header.Get("Authorization") != "Bearer test-credential" {
 			t.Error("edge request lost its exact runtime path or credential")
 		}
 		http.Error(w, private, http.StatusForbidden)
@@ -241,7 +241,7 @@ func TestTerminalViaEdgeDeniedHandshakePreservesSafeStatus(t *testing.T) {
 		copy.URL.Scheme, copy.URL.Host = target.Scheme, target.Host
 		return base.RoundTrip(copy)
 	})}
-	_, err = (Client{HTTPClient: client}).TerminalViaEdge(context.Background(), "edge.example.test", "runtime.example.test", "test-credential", "snapshot", "session_1", "operation_1")
+	_, err = (Client{HTTPClient: client}).Terminal(context.Background(), "https://runtime.example.test", "test-credential", "snapshot", "session_1", "operation_1")
 	var failure websocketDialFailure
 	if !errors.As(err, &failure) || failure.DiagnosticStatus() != http.StatusForbidden || errors.Unwrap(failure) == nil {
 		t.Fatal("denied handshake lost typed status or original cause")
@@ -253,10 +253,10 @@ func TestTerminalViaEdgeDeniedHandshakePreservesSafeStatus(t *testing.T) {
 	}
 }
 
-func TestTerminalViaEdgeTransportFailurePreservesCauseWithoutStatus(t *testing.T) {
+func TestTerminalTransportFailurePreservesCauseWithoutStatus(t *testing.T) {
 	sentinel := errors.New("private transport cause")
 	client := &http.Client{Transport: helperDialTransport(func(*http.Request) (*http.Response, error) { return nil, sentinel })}
-	_, err := (Client{HTTPClient: client}).TerminalViaEdge(context.Background(), "edge.example.test", "runtime.example.test", "test-credential", "snapshot", "session_1", "operation_1")
+	_, err := (Client{HTTPClient: client}).Terminal(context.Background(), "https://runtime.example.test", "test-credential", "snapshot", "session_1", "operation_1")
 	var failure websocketDialFailure
 	if !errors.As(err, &failure) || !errors.Is(err, sentinel) || failure.DiagnosticStatus() != 0 || err.Error() != "helper runtime websocket dial failed" {
 		t.Fatal("transport failure lost original cause, invented status, or exposed error text")
