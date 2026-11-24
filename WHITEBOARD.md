@@ -411,3 +411,11 @@ A switch per feature that turns it fully on or off for a whole workspace (for ex
 tunnels, ENV, recordings). Off means off everywhere: the server refuses it, every `pb` command and console page says it is turned off,
 and what is already running stops. Open: who flips it (the workspace's owners and admins, Paperboat's operators in the admin panel, or
 both), whether a team can also lock a feature on, and how it sits next to the existing team access rules.
+
+## Every plan limit editable in the admin panel (user 2026-11-24)
+
+Today the panel changes the Free monthly allowance and a product's allowance, and overrides counts for one workspace. Plan-wide speed
+caps (slow speed after the allowance, relay speed, terminal cap), count limits (machines, previews and tunnels, browser terminals,
+public TCP, viewers) and the team per-seat allowance are server configuration and need a restart. Make all of them editable per plan
+in the panel, audited, and picked up by servers, edges and relays without a restart. Check first whether the panel's team allowance
+field changes a paid team's pool at all (the pool is TeamPerSeatBytes times seats).
