@@ -7,11 +7,6 @@ Everything here is after launch unless its group says otherwise (user decision 2
 ### Drop control_tunnel_nodes.capacity_limit
 No server code names `control_tunnel_nodes.capacity_limit` any more (node load is the sustained CPU: migration 509; the registry check no longer needs it: 510, 511); the column stays NOT NULL DEFAULT 0 for the previous server. The deploy after the one that ships this: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_tunnel_nodes DROP COLUMN capacity_limit;` (`-- contract-after: 510`, forward-only Down), then `make generate` (the sqlc `RETURNING *` lists still name it).
 
-### Global edges: verify without an own hostname (2026-11-24)
-Customer edges are verified by their pinned node identity, so they need no hostname or public certificate. Only a global (operator) edge must serve a
-publicly trusted certificate for its own name (`server/internal/selfhost/ingress.go`), so each new global edge needs one hand-made DNS record and
-`--endpoint-host`. Simplest fix: check global edges the same pinned way, or through the platform wildcard certificate every edge already holds.
-
 ### Scale: peer-network config fan-out
 Machines get deltas since the signed configuration delta landed (`ConfigurationDelta`). Left: check in production that "peer network configuration
 slow" builds and predicate-lock pressure on a 100+ machine account are really gone; if not, cap the build cost per account.
@@ -178,14 +173,6 @@ idle limit in the console player; markers and keyboard shortcuts in our player; 
 `pb recordings export --format v3` (asciicast v3: relative intervals, marker/exit events, header term metadata) with v2
 staying the default. Not planned: switching to asciinema-player (it brings a second terminal emulator).
 
-### Exec round trips: what is left — after launch
-
-Measured 2026-11-12: one `pb exec` over a 290 ms path took ~12 dependent round trips. Fixed 2026-11-16 (1f9007a39): the per-exec
-network refresh (2-5 round trips) is gone. Fixed 2026-11-16 (FIX-EXECRTT): exec runs on one stream whose credential, preface, hello and
-start go out in one flight, and the peer association lingers 5 s after its last user; 290 ms path 2.57 s -> 1.05-1.3 s
-(private smoke receipt 20261116T-execrtt.json). Left: the daemon's per-exec descriptor fetch from the server
-(`MachineExecDescriptor`, one control-server round trip per exec).
-
 - Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it).
 
 ### Remote desktop beta — deferred former Task 38
@@ -275,9 +262,7 @@ Tailscale control plane. Dropping Tailscale itself is a rewrite; dropping the fo
 | Peer relay policy (udprelay, ~230) | Upstream authorizes once, before `AllocateEndpoint`, via `PeerCapabilityRelay`/`RelayTarget` (`feature/relayserver/relayserver.go:136`) and revokes by stock lifetimes (30 s unbound, 5 min idle; `net/udprelay/server.go:60`). Copy that: drop the per-packet authorizer and policy deadline; keep `RevokeEndpoint` only if instant revocation is a product promise and the limiter only for per-plan bandwidth (USER DECIDES). ~230 -> ~60 or 0 |
 | DERP carrier factory (~350) | Keep. Upstream relays are TCP only; Tailscale documents DERP head-of-line blocking and TCP meltdown under load/loss and moved to UDP peer relays. Our fallback, QUIC datagrams (`relay/derpquic`), is the better design there |
 
-Also: the derpquic relay drops on its 64-slot per-peer queue (`server.go` select/default); a loaded loopback
-benchmark lost up to 1.5 %. Tune before measuring under loss (two windows-test VMs, forced relay, `tc netem` 1/3/5 %
-loss + 100 ms: transfer rate, terminal echo, network switch). `cli/upstream/PATCHES.md` names fork commit
+`cli/upstream/PATCHES.md` names fork commit
 ac1095ce while both go.mod files pin 2d32e5f0.
 
 ### Held for after launch — decided 2026-11-18
@@ -311,5 +296,3 @@ ac1095ce while both go.mod files pin 2d32e5f0.
   `$device_type` with their events; retention needs new explicit events (privacy decision first).
 - **TUI:** `huh` forms only if a real multi-field form appears (e.g. `pb env set` name + hidden value); a real Windows
   console check of the narrow-terminal hint (headless runs are fixed at 120 columns).
-- **Edge error pages:** four 401 answers (bad/expired token, duplicate cookies, malformed machine token, anonymous
-  non-navigation) — keep only if they never differ between an existing private name and a missing one.
