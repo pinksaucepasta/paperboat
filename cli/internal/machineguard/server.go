@@ -44,11 +44,13 @@ type guardedLease struct {
 	uid          string
 	owner        controlConn // nil: inherited from the previous guard process, until its daemon re-acquires it
 	listener     net.Listener
+	storedName   int // bytes of its name in systemd's descriptor store; 0 when not stored
 }
 type guardServer struct {
 	mu              sync.Mutex
 	cfg             Config
 	reserved        reservations
+	storedNames     int    // sum of the leases' storedName
 	persisted       []byte // last reservations written; an unchanged state is not rewritten
 	claims          *claimBook
 	leases          map[string]*guardedLease
@@ -72,8 +74,11 @@ type guardServer struct {
 	policyPending bool
 }
 
-// applyPolicy installs the whole access policy; tests replace it.
-var applyPolicy = applyProtection
+// applyPolicy installs the whole access policy and shutdownLease ends one listener; tests replace them.
+var (
+	applyPolicy   = applyProtection
+	shutdownLease = shutdownListener
+)
 
 func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	if cfg.StateDir == "" {
@@ -107,7 +112,7 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
 	g := &guardServer{cfg: cfg, reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{}, failures: make(chan error, 1)}
 	if data, err := os.ReadFile(filepath.Join(cfg.StateDir, "reservations.json")); err == nil {
-		if len(data) > 8<<20 || json.Unmarshal(data, &g.reserved) != nil || g.reserved.Names == nil {
+		if len(data) > maxJournal || json.Unmarshal(data, &g.reserved) != nil || g.reserved.Names == nil {
 			return errors.New("invalid machine guard reservation journal")
 		}
 	} else if !os.IsNotExist(err) {
@@ -202,7 +207,7 @@ func (g *guardServer) releaseUnclaimed() {
 	for key, lease := range g.leases {
 		if lease.owner == nil {
 			delete(g.leases, key)
-			forgetLease(lease)
+			g.forget(lease)
 			if err := shutdownListener(lease.listener); err != nil {
 				g.fail(err)
 			}
@@ -268,7 +273,7 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 			sameOwner++
 		}
 	}
-	if sameOwner >= 4 {
+	if sameOwner >= maxUserConnections {
 		g.mu.Unlock()
 		return
 	}
@@ -297,7 +302,9 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 			if err == nil {
 				file, err = g.handle(opCtx, conn, uid, in)
 			}
-			g.pruneCertificates(conn, uid)
+			if in.Operation == "aliases" || in.Operation == "release" || in.Operation == "release_all" { // nothing else withdraws a name
+				g.pruneCertificates(conn, uid)
+			}
 			g.mu.Unlock()
 		}
 		cancel()
@@ -511,9 +518,6 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if err := g.reserveName(uid, in.Hostname); err != nil {
 			return nil, err
 		}
-		if err := g.persist(); err != nil {
-			return nil, err
-		}
 		bind := key
 		if portRedirects {
 			bind = net.JoinHostPort(in.IP, "0") // the nat rule sends key here
@@ -525,10 +529,18 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		lease := &guardedLease{hostname: in.Hostname, ip: in.IP, port: in.Port, uid: uid, owner: conn, listener: listener}
 		g.leases[key] = lease
 		// shortcut: a lease that cannot be stored still serves; it only is not kept across a guard replacement.
-		_ = storeLease(lease)
+		if size := g.storedNameSize(lease); size > 0 && storeLease(lease) == nil {
+			lease.storedName = size
+			g.storedNames += size
+		}
 		g.policyPending = true
 		return listener, nil
 	case "apply":
+		// The names and addresses of every acquire since the last apply become durable before they are reachable:
+		// one write per reconcile, not one per listener.
+		if err := g.persist(); err != nil {
+			return nil, err
+		}
 		if !g.policyPending {
 			return nil, nil
 		}
@@ -544,28 +556,22 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if lease.owner != conn {
 			return nil, errors.New("protected listener belongs to another connection")
 		}
-
-		delete(g.leases, key)
-		forgetLease(lease)
-		g.removeUnservedNames(conn)
-		shutdownErr := shutdownListener(lease.listener)
-		if releaseDefersPolicy {
-			if shutdownErr != nil {
-				g.fail(shutdownErr)
-				return nil, shutdownErr
+		return nil, g.releaseLeases(ctx, conn, map[string]*guardedLease{key: lease})
+	case "release_all":
+		if len(in.Listeners) > maxUserListeners {
+			return nil, errors.New("too many listeners")
+		}
+		owned := make(map[string]*guardedLease, len(in.Listeners))
+		for _, key := range in.Listeners {
+			if lease, ok := g.leases[key]; ok && lease.owner == conn { // another connection's, or already released: not ours
+				owned[key] = lease
 			}
-			g.policyPending = true // the next apply, from any connection, retires the lease's rule
-			return nil, nil
 		}
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		updateErr := g.applyRules(cleanupCtx)
-		if err := errors.Join(shutdownErr, updateErr); err != nil {
-			g.fail(err)
-			return nil, err
-		}
-		return nil, nil
+		return nil, g.releaseLeases(ctx, conn, owned)
 	case "claims":
+		if len(in.Machines) > maxClaimMachines {
+			return nil, errors.New("too many machines")
+		}
 		present := make(map[string]bool, len(in.Machines))
 		for _, machine := range in.Machines {
 			present[machine] = true
@@ -579,7 +585,7 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 	case "preview_pac":
 		return nil, g.setPreviewPAC(conn, in.PAC)
 	case "names":
-		if len(in.Names) > 128 {
+		if len(in.Names) > MaxRoutedMachines {
 			return nil, errors.New("too many machine names")
 		}
 		domain, err := selectedBrowserDomain(g.cfg.StateDir, uid)
@@ -588,19 +594,13 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		}
 		accepted := make(map[string]string, len(in.Names))
 		var refused []string
+		served := g.servedNames(conn)
 	names:
 		for name, ip := range in.Names {
 			if (!validName(name, domain) && !validSubdomainName(name, domain)) || !validAddressInCIDR(ip, g.cfg.LoopbackCIDR) {
 				return nil, errors.New("invalid machine name")
 			}
-			found := false
-			for _, lease := range g.leases {
-				if lease.owner == conn && g.leaseServesName(conn, lease, name) && lease.ip == ip {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !served[[2]string{name, ip}] {
 				refused = append(refused, name+" (no protected ready listener)")
 				continue
 			}
@@ -623,6 +623,9 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		}
 		if len(refused) > 0 {
 			slices.Sort(refused)
+			if more := len(refused) - maxRefusedNamesListed; more > 0 {
+				refused = append(refused[:maxRefusedNamesListed], fmt.Sprintf("and %d more", more))
+			}
 			return nil, namesRefusal{reason: "machine names not published: " + strings.Join(refused, ", ")}
 		}
 		return nil, nil
@@ -676,7 +679,7 @@ func (g *guardServer) withdraw(ctx context.Context, conn controlConn) {
 				continue // the guard is being replaced: the socket outlives its connection
 			}
 			delete(g.leases, key)
-			forgetLease(lease)
+			g.forget(lease)
 			if err := shutdownListener(lease.listener); err != nil {
 				g.fail(err)
 			}
@@ -698,23 +701,82 @@ func (g *guardServer) withdraw(ctx context.Context, conn controlConn) {
 		}
 	}
 }
+
+// servedNames is every (hostname, address) conn holds a listener for. The browser gateway's own address is never a
+// machine name's, so aliases do not appear here.
+func (g *guardServer) servedNames(conn controlConn) map[[2]string]bool {
+	served := make(map[[2]string]bool, len(g.leases))
+	for _, lease := range g.leases {
+		if lease.owner == conn {
+			served[[2]string{lease.hostname, lease.ip}] = true
+		}
+	}
+	return served
+}
+
+// releaseLeases withdraws conn's leases in one policy change.
+func (g *guardServer) releaseLeases(ctx context.Context, conn controlConn, leases map[string]*guardedLease) error {
+	if len(leases) == 0 {
+		return nil
+	}
+	var shutdownErr error
+	for key, lease := range leases {
+		delete(g.leases, key)
+		g.forget(lease)
+		shutdownErr = errors.Join(shutdownErr, shutdownLease(lease.listener))
+	}
+	g.removeUnservedNames(conn)
+	if releaseDefersPolicy {
+		if shutdownErr != nil {
+			g.fail(shutdownErr)
+			return shutdownErr
+		}
+		g.policyPending = true // the next apply, from any connection, retires the leases' rules
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := errors.Join(shutdownErr, g.applyRules(cleanupCtx)); err != nil {
+		g.fail(err)
+		return err
+	}
+	return nil
+}
+
 func (g *guardServer) removeUnservedNames(conn controlConn) bool {
 	changed := false
+	if len(g.names[conn]) == 0 {
+		return false
+	}
+	served := g.servedNames(conn)
 	for name, ip := range g.names[conn] {
-		found := false
-		for _, lease := range g.leases {
-			if lease.owner == conn && g.leaseServesName(conn, lease, name) && lease.ip == ip {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !served[[2]string{name, ip}] {
 			delete(g.names[conn], name)
 			changed = true
 		}
 	}
 	return changed
 }
+
+// storedNameSize is what lease adds to the stored names, or 0 when it no longer fits.
+func (g *guardServer) storedNameSize(lease *guardedLease) int {
+	size := len(leaseFDName(lease)) + 1
+	if g.storedNames+size > maxStoredLeaseNames {
+		return 0
+	}
+	return size
+}
+
+// forget removes a withdrawn lease from systemd's descriptor store.
+func (g *guardServer) forget(lease *guardedLease) {
+	if lease.storedName == 0 {
+		return
+	}
+	g.storedNames -= lease.storedName
+	lease.storedName = 0
+	forgetLease(lease)
+}
+
 func (g *guardServer) fail(err error) {
 	select {
 	case g.failures <- err:
@@ -750,8 +812,8 @@ func (g *guardServer) assignClaim(uid string, in request) (request, error) {
 	if err != nil {
 		return in, errors.New("invalid preferred machine address")
 	}
-	if in.Account == "" || in.Machine == "" {
-		return in, listenerRefusal{reason: "a machine address request needs an account and a machine"}
+	if !validClaimField(in.Account) || !validClaimField(in.Machine) {
+		return in, listenerRefusal{reason: "a machine address request needs a valid account and machine id"}
 	}
 	key := claimKey{UID: uid, Account: in.Account, Machine: in.Machine}
 	ip, err := g.claims.assign(key, preferred, time.Now())
@@ -759,7 +821,7 @@ func (g *guardServer) assignClaim(uid string, in request) (request, error) {
 		return in, err
 	}
 	in.IP = ip
-	return in, g.persist()
+	return in, nil
 }
 
 // Features names the protocol additions this build's guard serves (and its clients may use).
@@ -783,7 +845,7 @@ func (g *guardServer) acquireGatewayRoute(ctx context.Context, conn controlConn,
 	if _, exists := g.leases[key]; exists {
 		return nil, listenerRefusal{reason: "protected listener is already owned by another connection"}
 	}
-	if len(g.leases) >= 8192 {
+	if g.listenersFull(uid) {
 		return nil, listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
 	}
 	route, err := g.routeGateway(ctx, uid, in.Port)
@@ -810,20 +872,25 @@ func (g *guardServer) sameNamespace(conn controlConn, uid string) bool {
 	return !gatewayRouting || g.connections[conn] == uid
 }
 
+// listenersFull reports whether uid, or the whole host, holds all the listeners it may.
+func (g *guardServer) listenersFull(uid string) bool {
+	owned := 0
+	for _, lease := range g.leases {
+		if lease.uid == uid {
+			owned++
+		}
+	}
+	return owned >= maxUserListeners || len(g.leases) >= maxHostListeners
+}
+
 // reserveName reserves a machine name for uid, refusing a name another OS user holds in the same namespace and
 // bounding how many names one user and the host keep.
 func (g *guardServer) reserveName(uid, hostname string) error {
 	key := nameKey(uid, hostname)
 	atLimit := func() bool {
-		ownedNames := 0
-		for _, owner := range g.reserved.Names {
-			if owner == uid {
-				ownedNames++
-			}
-		}
-		return !has(g.reserved.Names, key) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512)
+		return !has(g.reserved.Names, key) && (len(g.reserved.Names) >= maxHostNames || g.ownedNames(uid) >= maxUserNames)
 	}
-	if len(g.leases) >= 8192 {
+	if g.listenersFull(uid) {
 		return listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
 	}
 	if atLimit() {

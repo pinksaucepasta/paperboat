@@ -817,6 +817,9 @@ func pendingStepRecovery(step string) string {
 	if step == "browser_http_port" {
 		return "Use the https:// URLs, or stop that program, and Paperboat turns the http:// links back on by itself."
 	}
+	if step == "machine_limit" {
+		return "The rest of local access works; remove machines, exported ports or port names you do not use to serve these too"
+	}
 	return "The rest of local access works; Paperboat retries the step by itself"
 }
 
@@ -836,6 +839,8 @@ func pendingStepTitle(step, detail string) string {
 			title += " (" + detail + ")"
 		}
 		return title + "; https:// browser URLs work"
+	case "machine_limit":
+		return "This account is above this computer's local access limits; not served locally: " + detail
 	case "browser_certificate":
 		what = "Browser URLs are unavailable"
 	case "browser_port_listener":

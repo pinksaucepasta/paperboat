@@ -179,6 +179,8 @@ func (g *guardServer) restoreFrom(files []*os.File, names []string) {
 		}
 	}
 	for _, lease := range leasesFromFiles(machineFiles, machineNames) {
+		lease.storedName = len(leaseFDName(lease)) + 1
+		g.storedNames += lease.storedName
 		g.leases[net.JoinHostPort(lease.ip, strconv.Itoa(lease.port))] = lease
 	}
 }

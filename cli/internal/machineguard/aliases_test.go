@@ -86,7 +86,7 @@ func TestBrowserAliasesRequireOwnedHTTPSListenerAndReservationLimits(t *testing.
 		t.Fatal("alias survived loss of its HTTPS listener")
 	}
 	g.leases["gateway"] = gateway
-	for i := len(g.reserved.Names); i < 4096; i++ {
+	for i := len(g.reserved.Names); i < maxHostNames; i++ {
 		g.reserved.Names[fmt.Sprintf("reserved%d.local.example.test", i)] = "other"
 	}
 	if err := g.replaceAliases(context.Background(), owner, "owner", valid); err != nil {

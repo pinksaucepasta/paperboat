@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -75,15 +76,50 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 }
 
 func listenProtected(ctx context.Context, address, loopbackCIDR string) (net.Listener, error) {
-	uid, gid, err := darwinBrokerIdentity(ctx)
-	if err != nil {
-		return nil, err
-	}
 	host, _, err := net.SplitHostPort(address)
 	if err != nil || !validProtectedBindAddress(address, loopbackCIDR) {
 		return nil, errors.New("invalid protected listener address")
 	}
 	if err = darwinEnsureAlias(ctx, host); err != nil {
+		return nil, err
+	}
+	fd, err := darwinBrokerSocket(ctx, address, loopbackCIDR)
+	if err != nil {
+		return nil, err
+	}
+	return bindDarwinSocket(ctx, fd, address, loopbackCIDR)
+}
+
+// darwinSocketBatch is how many sockets one broker child hands over: a daemon with 1000 machines asks for that many
+// listeners at once, and one child process each took most of the time.
+const darwinSocketBatch = 32
+
+// darwinSpare holds the broker's unbound sockets not yet used; the guard alone binds them.
+var darwinSpare struct {
+	sync.Mutex
+	fds []int
+}
+
+func darwinBrokerSocket(ctx context.Context, address, loopbackCIDR string) (int, error) {
+	darwinSpare.Lock()
+	defer darwinSpare.Unlock()
+	if len(darwinSpare.fds) == 0 {
+		fds, err := darwinBrokerSockets(ctx, address, loopbackCIDR)
+		if err != nil {
+			return -1, err
+		}
+		darwinSpare.fds = fds
+	}
+	last := len(darwinSpare.fds) - 1
+	fd := darwinSpare.fds[last]
+	darwinSpare.fds = darwinSpare.fds[:last]
+	return fd, nil
+}
+
+// darwinBrokerSockets runs one broker child under the dedicated receiver UID.
+func darwinBrokerSockets(ctx context.Context, address, loopbackCIDR string) ([]int, error) {
+	uid, gid, err := darwinBrokerIdentity(ctx)
+	if err != nil {
 		return nil, err
 	}
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
@@ -123,18 +159,14 @@ func listenProtected(ctx context.Context, address, loopbackCIDR string) (net.Lis
 	}
 	stopRead := context.AfterFunc(ctx, func() { _ = connection.Close() })
 	defer stopRead()
-	fd, err := receiveDarwinSocket(connection.(*net.UnixConn))
-	if err != nil {
-		return nil, err
-	}
-	return bindDarwinSocket(ctx, fd, address, loopbackCIDR)
+	return receiveDarwinSockets(connection.(*net.UnixConn))
 }
 
-// receiveDarwinSocket owns every descriptor delivered by this private channel,
+// receiveDarwinSockets owns every descriptor delivered by this private channel,
 // including descriptors accompanying a malformed response.
-func receiveDarwinSocket(connection *net.UnixConn) (int, error) {
+func receiveDarwinSockets(connection *net.UnixConn) ([]int, error) {
 	marker := make([]byte, 2)
-	oob := make([]byte, unix.CmsgSpace(4*16))
+	oob := make([]byte, unix.CmsgSpace(4*darwinSocketBatch))
 	n, oobn, flags, _, readErr := connection.ReadMsgUnix(marker, oob)
 	messages, parseErr := unix.ParseSocketControlMessage(oob[:oobn])
 	var descriptors []int
@@ -147,14 +179,16 @@ func receiveDarwinSocket(connection *net.UnixConn) (int, error) {
 		}
 		descriptors = append(descriptors, fds...)
 	}
-	if readErr != nil || parseErr != nil || !valid || n != 1 || marker[0] != 1 || flags&(unix.MSG_CTRUNC|unix.MSG_TRUNC) != 0 || len(descriptors) != 1 {
+	if readErr != nil || parseErr != nil || !valid || n != 1 || marker[0] != 1 || flags&(unix.MSG_CTRUNC|unix.MSG_TRUNC) != 0 || len(descriptors) == 0 || len(descriptors) > darwinSocketBatch {
 		for _, fd := range descriptors {
 			_ = unix.Close(fd)
 		}
-		return -1, errors.New("protected receiver did not return one socket")
+		return nil, errors.New("protected receiver did not return its sockets")
 	}
-	unix.CloseOnExec(descriptors[0])
-	return descriptors[0], nil
+	for _, fd := range descriptors {
+		unix.CloseOnExec(fd)
+	}
+	return descriptors, nil
 }
 
 // The socket's creation credentials remain the broker's. XNU checks the
@@ -212,8 +246,8 @@ func bindDarwinSocket(ctx context.Context, fd int, address, loopbackCIDR string)
 	return net.FileListener(file)
 }
 
-// ServeSocketChild never regains root: it creates one unbound IPv4 TCP socket
-// under the dedicated receiver UID and hands it to the inherited private channel.
+// ServeSocketChild never regains root: it creates unbound IPv4 TCP sockets
+// under the dedicated receiver UID and hands them to the inherited private channel.
 func ServeSocketChild(ctx context.Context, address, loopbackCIDR string) error {
 	_, rawPort, splitErr := net.SplitHostPort(address)
 	port, portErr := strconv.Atoi(rawPort)
@@ -236,16 +270,20 @@ func ServeSocketChild(ctx context.Context, address, loopbackCIDR string) error {
 		return err
 	}
 	defer connection.Close()
-	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, unix.IPPROTO_TCP)
-	if err != nil {
-		return err
+	fds := make([]int, 0, darwinSocketBatch)
+	for range darwinSocketBatch {
+		fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, unix.IPPROTO_TCP)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(fd)
+		unix.CloseOnExec(fd)
+		fds = append(fds, fd)
 	}
-	defer unix.Close(fd)
-	unix.CloseOnExec(fd)
 	if err = connection.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
-	n, _, err := connection.(*net.UnixConn).WriteMsgUnix([]byte{1}, unix.UnixRights(fd), nil)
+	n, _, err := connection.(*net.UnixConn).WriteMsgUnix([]byte{1}, unix.UnixRights(fds...), nil)
 	if err == nil && n != 1 {
 		return errors.New("incomplete protected socket handoff")
 	}

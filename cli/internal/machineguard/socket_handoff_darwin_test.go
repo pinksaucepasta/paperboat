@@ -61,7 +61,8 @@ func TestDarwinSocketHandoffValidation(t *testing.T) {
 	}{
 		{"single socket", []byte{1}, 1, true},
 		{"missing descriptor", []byte{1}, 0, false},
-		{"multiple descriptors", []byte{1}, 2, false},
+		{"full batch", []byte{1}, darwinSocketBatch, true},
+		{"too many descriptors", []byte{1}, darwinSocketBatch + 1, false},
 		{"invalid marker", []byte{9}, 1, false},
 		{"extra marker byte", []byte{1, 1}, 1, false},
 	} {
@@ -97,11 +98,11 @@ func TestDarwinSocketHandoffValidation(t *testing.T) {
 			if _, _, err = conns[0].WriteMsgUnix(tt.marker, oob, nil); err != nil {
 				t.Fatal(err)
 			}
-			fd, err := receiveDarwinSocket(conns[1])
-			if fd >= 0 {
+			received, err := receiveDarwinSockets(conns[1])
+			for _, fd := range received {
 				defer unix.Close(fd)
 			}
-			if (err == nil) != tt.valid {
+			if (err == nil) != tt.valid || tt.valid && len(received) != tt.count {
 				t.Fatalf("valid=%t error=%v", tt.valid, err)
 			}
 		})

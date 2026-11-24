@@ -150,7 +150,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		for _, address := range []string{"127.100.253.68", "127.100.253.69"} {
-			if exists, _ := darwinAliasExists(ctx, address); exists {
+			if exists, _ := darwinAliasExists(address); exists {
 				_, _ = darwinRun(ctx, "", "/sbin/ifconfig", "lo0", "-alias", address)
 			}
 		}

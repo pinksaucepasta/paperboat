@@ -337,7 +337,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	if err = json.Unmarshal(data, &journal); err != nil {
 		t.Fatal(err)
 	}
-	for len(journal.Names) < 4096 {
+	for len(journal.Names) < maxHostNames {
 		journal.Names[fmt.Sprintf("reserved%d.local.example.test", len(journal.Names))] = "0"
 	}
 	data, err = json.Marshal(journal)

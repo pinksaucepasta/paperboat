@@ -81,7 +81,9 @@ func (c *Client) exchange(ctx context.Context, in request) (response, error) {
 			_ = c.conn.SetDeadline(time.Time{})
 		}
 	}()
-	if err := writeFrame(c.conn, in); err != nil {
+	if err := writeFrame(c.conn, in); errors.Is(err, errFrameSize) {
+		return response{}, err // nothing was written
+	} else if err != nil {
 		err = errors.Join(err, c.conn.Close())
 		c.conn = nil
 		return response{}, err
@@ -117,6 +119,16 @@ func (c *Client) AcquireMachine(ctx context.Context, account, machine, hostname 
 // transaction; until then their addresses stay denied.
 func (c *Client) ApplyPolicy(ctx context.Context) error {
 	_, err := c.exchange(ctx, request{Operation: "apply"})
+	return err
+}
+
+// ReleaseMachines withdraws this connection's listeners in one guard policy change.
+func (c *Client) ReleaseMachines(ctx context.Context, listeners []netip.AddrPort) error {
+	in := request{Operation: "release_all"}
+	for _, listener := range listeners {
+		in.Listeners = append(in.Listeners, listener.String())
+	}
+	_, err := c.exchange(ctx, in)
 	return err
 }
 

@@ -227,12 +227,19 @@ func browserGatewayRoutes(routes map[string]splitdns.BrowserRoute, aliases map[s
 // local certificate service knows a name only after its aliases are replaced, so this runs after
 // ReplaceAliases (issuing first left the gateway without listeners, round 22).
 func (c *Coordinator) issueBrowserRouteCertificates(ctx context.Context, client guardedNameClient, routes, previous map[string]splitdns.BrowserRoute) error {
+	issued := map[string]bool{} // one certificate covers every name under a machine's wildcard
 	for name, route := range routes {
 		if strings.HasPrefix(name, "*.") {
 			continue
 		}
 		if known, ok := previous[name]; ok && known == route {
 			continue
+		}
+		if _, under, found := strings.Cut(name, "."); found && under != c.localDomain() {
+			if issued[under] {
+				continue
+			}
+			issued[under] = true
 		}
 		if _, err := c.issueBrowserCertificate(ctx, client, name, route.MachineID, route.Port); err != nil {
 			return err

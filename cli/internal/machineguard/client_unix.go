@@ -52,8 +52,8 @@ func Connect(ctx context.Context, path string) (*Client, error) {
 	return &Client{conn: conn}, nil
 }
 func writeFrame(writer io.Writer, data []byte) error {
-	if len(data) > 60<<10 {
-		return errors.New("machine guard request too large")
+	if err := checkFrame(data); err != nil {
+		return err
 	}
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
@@ -70,12 +70,7 @@ func readFrame(reader io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	size := binary.BigEndian.Uint32(header[:])
-	if size == 0 || size > 60<<10 {
-		return nil, errors.New("invalid machine guard frame size")
-	}
-	data := make([]byte, int(size))
-	_, err := io.ReadFull(reader, data)
-	return data, err
+	return readFrameBody(reader, size)
 }
 func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, error) {
 	c.mu.Lock()
@@ -113,6 +108,9 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 		return response{}, nil, errors.Join(err, closeErr)
 	}
 	data, err := json.Marshal(in)
+	if err == nil {
+		err = checkFrame(data)
+	}
 	if err != nil {
 		return response{}, nil, err
 	}
@@ -183,6 +181,16 @@ func (c *Client) AcquireMachine(ctx context.Context, account, machine, hostname 
 // transaction; until then their addresses stay denied.
 func (c *Client) ApplyPolicy(ctx context.Context) error {
 	_, _, err := c.exchange(ctx, request{Operation: "apply"})
+	return err
+}
+
+// ReleaseMachines withdraws this connection's listeners in one guard policy change.
+func (c *Client) ReleaseMachines(ctx context.Context, listeners []netip.AddrPort) error {
+	in := request{Operation: "release_all"}
+	for _, listener := range listeners {
+		in.Listeners = append(in.Listeners, listener.String())
+	}
+	_, _, err := c.exchange(ctx, in)
 	return err
 }
 

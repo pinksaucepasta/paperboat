@@ -62,6 +62,9 @@ type Coordinator struct {
 	// browserPending is set while the last reconciliation left browser URLs off because the browser
 	// certificate could not be issued or trusted (guarded by mu); it is retried like a failed reconcile.
 	browserPending bool
+	// overLimit says what of the last reconciliation is above the machine guard's limits and not served on this
+	// computer, or "" (guarded by mu). It is not retried: only a smaller account changes it.
+	overLimit string
 	// namesRefused is set while the guard refused some machine names of the last reconciliation (guarded by mu).
 	namesRefused bool
 	// browserPortsPending is set while a per-port browser listener of the last reconciliation could not be
@@ -553,6 +556,9 @@ func (c *Coordinator) PendingLocalAccessStep() string {
 	if c.browserPortsPending {
 		return "browser_port_listener"
 	}
+	if c.overLimit != "" {
+		return "machine_limit"
+	}
 	return ""
 }
 
@@ -563,6 +569,9 @@ func (c *Coordinator) PendingLocalAccessDetail() string {
 	defer c.mu.Unlock()
 	if c.browserGatewayBusy || c.browserHTTPBusy {
 		return c.browserGatewayOwner
+	}
+	if !c.namesRefused && !c.browserPending && !c.browserPortsPending {
+		return c.overLimit
 	}
 	return ""
 }

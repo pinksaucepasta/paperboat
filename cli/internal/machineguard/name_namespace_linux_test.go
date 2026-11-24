@@ -20,7 +20,7 @@ func TestTwoOSUsersMayUseTheSameMachineName(t *testing.T) {
 	}
 }
 
-// a long-lived machine with peer churn must not fill its 512-name cap with names nothing serves.
+// a long-lived machine with peer churn must not fill its name cap with names nothing serves.
 func TestReservationsOfUnservedNamesAreReleasedAtTheCap(t *testing.T) {
 	g := &guardServer{reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{}, connections: map[controlConn]string{}}
 	live := "live." + testBrowserDomain
@@ -28,13 +28,13 @@ func TestReservationsOfUnservedNamesAreReleasedAtTheCap(t *testing.T) {
 	if err := g.reserveName("1000", live); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 511; i++ {
+	for i := 0; i < maxUserNames-1; i++ {
 		if err := g.reserveName("1000", fmt.Sprintf("gone%d.%s", i, testBrowserDomain)); err != nil {
 			t.Fatalf("name %d refused below the cap: %v", i, err)
 		}
 	}
 	if err := g.reserveName("1000", "new."+testBrowserDomain); err != nil {
-		t.Fatalf("a new name was refused though 511 reserved names are unserved: %v", err)
+		t.Fatalf("a new name was refused though the other reserved names are unserved: %v", err)
 	}
 	if !has(g.reserved.Names, nameKey("1000", live)) || len(g.reserved.Names) != 2 {
 		t.Fatalf("reservations=%d, want the served and the new name", len(g.reserved.Names))

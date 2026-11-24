@@ -12,8 +12,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 )
 
-const MaxBrowserAliases = 128
-
 func numericBrowserLabel(label string) bool {
 	port, err := strconv.Atoi(label)
 	return err == nil && port > 0 && port <= 65535 && strconv.Itoa(port) == label
@@ -78,10 +76,28 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 	if err != nil {
 		return err
 	}
-	newNames, ownedNames := 0, 0
-	for _, owner := range g.reserved.Names {
-		if owner == uid {
-			ownedNames++
+	leaseNames, gateway := map[string]bool{}, false
+	for _, lease := range g.leases {
+		if !gatewayRouting || lease.uid == uid {
+			leaseNames[lease.hostname] = true
+		}
+		if lease.owner == conn && lease.hostname == splitdns.BrowserGatewayHostname && lease.ip == splitdns.BrowserGatewayIP && lease.port == 443 {
+			gateway = true
+		}
+	}
+	reserved, others := newBrowserNames(domain), newBrowserNames(domain)
+	if !gatewayRouting {
+		for name, owner := range g.reserved.Names {
+			if owner != uid {
+				reserved.add(name)
+			}
+		}
+	}
+	for other, values := range g.aliases {
+		if other != conn && g.sameNamespace(other, uid) {
+			for name := range values {
+				others.add(name)
+			}
 		}
 	}
 	for name := range aliases {
@@ -90,65 +106,33 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 			machine, label, err := splitdns.ParseBrowserHostname(name, domain)
 			public = err == nil && label != "" && !splitdns.NumericBrowserLabel(label) && browserAliasTarget(aliases, "*."+machine+"."+domain, domain) != ""
 		}
-		if !public {
+		switch owner, held := g.reserved.Names[nameKey(uid, name)]; {
+		case !public:
 			return errors.New("invalid browser alias")
-		}
-		for reserved, owner := range g.reserved.Names {
-			if owner != uid && !gatewayRouting && browserNamesOverlap(name, reserved, domain) {
-				return errors.New("browser namespace belongs to another OS user")
-			}
-		}
-		if owner, ok := g.reserved.Names[nameKey(uid, name)]; ok {
-			if owner != uid {
-				return errors.New("browser alias belongs to another OS user")
-			}
-		} else {
-			newNames++
-		}
-		found := false
-		for _, lease := range g.leases {
-			if lease.hostname == name && (!gatewayRouting || lease.uid == uid) {
-				return errors.New("browser alias conflicts with a machine name")
-			}
-			if lease.owner == conn && lease.hostname == splitdns.BrowserGatewayHostname && lease.ip == splitdns.BrowserGatewayIP && lease.port == 443 {
-				found = true
-			}
-		}
-		if !found {
+		case reserved.overlaps(name):
+			return errors.New("browser namespace belongs to another OS user")
+		case held && owner != uid:
+			return errors.New("browser alias belongs to another OS user")
+		case leaseNames[name]:
+			return errors.New("browser alias conflicts with a machine name")
+		case !gateway:
 			return errors.New("browser alias requires an owned protected HTTPS listener")
-		}
-		for other, values := range g.aliases {
-			if other != conn && g.sameNamespace(other, uid) {
-				for otherName := range values {
-					if browserNamesOverlap(name, otherName, domain) {
-						return errors.New("browser alias belongs to another connection")
-					}
-				}
-			}
+		case others.overlaps(name):
+			return errors.New("browser alias belongs to another connection")
 		}
 	}
-	if newNames > 0 && (len(g.reserved.Names)+newNames > 4096 || ownedNames+newNames > 512) {
+	newNames, full := g.aliasReservations(uid, aliases)
+	if full {
 		g.pruneNames(uid)
-		newNames, ownedNames = 0, 0
-		for _, owner := range g.reserved.Names {
-			if owner == uid {
-				ownedNames++
-			}
+		if newNames, full = g.aliasReservations(uid, aliases); full {
+			return namesRefusal{reason: "machine guard reservation limit reached for this OS user"}
 		}
-		for name := range aliases {
-			if !has(g.reserved.Names, nameKey(uid, name)) {
-				newNames++
-			}
-		}
-		if newNames > 0 && (len(g.reserved.Names)+newNames > 4096 || ownedNames+newNames > 512) {
-			return errors.New("machine guard reservation limit reached for this OS user")
-		}
-	}
-	previousReservations := maps.Clone(g.reserved.Names)
-	for name := range aliases {
-		g.reserved.Names[nameKey(uid, name)] = uid
 	}
 	if newNames > 0 {
+		previousReservations := maps.Clone(g.reserved.Names)
+		for name := range aliases {
+			g.reserved.Names[nameKey(uid, name)] = uid
+		}
 		if err := g.persist(); err != nil {
 			g.reserved.Names = previousReservations
 			return err
@@ -162,19 +146,59 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 	return nil
 }
 
-// Fixed wildcard reservations exclude overlapping names owned by another user.
-func browserNamesOverlap(a, b, domain string) bool {
-	if a == b {
+// aliasReservations counts the aliases uid does not hold yet, and whether they exceed a reservation limit.
+func (g *guardServer) aliasReservations(uid string, aliases map[string]string) (newNames int, full bool) {
+	for name := range aliases {
+		if !has(g.reserved.Names, nameKey(uid, name)) {
+			newNames++
+		}
+	}
+	return newNames, newNames > 0 && (len(g.reserved.Names)+newNames > maxHostNames || g.ownedNames(uid)+newNames > maxUserNames)
+}
+
+func (g *guardServer) ownedNames(uid string) int {
+	owned := 0
+	for _, owner := range g.reserved.Names {
+		if owner == uid {
+			owned++
+		}
+	}
+	return owned
+}
+
+// browserNames indexes names for overlap checks: a fixed wildcard excludes every name of its machine.
+type browserNames struct {
+	domain         string
+	names, parents map[string]bool
+}
+
+func newBrowserNames(domain string) browserNames {
+	return browserNames{domain: domain, names: map[string]bool{}, parents: map[string]bool{}}
+}
+
+// parent is the wildcard that covers name, or "" for a wildcard or foreign name.
+func (b browserNames) parent(name string) string {
+	machine, _, err := splitdns.ParseBrowserHostname(name, b.domain)
+	if err != nil {
+		return ""
+	}
+	return "*." + machine + "." + b.domain
+}
+
+func (b browserNames) add(name string) {
+	b.names[name] = true
+	if parent := b.parent(name); parent != "" {
+		b.parents[parent] = true
+	}
+}
+
+func (b browserNames) overlaps(name string) bool {
+	if len(b.names) == 0 {
+		return false
+	}
+	if b.names[name] || b.parents[name] {
 		return true
 	}
-	for _, pair := range [][2]string{{a, b}, {b, a}} {
-		if !strings.HasPrefix(pair[0], "*.") {
-			continue
-		}
-		machine, _, err := splitdns.ParseBrowserHostname(pair[1], domain)
-		if err == nil && pair[0] == "*."+machine+"."+domain {
-			return true
-		}
-	}
-	return false
+	parent := b.parent(name)
+	return parent != "" && b.names[parent]
 }

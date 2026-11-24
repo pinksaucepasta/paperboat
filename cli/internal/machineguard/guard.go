@@ -107,6 +107,8 @@ type request struct {
 	Account  string   `json:"account,omitempty"`
 	Machine  string   `json:"machine,omitempty"`
 	Machines []string `json:"machines,omitempty"`
+	// Listeners are the "ip:port" listeners a "release_all" withdraws in one policy change.
+	Listeners []string `json:"listeners,omitempty"`
 	// Handoff asks for a gateway route instead of a listener: the daemon receives one end of a socket pair carrying
 	// each gateway connection attributed to its OS user (FeatureGatewayRouting).
 	Handoff bool `json:"handoff,omitempty"`

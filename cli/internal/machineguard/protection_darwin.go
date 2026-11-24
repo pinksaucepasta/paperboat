@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
 	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -16,13 +18,16 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 var darwinPlatform struct {
 	sync.Mutex
-	cfg     Config
-	aliases map[string]bool
+	cfg      Config
+	aliases  map[string]bool
+	retiring bool            // darwinRetireLater is scheduled
+	active   map[string]bool // addresses the last applied policy serves
 }
 
 func darwinLoadAliases(cfg Config) error {
@@ -55,18 +60,18 @@ func darwinSaveAliases() error {
 	}
 	return darwinWrite(filepath.Join(darwinPlatform.cfg.StateDir, "aliases.json"), data, 0600)
 }
-func darwinAliasExists(ctx context.Context, address string) (bool, error) {
-	output, err := darwinRun(ctx, "", "/sbin/ifconfig", "lo0")
+
+// darwinAliasExists reports whether address is configured: only then can a socket bind it. Listing lo0's addresses
+// per listener (ifconfig, or the routing socket) grows with the machines.
+func darwinAliasExists(address string) (bool, error) {
+	probe, err := net.ListenPacket("udp4", net.JoinHostPort(address, "0"))
+	if errors.Is(err, syscall.EADDRNOTAVAIL) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == "inet" && fields[1] == address {
-			return true, nil
-		}
-	}
-	return false, nil
+	return true, probe.Close()
 }
 func darwinEnsureAlias(ctx context.Context, address string) error {
 	darwinPlatform.Lock()
@@ -78,12 +83,15 @@ func darwinEnsureAliasLocked(ctx context.Context, address string) error {
 	if address == "127.0.0.1" {
 		return nil
 	}
-	exists, err := darwinAliasExists(ctx, address)
+	exists, err := darwinAliasExists(address)
 	if err != nil {
 		return err
 	}
 	if exists && !darwinPlatform.aliases[address] {
 		return errors.New("protected address is configured by another owner")
+	}
+	if darwinPlatform.active != nil {
+		darwinPlatform.active[address] = true // being acquired: a background retire leaves it alone
 	}
 	if exists {
 		return nil
@@ -151,27 +159,95 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	if err = darwinEnsureSSHSourcesLocked(ctx, active); err != nil {
 		return darwinStep("add the managed SSH source addresses", err)
 	}
+	darwinPlatform.active = active
+	return darwinRetireLocked(ctx, len(leases) == 0)
+}
+
+const (
+	darwinRetireConcurrency = 16
+	// darwinRetireBatch bounds the addresses one apply retires: a daemon that stops retires all its machines at once,
+	// and 1000 of them outlasted the deadline and stopped the guard. The PF rules already deny the rest.
+	darwinRetireBatch = 64
+)
+
+// darwinRetireLocked ends the addresses without a listener, a batch now and the others in the background.
+func darwinRetireLocked(ctx context.Context, all bool) error {
+	var retired []string
 	for address := range darwinPlatform.aliases {
-		if active[address] {
-			continue
+		if !darwinPlatform.active[address] {
+			retired = append(retired, address)
 		}
-		// Every port on this address is retired. Kill only its states; never flush
-		// other Paperboat machines, normal loopback traffic, or system PF policy.
-		if _, err = darwinRun(ctx, "", "/sbin/pfctl", "-k", "0.0.0.0/0", "-k", address); err != nil {
-			return err
-		}
-		exists, err := darwinAliasExists(ctx, address)
-		if err != nil {
-			return err
-		}
-		if exists {
-			if _, err = darwinRun(ctx, "", "/sbin/ifconfig", "lo0", "-alias", address); err != nil {
+	}
+	if batch := darwinRetireBatch; len(retired) > batch {
+		if all { // no listener is left: end every machine connection's state at once, and remove the addresses later
+			if _, err := darwinRun(ctx, "", "/sbin/pfctl", "-k", "0.0.0.0/0", "-k", machineloopback.DefaultCIDR); err != nil {
 				return err
 			}
+			batch = 0
 		}
-		delete(darwinPlatform.aliases, address)
+		retired = retired[:batch]
+		if !darwinPlatform.retiring {
+			darwinPlatform.retiring = true
+			time.AfterFunc(time.Second, darwinRetireLater)
+		}
 	}
-	return darwinSaveAliases()
+	return darwinRetireAddresses(ctx, retired)
+}
+
+// darwinRetireAddresses requires darwinPlatform's lock.
+func darwinRetireAddresses(ctx context.Context, retired []string) error {
+	results := make([]error, len(retired))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, darwinRetireConcurrency)
+	for i, address := range retired {
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			results[i] = darwinRetireAddress(ctx, address)
+		})
+	}
+	wg.Wait()
+	for i, address := range retired {
+		if results[i] == nil {
+			delete(darwinPlatform.aliases, address)
+		}
+	}
+	return errors.Join(errors.Join(results...), darwinSaveAliases())
+}
+
+// darwinRetireLater retires one short batch, so a listener request never waits long for the lock, and continues until
+// none is left. Addresses that stay are denied and journaled.
+func darwinRetireLater() {
+	darwinPlatform.Lock()
+	defer darwinPlatform.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var retired []string
+	for address := range darwinPlatform.aliases {
+		if !darwinPlatform.active[address] {
+			retired = append(retired, address)
+		}
+	}
+	if len(retired) == 0 {
+		darwinPlatform.retiring = false
+		return
+	}
+	_ = darwinRetireAddresses(ctx, retired[:min(len(retired), darwinRetireConcurrency)])
+	time.AfterFunc(time.Second, darwinRetireLater)
+}
+
+// darwinRetireAddress ends an address with no listener left. It kills only that address's states; never flush other
+// Paperboat machines, normal loopback traffic, or system PF policy.
+func darwinRetireAddress(ctx context.Context, address string) error {
+	if _, err := darwinRun(ctx, "", "/sbin/pfctl", "-k", "0.0.0.0/0", "-k", address); err != nil {
+		return err
+	}
+	exists, err := darwinAliasExists(address)
+	if err != nil || !exists {
+		return err
+	}
+	_, err = darwinRun(ctx, "", "/sbin/ifconfig", "lo0", "-alias", address)
+	return err
 }
 
 // darwinEnsureSSHSourcesLocked aliases every managed SSH source address (wire.LoopbackSources) on lo0 with one
@@ -226,7 +302,7 @@ func retirePlatform(cfg Config) {
 	// does not route unused127/8 aliases to loopback, so deleting owned aliases is
 	// an additional crash/reboot barrier independent of the retained PF denial.
 	for address := range darwinPlatform.aliases {
-		exists, err := darwinAliasExists(ctx, address)
+		exists, err := darwinAliasExists(address)
 		if err != nil {
 			return
 		}

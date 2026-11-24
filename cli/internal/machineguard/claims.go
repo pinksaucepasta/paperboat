@@ -14,11 +14,6 @@ import (
 // any other claimant may get it (PLAN 3b multi-account hosts 1).
 const claimHold = 7 * 24 * time.Hour
 
-const (
-	maxClaimsPerUID = 512
-	maxHostClaims   = 65533
-)
-
 var errClaimsExhausted = listenerRefusal{reason: "no free local machine address on this computer"}
 
 // claimKey names one machine of one account for one OS user incarnation.
@@ -77,7 +72,7 @@ func (b *claimBook) assign(key claimKey, preferred netip.Addr, now time.Time) (s
 			owned++
 		}
 	}
-	if owned >= maxClaimsPerUID || len(b.Claims) >= maxHostClaims {
+	if owned >= maxUserClaims || len(b.Claims) >= maxHostClaims {
 		return "", errClaimsExhausted
 	}
 	want := preferred.String()

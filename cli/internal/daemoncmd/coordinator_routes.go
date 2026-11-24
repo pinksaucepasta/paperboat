@@ -3,7 +3,6 @@ package daemoncmd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 	"io"
 	"net"
@@ -151,9 +150,11 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 	wanted := make(map[string]*guardedRoute)
 	wantedWeb := make(map[string]guardedWebRoute)
 	names := make(map[string]netip.Addr)
-	aliases := make(map[string]string)
+	aliasSet := browserAliasSet{names: make(map[string]string)}
+	aliases, aliasesRefused := aliasSet.names, false
 	browserRoutes := make(map[string]splitdns.BrowserRoute)
 	conflictedPorts, firstConflictedPort := 0, 0
+	peers, skippedMachines, skippedPorts := routableWithinLimits(peers)
 	var topLevel [][2]string // top-level name, numeric hostname of its port
 	for _, peer := range peers {
 		if peer == nil || !peer.GetApproved() || !peer.GetOnline() || peer.GetAlias() == "" {
@@ -196,18 +197,21 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 					c.resetNameGenerationLocked(ctx)
 					return errors.New("ambiguous browser hostname")
 				}
+				if !aliasSet.add(name, splitdns.BrowserGatewayHostname) {
+					continue
+				}
 				browserRoutes[name] = splitdns.BrowserRoute{Address: ip, Port: port, MachineID: peer.GetPeerId(), HTTPS: port == 443}
-				aliases[name] = splitdns.BrowserGatewayHostname
 				if port == frontDesk {
 					pattern, err := splitdns.BrowserWildcardPattern(lower, c.localDomain())
 					if err != nil {
 						c.resetNameGenerationLocked(ctx)
 						return err
 					}
-					desk := browserRoutes[name]
-					desk.HTTPS = listed.FrontDesk.Scheme == "https" || listed.FrontDesk.Scheme == "" && port == 443
-					browserRoutes[pattern] = desk
-					aliases[pattern] = name
+					if aliasSet.add(pattern, name) {
+						desk := browserRoutes[name]
+						desk.HTTPS = listed.FrontDesk.Scheme == "https" || listed.FrontDesk.Scheme == "" && port == 443
+						browserRoutes[pattern] = desk
+					}
 				}
 				for _, named := range listed.PortNames {
 					if named.Port != port {
@@ -217,9 +221,8 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 					if _, label, err := splitdns.ParseBrowserHostname(namedHost, c.localDomain()); err != nil || label == "" || splitdns.NumericBrowserLabel(label) {
 						continue // the server validates names; a name this computer cannot use is left out alone
 					}
-					if _, exists := browserRoutes[namedHost]; !exists {
+					if _, exists := browserRoutes[namedHost]; !exists && aliasSet.add(namedHost, name) {
 						browserRoutes[namedHost] = browserRoutes[name]
-						aliases[namedHost] = name
 					}
 				}
 				for _, named := range listed.TopLevelNames {
@@ -227,10 +230,6 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 						topLevel = append(topLevel, [2]string{named.Name, name})
 					}
 				}
-			}
-			if len(aliases) > machineguard.MaxBrowserAliases {
-				c.resetNameGenerationLocked(ctx)
-				return fmt.Errorf("local browser routes exceed the limit of %d; remove port names or exported ports", machineguard.MaxBrowserAliases)
 			}
 		}
 		for _, raw := range ports {
@@ -272,11 +271,14 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 		if _, exists := browserRoutes[host]; exists || c.machineAliases[named[0]] || named[0] == "gateway" {
 			continue
 		}
-		browserRoutes[host] = browserRoutes[named[1]]
-		aliases[host] = named[1]
-		if len(aliases) > machineguard.MaxBrowserAliases {
-			c.resetNameGenerationLocked(ctx)
-			return fmt.Errorf("local browser routes exceed the limit of %d; remove port names or exported ports", machineguard.MaxBrowserAliases)
+		if aliasSet.add(host, named[1]) {
+			browserRoutes[host] = browserRoutes[named[1]]
+		}
+	}
+	if detail := overLimitDetail(skippedMachines, skippedPorts, aliasSet.skipped); detail != c.overLimit {
+		c.overLimit = detail
+		if detail != "" {
+			diagnosticlog.TryWarn("this account is above this computer's local access limits; the rest is served", "not_served", detail)
 		}
 	}
 	if conflictedPorts > 0 {
@@ -294,6 +296,10 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 			c.browserGatewayBusy, c.browserGatewayOwner = true, browserGatewayPortOwner()
 			diagnosticlog.TryWarn("browser gateway ports are in use by another program; browser URLs are unavailable until it stops", "owner", c.browserGatewayOwner)
 			aliases = map[string]string{}
+		case errors.Is(err, machineguard.ErrNamesRefused):
+			// This OS user's browser names do not fit the guard: native access and machine names keep working.
+			diagnosticlog.TryWarn("browser names were not published; machine access is unaffected", "error", err)
+			aliases, aliasesRefused = map[string]string{}, true
 		case browserCertificateFailure(err):
 			// Browser trust (for example NSS certutil on Linux) is a prerequisite of browser URLs
 			// only: native machine access and names keep working without them.
@@ -316,7 +322,9 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 		c.resetNameGenerationLocked(ctx)
 		return coordinatorOperationFailure("native_listener", err)
 	}
-	if err := nameClient.ReplaceAliases(ctx, aliases); err != nil {
+	if err := nameClient.ReplaceAliases(ctx, aliases); errors.Is(err, machineguard.ErrNamesRefused) {
+		aliasesRefused = true
+	} else if err != nil {
 		c.resetNameGenerationLocked(ctx)
 		return coordinatorOperationFailure("browser_aliases", err)
 	}
@@ -326,7 +334,7 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 	} else {
 		// The guard published every other name: a refused name degrades only that item (multi-account hosts);
 		// it is retried and pb doctor names the step meanwhile.
-		c.namesRefused = err != nil
+		c.namesRefused = err != nil || aliasesRefused
 		if err != nil {
 			diagnosticlog.TryWarn("some machine names were not published; the others work", "error", err)
 		}
@@ -354,6 +362,17 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 	}
 	cleanup := c.launchCleanupLocked(func() error {
 		var causes []error
+		// One policy change for all of them; each close below then finds its lease already gone. A change per
+		// listener took 350 ms each at 1000 machines, so a few machines leaving outlasted the reconcile.
+		if batch, ok := nameClient.(interface {
+			ReleaseMachines(context.Context, []netip.AddrPort) error
+		}); ok && len(removedRoutes) > 1 {
+			var listeners []netip.AddrPort
+			for _, route := range removedRoutes {
+				listeners = append(listeners, netip.AddrPortFrom(route.address, uint16(route.port)))
+			}
+			causes = append(causes, lifecycleCleanup(batch.ReleaseMachines(ctx, listeners)))
+		}
 		for _, route := range removedRoutes {
 			causes = append(causes, route.close())
 		}

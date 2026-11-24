@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -56,19 +57,13 @@ func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, 
 	if g.certificates[conn] == nil {
 		g.certificates[conn] = map[string]cachedCertificate{}
 	}
-	for name := range g.certificates[conn] {
-		if !g.certificateAuthorizedKey(conn, owner, name) {
-			delete(g.certificates[conn], name)
-		}
-	}
 	cacheKey := alias + "." + domain
 	if cached, ok := g.certificates[conn][cacheKey]; ok && time.Now().Before(cached.renewAt) {
 		g.mu.Unlock()
 		return cached.bundle, nil
 	}
-	if len(g.certificates[conn]) >= MaxBrowserAliases {
-		g.mu.Unlock()
-		return nil, errors.New("local browser certificate capacity reached")
+	if len(g.certificates[conn]) >= maxCachedCertificates {
+		g.pruneCertificates(conn, owner)
 	}
 	ca := g.ca
 	g.mu.Unlock()
@@ -105,7 +100,9 @@ func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, 
 	if g.certificates[conn] == nil {
 		g.certificates[conn] = map[string]cachedCertificate{}
 	}
-	g.certificates[conn][cacheKey] = cachedCertificate{bundle: bundle, renewAt: renewAt}
+	if _, cached := g.certificates[conn][cacheKey]; cached || len(g.certificates[conn]) < maxCachedCertificates {
+		g.certificates[conn][cacheKey] = cachedCertificate{bundle: bundle, renewAt: renewAt}
+	}
 	return bundle, nil
 }
 func (g *guardServer) certificateRequestAuthorizedDomain(conn controlConn, owner, hostname, alias, domain string) bool {
@@ -122,38 +119,43 @@ func (g *guardServer) certificateRequestAuthorizedDomain(conn controlConn, owner
 	}
 	return browserAliasTarget(g.aliases[conn], hostname, domain) != ""
 }
-func (g *guardServer) certificateAuthorizedKey(conn controlConn, owner, key string) bool {
-	domain, err := selectedBrowserDomain(g.cfg.StateDir, owner)
-	if err != nil {
-		return false
-	}
-	alias, label, err := splitdns.ParseBrowserHostname(key, domain)
-	return err == nil && label == "" && g.certificateAuthorizedDomain(conn, owner, alias, domain)
-}
 
 // Registry lock held. Trust never authorizes a requested machine or service.
 func (g *guardServer) certificateAuthorizedDomain(conn controlConn, owner, alias, domain string) bool {
-	selected, err := selectedBrowserDomain(g.cfg.StateDir, owner)
-	if err != nil || selected != domain || g.closing || g.connections[conn] != owner {
+	if !g.ownsHTTPSGateway(conn, owner) {
 		return false
 	}
-	gateway := false
-	for _, lease := range g.leases {
-		if lease.owner == conn && lease.uid == owner && lease.hostname == splitdns.BrowserGatewayHostname && lease.ip == splitdns.BrowserGatewayIP && lease.port == 443 {
-			gateway = true
-			break
+	for name := range g.aliases[conn] {
+		if strings.HasSuffix(name, alias+"."+domain) { // cheap first: this runs per certificate over every alias
+			if machine, ok := g.certificateAlias(conn, name, domain); ok && machine == alias {
+				return true
+			}
 		}
 	}
-	if !gateway {
+	return false
+}
+
+// ownsHTTPSGateway requires the registry lock.
+func (g *guardServer) ownsHTTPSGateway(conn controlConn, owner string) bool {
+	if g.closing || g.connections[conn] != owner {
 		return false
 	}
-	for name, base := range g.aliases[conn] {
-		machine, label, e := splitdns.ParseBrowserHostname(name, domain)
-		if e == nil && machine == alias && (numericBrowserLabel(label) && base == splitdns.BrowserGatewayHostname || label == "" && browserAliasTarget(g.aliases[conn], name, domain) != "") {
+	for _, lease := range g.leases {
+		if lease.owner == conn && lease.uid == owner && lease.hostname == splitdns.BrowserGatewayHostname && lease.ip == splitdns.BrowserGatewayIP && lease.port == 443 {
 			return true
 		}
 	}
 	return false
+}
+
+// certificateAlias is the machine (or top-level) label a registered alias authorizes a certificate for.
+func (g *guardServer) certificateAlias(conn controlConn, name, domain string) (string, bool) {
+	machine, label, err := splitdns.ParseBrowserHostname(name, domain)
+	if err != nil {
+		return "", false
+	}
+	numeric := numericBrowserLabel(label) && g.aliases[conn][name] == splitdns.BrowserGatewayHostname
+	return machine, numeric || label == "" && browserAliasTarget(g.aliases[conn], name, domain) != ""
 }
 func prepareNamespaceCA(state, domain string, existingOnly bool) (*splitdns.CA, error) {
 	directory := filepath.Join(state, "certificates", domain)
@@ -279,9 +281,21 @@ func certificateRenewAt(bundle *CertificateBundle, now time.Time) (time.Time, er
 
 // Registry lock held; stale aliases cannot consume the per-connection leaf bound.
 func (g *guardServer) pruneCertificates(conn controlConn, owner string) {
-	for alias := range g.certificates[conn] {
-		if !g.certificateAuthorizedKey(conn, owner, alias) {
-			delete(g.certificates[conn], alias)
+	if len(g.certificates[conn]) == 0 {
+		return
+	}
+	domain, err := selectedBrowserDomain(g.cfg.StateDir, owner)
+	live := map[string]bool{}
+	if err == nil && g.ownsHTTPSGateway(conn, owner) {
+		for name := range g.aliases[conn] {
+			if alias, ok := g.certificateAlias(conn, name, domain); ok {
+				live[alias+"."+domain] = true
+			}
+		}
+	}
+	for key := range g.certificates[conn] {
+		if !live[key] {
+			delete(g.certificates[conn], key)
 		}
 	}
 }

@@ -71,7 +71,7 @@ func TestDarwinUninstallOwnedLifecycle(t *testing.T) {
 	if existing, e := exec.Command("/sbin/pfctl", "-a", anchor, "-sr").Output(); e != nil || strings.TrimSpace(string(existing)) != "" {
 		t.Fatal("fixture anchor not empty", e)
 	}
-	aliasExists, err := darwinAliasExists(t.Context(), "127.100.253.71")
+	aliasExists, err := darwinAliasExists("127.100.253.71")
 	if err != nil || aliasExists {
 		t.Fatal("fixture alias unavailable", err)
 	}

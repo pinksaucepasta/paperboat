@@ -226,11 +226,8 @@ func readFrame(r io.Reader, v any) error {
 		return err
 	}
 	n := binary.LittleEndian.Uint32(h[:])
-	if n == 0 || n > 64<<10 {
-		return errors.New("invalid machine guard frame")
-	}
-	data := make([]byte, n)
-	if _, err := io.ReadFull(r, data); err != nil {
+	data, err := readFrameBody(r, n)
+	if err != nil {
 		return err
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -248,8 +245,8 @@ func writeFrame(w io.Writer, v any) error {
 	if err != nil {
 		return err
 	}
-	if len(data) == 0 || len(data) > 64<<10 {
-		return errors.New("invalid machine guard frame size")
+	if err := checkFrame(data); err != nil {
+		return err
 	}
 	var h [4]byte
 	binary.LittleEndian.PutUint32(h[:], uint32(len(data)))
