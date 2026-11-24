@@ -110,7 +110,7 @@ func TestMachineListShowsAndFiltersTags(t *testing.T) {
 
 func TestStatusShowsMachineTags(t *testing.T) {
 	var out strings.Builder
-	writeStatus(&out, localapi.Snapshot{DaemonState: "ready", Machines: []localapi.MachineStatus{{ID: "m1", Alias: "db", Tags: []string{"tag:ci", "tag:prod"}}, {ID: "m2", Alias: "web"}}})
+	writeStatus(&out, localapi.Snapshot{DaemonState: "ready", Machines: []localapi.MachineStatus{{ID: "m1", Alias: "db", Tags: []string{"tag:ci", "tag:prod"}}, {ID: "m2", Alias: "web"}}}, false)
 	if !strings.Contains(out.String(), "  Tags: tag:ci, tag:prod") || strings.Count(out.String(), "Tags:") != 1 {
 		t.Fatalf("%s", out.String())
 	}

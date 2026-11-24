@@ -274,7 +274,7 @@ func TestWriteStatusIncludesOperationalFieldsAndSafeHealth(t *testing.T) {
 		Machines: []localapi.MachineStatus{{ID: "machine_1", Alias: "Studio Mac", Eligible: true, RuntimeState: "ready", Generation: 4, LastObservedAt: &now, ActiveConsumers: 2, SelectedPath: "relay", RelayRegion: "bom", TransferReadiness: "ready", PreviewReadiness: "degraded", SSHReadiness: "unavailable"}},
 	}
 	var output bytes.Buffer
-	writeStatus(&output, snapshot)
+	writeStatus(&output, snapshot, false)
 	for _, expected := range []string{"Daemon: degraded", "Control plane is unavailable", "Studio Mac (machine_1)", "Runtime: ready", "Path: relay/bom", "Consumers: 2", "Transfer: ready", "Preview: degraded", "SSH: unavailable"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("output missing %q:\n%s", expected, output.String())

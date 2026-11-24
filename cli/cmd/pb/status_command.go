@@ -36,13 +36,14 @@ func statusCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				refreshSSHReadiness(&machine, func(id string) error { return sshServerAnswers(command.Context(), command, id) })
 				snapshot.Machines = []localapi.MachineStatus{machine}
 			}
 			jsonOutput, _ := command.Flags().GetBool("json")
 			if jsonOutput {
 				return writeStatusJSON(command.OutOrStdout(), snapshot)
 			}
-			writeStatus(command.OutOrStdout(), snapshot)
+			writeStatus(command.OutOrStdout(), snapshot, len(args) == 1)
 			return nil
 		},
 	}

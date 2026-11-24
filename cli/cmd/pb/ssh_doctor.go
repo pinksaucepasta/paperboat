@@ -72,45 +72,22 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err := managedssh.ProbeAgentIdentity(command.Context(), agentSocket, identity.Fingerprint, 5*time.Second); err != nil {
 		return commandPreparationFailure{step: prepareSSHAgent, cause: err}
 	}
-	d, err := buildDeps(actionContext(command, args))
-	if err != nil {
-		return err
-	}
-	if d.peerApplications == nil {
-		return errors.New("Paperboat peer transport is unavailable")
-	}
-	operationID := newSSHOperationID()
-	defer releaseOperationCredentials(command.Context(), d, machine.ID, operationID, "managed_ssh")
-	descriptor := pendingSSHDescriptor(machine, operationID)
 	probeCtx, cancel := context.WithTimeout(command.Context(), 20*time.Second)
 	defer cancel()
-	connection, err := d.peerApplications.DialSSH(probeCtx, sshConnectInfo(machine, descriptor, client.Workspace(), target.OSUser), operationID)
+	connection, reader, done, err := dialSSHServer(probeCtx, actionContext(command, args), client, machine, target)
 	if err != nil {
-		return commandPreparationFailure{step: prepareSSHTransport, cause: err}
-	}
-	host, err := managedssh.AliasHost(machine.Alias, domain)
-	if err != nil {
-		_ = connection.Close()
 		return err
 	}
-	// The host writes a refusal line before sshd's banner when it knows sshd will refuse (macOS Remote Login), and
-	// ends the stream with nothing when it does not serve it; read that first, and stop waiting for a silent
-	// stream when the probe's time is up.
-	stopWatch := context.AfterFunc(probeCtx, func() { _ = connection.Close() })
-	reader := bufio.NewReader(connection)
-	if refused := managedssh.ReadServerStart(reader); refused != nil {
-		stopWatch()
-		_ = connection.Close()
-		return refused
+	defer done()
+	host, err := managedssh.AliasHost(machine.Alias, domain)
+	if err != nil {
+		return err
 	}
 	signer, err := sshCertificateSigner(actionContext(command, args), client, machine, target, identity.Signer)
 	if err != nil {
-		stopWatch()
-		_ = connection.Close()
 		return commandPreparationFailure{step: prepareSSHCertificate, cause: err}
 	}
 	authErr := managedssh.ProbeSSHAuthentication(probeCtx, bufferedStream{ReadWriteCloser: connection, reader: reader}, net.JoinHostPort(host, strconv.Itoa(int(target.Port))), target.OSUser, signer, keys.Keys)
-	stopWatch()
 	closeErr := connection.Close()
 	if authErr != nil {
 		if changed := pendingHostKeyFailure(command.Context(), client, machine, authErr); changed != nil {

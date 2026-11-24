@@ -45,20 +45,24 @@ func selectStatusMachine(machines []localapi.MachineStatus, target string) (loca
 	return localwait.ResolveMachine(machines, target)
 }
 
-func writeStatus(output io.Writer, snapshot localapi.Snapshot) {
+// writeStatus prints the snapshot. sshChecked: SSH was asked just now; stored readiness only says it is set up ("on").
+func writeStatus(output io.Writer, snapshot localapi.Snapshot, sshChecked bool) {
 	fmt.Fprintf(output, "Daemon: %s  Generation: %d  Observed: %s\n", snapshot.DaemonState, snapshot.Generation, snapshot.ObservedAt.Format(time.RFC3339))
 	for _, health := range snapshot.Health {
 		fmt.Fprintf(output, "Health: %s: %s  Recovery: %s\n", health.Severity, health.Title, health.Recovery)
 	}
 	for _, machine := range snapshot.Machines {
-		path := statusPath(machine)
+		path, ssh := statusPath(machine), machine.SSHReadiness
+		if ssh == "ready" && !sshChecked {
+			ssh = "on"
+		}
 		observed := "never"
 		if machine.LastObservedAt != nil {
 			observed = machine.LastObservedAt.Format(time.RFC3339)
 		}
 		fmt.Fprintf(output, "\n%s (%s)\n", machine.Alias, machine.ID)
 		fmt.Fprintf(output, "  Runtime: %s  Eligible: %t  Generation: %d  Last observed: %s\n", machine.RuntimeState, machine.Eligible, machine.Generation, observed)
-		fmt.Fprintf(output, "  Path: %s  Consumers: %d  Transfer: %s  Preview: %s  SSH: %s\n", path, machine.ActiveConsumers, machine.TransferReadiness, machine.PreviewReadiness, machine.SSHReadiness)
+		fmt.Fprintf(output, "  Path: %s  Consumers: %d  Transfer: %s  Preview: %s  SSH: %s\n", path, machine.ActiveConsumers, machine.TransferReadiness, machine.PreviewReadiness, ssh)
 		if len(machine.Tags) > 0 {
 			fmt.Fprintf(output, "  Tags: %s\n", strings.Join(machine.Tags, ", "))
 		}
@@ -314,6 +318,15 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 	probes = append(probes, doctorDependenciesOf(command.Context()).hostd()...)
 	probes = append(probes, doctorSSHSourceProbes()...)
 	probes = append(probes, doctorpkg.Probe{Code: "managed_ssh_port", Run: doctorSSHPortCheck})
+	sshMachines := snapshot.Machines
+	if machine != nil {
+		sshMachines = []localapi.MachineStatus{*machine}
+	}
+	for _, m := range sshMachines {
+		if m.SSHReadiness == "ready" && (machine != nil || m.ID == ownMachineID()) {
+			probes = append(probes, doctorSSHServerProbe(command, m))
+		}
+	}
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
@@ -583,7 +596,7 @@ func doctorMachineProbes(machine localapi.MachineStatus) []doctorpkg.Probe {
 		{Code: "ssh_readiness", Run: func(context.Context) doctorpkg.Check {
 			switch machine.SSHReadiness {
 			case "ready":
-				return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusPass, Summary: "Managed SSH is ready."}
+				return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusPass, Summary: "Managed SSH is set up."}
 			case "degraded":
 				return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusWarning, Summary: "Managed SSH requires attention.", Recovery: "Run pb ssh doctor for the selected machine."}
 			default:
