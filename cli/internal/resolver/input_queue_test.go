@@ -31,7 +31,7 @@ func TestTerminalInputQueueReconcileResendsWhatTheHostHasNotAnswered(t *testing.
 			t.Fatal(err)
 		}
 	}
-	decided, resend, _ := queue.Reconcile(2)
+	decided, resend, _ := queue.Reconcile(2, nil)
 	if len(decided) != 1 || decided[0].Sequence != 1 {
 		t.Fatalf("decided=%#v", decided)
 	}
@@ -45,7 +45,7 @@ func TestTerminalInputQueueReconcileResendsWhatTheHostHasNotAnswered(t *testing.
 	for _, s := range []uint64{2, 3, 4, 5} {
 		queue.Complete(s)
 	}
-	if decided, resend, unconfirmed := queue.Reconcile(5); len(decided)+len(resend)+len(unconfirmed) != 0 {
+	if decided, resend, unconfirmed := queue.Reconcile(5, nil); len(decided)+len(resend)+len(unconfirmed) != 0 {
 		t.Fatalf("answered input came back: %#v %#v", decided, resend)
 	}
 }
@@ -60,7 +60,7 @@ func TestTerminalInputQueueReconcileFollowsANewAttachment(t *testing.T) {
 		}
 	}
 	queue.Complete(1)
-	decided, resend, unconfirmed := queue.Reconcile(0)
+	decided, resend, unconfirmed := queue.Reconcile(0, nil)
 	if len(decided) != 0 || len(resend) != 0 || len(unconfirmed) != 2 {
 		t.Fatalf("decided=%#v resend=%#v unconfirmed=%#v", decided, resend, unconfirmed)
 	}

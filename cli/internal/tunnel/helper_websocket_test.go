@@ -890,13 +890,52 @@ func TestReattachResendsUnansweredInputExactlyOnce(t *testing.T) {
 		t.Fatalf("sent %v, want the host's last sequence, then the rest, then new input", sent)
 	}
 	// The keystroke the host had passed is settled; the rest stay queued until the host answers.
-	decided, resend, _ := target.InputQueue.Reconcile(2)
+	decided, resend, _ := target.InputQueue.Reconcile(2, nil)
 	var pending []uint64
 	for _, item := range resend {
 		pending = append(pending, item.Sequence)
 	}
 	if len(decided) != 0 || fmt.Sprint(pending) != "[2 3 4]" {
 		t.Fatalf("decided %d, still queued %v; want 0 and [2 3 4]", len(decided), pending)
+	}
+}
+
+// A probe attaches beside the link it replaces, so a key can still arrive on the old link after the new one reconciled.
+// It went out on the dead link only: lost, and every later key was refused as out of order.
+func TestInputOnAReplacedLinkIsSentByTheNewLink(t *testing.T) {
+	target := &resolver.TerminalTarget{SessionID: "ses_1", InputQueue: resolver.NewTerminalInputQueue(8)}
+	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_lease":1,"attachment_id":"att_1","input_sequence":0,"session":{"snapshot":{"generation":1}}}}`)}
+	replaced := newHelperTerminalConn(&capturedHelperMessageConnection{}, target, 1)
+	if err := replaced.finishAttachment(attached, true, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	message := &capturedHelperMessageConnection{}
+	current := newHelperTerminalConn(message, target, 1)
+	if err := current.finishAttachment(attached, true, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, live := range []bool{true, false} { // the old link still open, then ended
+		if !live {
+			replaced.finish(1, ErrHandedOver)
+		}
+		if n, err := replaced.Write([]byte("a")); n != 1 || err != nil {
+			t.Fatalf("write on the replaced link: %d, %v", n, err)
+		}
+	}
+	if _, err := current.Write([]byte("b")); err != nil {
+		t.Fatal(err)
+	}
+	current.finish(0, nil)
+	message.mu.Lock()
+	defer message.mu.Unlock()
+	var sent []string
+	for _, record := range message.writes {
+		if record[0] == 1 {
+			sent = append(sent, fmt.Sprintf("%d:%s", binary.BigEndian.Uint64(record[5:13]), helperTestInputBody(t, record)))
+		}
+	}
+	if strings.Join(sent, " ") != "1:a 2:a 3:b" {
+		t.Fatalf("the new link sent %v", sent)
 	}
 }
 

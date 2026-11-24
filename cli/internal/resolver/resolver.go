@@ -30,6 +30,13 @@ type TerminalInputQueue struct {
 	limit   int
 	pending map[uint64]TerminalInput
 	room    chan struct{} // closed when an answer frees space; nil while nobody waits
+	owner   TerminalInputSender
+}
+
+// TerminalInputSender is the link that sends the queue's input: the one that reconciled last.
+type TerminalInputSender interface {
+	// SendPending sends, in order, queued input this link has not sent yet, and returns the last sequence sent.
+	SendPending() (uint64, error)
 }
 
 func NewTerminalInputQueue(limit int) *TerminalInputQueue {
@@ -126,6 +133,31 @@ func (q *TerminalInputQueue) Complete(sequence uint64) {
 	q.freedLocked()
 }
 
+// Owner is the link that must send input queued now, or fallback before any link reconciled. A link replaced by a newer
+// one still takes keys already on their way to it; left to the old link they were never sent and the terminal went deaf.
+func (q *TerminalInputQueue) Owner(fallback TerminalInputSender) TerminalInputSender {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.owner == nil {
+		return fallback
+	}
+	return q.owner
+}
+
+// After is the pending input past sequence, in order.
+func (q *TerminalInputQueue) After(sequence uint64) []TerminalInput {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var items []TerminalInput
+	for pending, item := range q.pending {
+		if pending > sequence {
+			items = append(items, item)
+		}
+	}
+	slices.SortFunc(items, func(a, b TerminalInput) int { return cmp.Compare(a.Sequence, b.Sequence) })
+	return items
+}
+
 // Reconcile settles pending input against the host's last input sequence after
 // a reattach. Entries before it were decided by the host, but their answers
 // were lost: they are returned as decided and never sent again. The rest are
@@ -133,13 +165,14 @@ func (q *TerminalInputQueue) Complete(sequence uint64) {
 // sequence (the host answers it from its journal) and every later one.
 // Unconfirmed is input a host that does not know this numbering never answered:
 // it may be a different shell, so it is not sent again and the user is told.
-func (q *TerminalInputQueue) Reconcile(hostSequence uint64) (decided, resend, unconfirmed []TerminalInput) {
+func (q *TerminalInputQueue) Reconcile(hostSequence uint64, owner TerminalInputSender) (decided, resend, unconfirmed []TerminalInput) {
 	if q == nil {
 		return nil, nil, nil
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	defer q.freedLocked()
+	q.owner = owner
 	for sequence, item := range q.pending {
 		if sequence < hostSequence {
 			decided = append(decided, item)

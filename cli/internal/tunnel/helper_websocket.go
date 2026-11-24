@@ -206,6 +206,8 @@ type helperTerminalConn struct {
 	ackNotify                 chan struct{}
 	ackMu                     sync.Mutex
 	inputQueue                *resolver.TerminalInputQueue
+	sendMu                    sync.Mutex // orders input on this link; held by one sender
+	sentSequence              uint64     // last queued input sent on this link; sendMu
 	closing                   atomic.Bool
 	handedOver                atomic.Bool
 	finishOnce                sync.Once
@@ -390,7 +392,7 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 	return c.finishAttachment(frame, existingSession, snapshotLatest, fromSequence)
 }
 
-func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession bool, snapshotLatest, fromSequence uint64) error {
+func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession bool, snapshotLatest, fromSequence uint64) (err error) {
 	var response struct {
 		Result struct {
 			ResumeSecret    []byte `json:"resume_secret"`
@@ -420,7 +422,15 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	c.target.ResumeSecret = response.Result.ResumeSecret
 	c.streamID = response.Result.StreamID
 	c.inputSeq.Store(response.Result.InputSequence)
-	decided, resend, unconfirmed := c.inputQueue.Reconcile(response.Result.InputSequence)
+	c.sendMu.Lock() // a key queued through the link this one replaces waits for the resend
+	defer c.sendMu.Unlock()
+	defer func() {
+		if err != nil {
+			c.finish(1, err) // a sender waiting for this link must not wait for its write loop
+		}
+	}()
+	decided, resend, unconfirmed := c.inputQueue.Reconcile(response.Result.InputSequence, c)
+	c.sentSequence = response.Result.InputSequence
 	for _, pending := range decided {
 		diagnosticlog.TryInfo("terminal input reconciled without a result", "sequence", pending.Sequence)
 	}
@@ -450,6 +460,7 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 			return errors.Join(ErrTransportLost, err)
 		}
 		c.inputSeq.Store(pending.Sequence)
+		c.sentSequence = pending.Sequence
 	}
 	go c.writeLoop()
 	go c.readLoop()
@@ -862,21 +873,42 @@ func (c *helperTerminalConn) Write(p []byte) (int, error) {
 		chunks = append(chunks, resolver.TerminalInput{Sequence: sequence, Data: rest[:size]})
 		rest = rest[size:]
 	}
+	owner := c.inputQueue.Owner(c)
+	sent, err := owner.SendPending()
+	if owner != c {
+		// The newer link sends it, now or with its own successor's resend.
+		sent, err = chunks[len(chunks)-1].Sequence, nil
+	}
 	written := 0
 	for _, chunk := range chunks {
-		c.inputSeq.Store(chunk.Sequence)
-		if len(chunk.Data) == 1 && chunk.Data[0] == 0x03 {
-			c.startHold(chunk.Sequence) // output is held from here until the host answers this key
+		if chunk.Sequence <= sent {
+			written += len(chunk.Data)
 		}
-		if err := c.queueWrite(c.inputWrites, helperWrite{messageType: helperBinaryMessage, data: c.inputFrame(chunk), result: make(chan error, 1)}); err != nil {
-			return written, err
-		}
-		written += len(chunk.Data)
+	}
+	if err != nil && written < len(p) {
+		return written, err
 	}
 	if written < len(p) {
 		return written, resolver.ErrTerminalInputQueueFull
 	}
 	return written, nil
+}
+
+// SendPending implements resolver.TerminalInputSender.
+func (c *helperTerminalConn) SendPending() (uint64, error) {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	for _, input := range c.inputQueue.After(c.sentSequence) {
+		c.inputSeq.Store(input.Sequence)
+		if len(input.Data) == 1 && input.Data[0] == 0x03 {
+			c.startHold(input.Sequence) // output is held from here until the host answers this key
+		}
+		if err := c.queueWrite(c.inputWrites, helperWrite{messageType: helperBinaryMessage, data: c.inputFrame(input), result: make(chan error, 1)}); err != nil {
+			return c.sentSequence, err
+		}
+		c.sentSequence = input.Sequence
+	}
+	return c.sentSequence, nil
 }
 
 // inputFrame is one sequenced terminal input message.
