@@ -90,24 +90,10 @@ func (s *Service) TerminalSessionInventory(ctx context.Context, account string, 
 	return s.terminalSessionInventory(ctx, account, nil, opts)
 }
 
-// terminalSessionInventory lists the catalog, with live detail unless sessions narrows it (their callers describe).
-func (s *Service) terminalSessionInventory(ctx context.Context, account string, sessions []string, opts InventoryOptions) ([]SharedTerminalSession, int, error) {
-	if opts.Limit < 1 || opts.Limit > maximumTerminalCatalog || opts.Offset < 0 {
-		return nil, 0, ErrTerminalSessionInvalidName
-	}
-	if scope, ok := workspace.FromContext(ctx); ok {
-		if err := workspace.Validate(ctx, s.db, account, scope); err != nil {
-			return nil, 0, err
-		}
-	}
-	workspaceSet, workspaceTeamID := workspaceTeamArgument(ctx)
-	var teamID any
-	if workspaceTeamID.Valid {
-		teamID = workspaceTeamID.String
-	}
-	// sessions holds only candidates (own, bound to an active team of the account, browser policy); the role checks
-	// below decide. Without the candidate clause terminal_session_role ran for every terminal in the database.
-	query := `WITH browser_candidates AS (
+// sessions holds only candidates (own, bound to an active team of the account, browser policy); the role checks
+// below decide. Without the candidate clause terminal_session_role ran for every terminal in the database.
+// OFFSET 0 keeps the role from being inlined into each of its uses, so it is computed once per row.
+const terminalInventoryQuery = `WITH browser_candidates AS (
  SELECT p.terminal_session_id id FROM terminal_browser_access_policies p
  JOIN user_machine_terminal_sessions target ON target.id=p.terminal_session_id
  JOIN users actor ON actor.id=$1 AND actor.status='active'
@@ -125,22 +111,39 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
  SELECT s.id,s.name,s.launch_cwd,s.desired_state,s.runtime_state,s.last_activity_at,s.closed_at,s.closed_reason,s.is_default,s.created_at,s.updated_at,s.owner_account,s.owner_team_id,'machine'::text kind,m.id target_id,m.alias target_name,m.id machine_id,m.environment_id,m.installation_generation,m.state,m.online,m.configured_capabilities @> ARRAY['terminal_host'] AND m.observed_capabilities @> ARRAY['terminal_host'] terminal_ready FROM user_machine_terminal_sessions s JOIN user_machines m ON m.id=s.user_machine_id WHERE s.deleted_at IS NULL AND m.deleted_at IS NULL
  AND (s.owner_account=$1 OR s.id IN (SELECT id FROM browser_candidates) OR s.id IN (SELECT b.resource_id FROM team_resource_bindings b
   JOIN team_members tm ON tm.team_id=b.team_id AND tm.account_id=$1 AND tm.active WHERE b.resource_kind='terminal_session' AND b.active)))
-	 SELECT x.id,x.name,x.launch_cwd,x.desired_state,x.runtime_state,x.last_activity_at,x.closed_at,x.closed_reason,x.is_default,x.owner_account,x.kind,x.target_id,x.target_name,x.machine_id,x.environment_id,x.installation_generation,x.state,x.online,x.terminal_ready,coalesce(b.team_id,''),coalesce(t.generation,0),coalesce(terminal_session_role($1,x.id),''),x.owner_account=$1,EXISTS(SELECT 1 FROM team_terminal_session_grants ag WHERE ag.team_id=b.team_id AND ag.terminal_session_id=x.id AND ag.audience='all_members' AND ag.active),bc.id IS NOT NULL,x.created_at,x.updated_at,coalesce(x.owner_team_id,'')
+	 SELECT x.id,x.name,x.launch_cwd,x.desired_state,x.runtime_state,x.last_activity_at,x.closed_at,x.closed_reason,x.is_default,x.owner_account,x.kind,x.target_id,x.target_name,x.machine_id,x.environment_id,x.installation_generation,x.state,x.online,x.terminal_ready,coalesce(b.team_id,''),coalesce(t.generation,0),r.role,x.owner_account=$1,EXISTS(SELECT 1 FROM team_terminal_session_grants ag WHERE ag.team_id=b.team_id AND ag.terminal_session_id=x.id AND ag.audience='all_members' AND ag.active),bc.id IS NOT NULL,x.created_at,x.updated_at,coalesce(x.owner_team_id,''),count(*) OVER()
 	 FROM sessions x LEFT JOIN team_resource_bindings b ON b.resource_kind='terminal_session' AND b.resource_id=x.id AND b.active LEFT JOIN teams t ON t.team_id=b.team_id AND t.deleted_at IS NULL
 	 LEFT JOIN browser_candidates bc ON bc.id=x.id
+	 CROSS JOIN LATERAL (SELECT CASE WHEN x.owner_account=$1 THEN 'owner' ELSE coalesce(terminal_session_role($1,x.id),'') END role OFFSET 0) r
 	WHERE ($2::text[] IS NULL OR x.id=ANY($2))
 	  AND (NOT $3::boolean
 	    OR ($4::text IS NULL AND x.owner_account=$1 AND x.owner_team_id IS NULL)
 	    OR ($4::text IS NOT NULL AND (
 	      (x.owner_account=$1 AND x.owner_team_id=$4)
-	      OR (b.team_id=$4 AND (x.owner_account=$1 OR terminal_session_role($1,x.id) IN ('viewer','interactive')))
+	      OR (b.team_id=$4 AND (x.owner_account=$1 OR r.role IN ('viewer','interactive')))
 	      OR bc.id IS NOT NULL)))
-	  AND (x.owner_account=$1 OR terminal_session_role($1,x.id) IN ('viewer','interactive') OR bc.id IS NOT NULL)
+	  AND (x.owner_account=$1 OR r.role IN ('viewer','interactive') OR bc.id IS NOT NULL)
  AND ($5='' OR position(lower($5) in lower(x.name||' '||x.target_name||' '||x.id))>0)
  AND ($6='' OR CASE WHEN x.desired_state<>'open' OR x.runtime_state IN ('closed','exited','deleted') THEN 'closed' WHEN x.runtime_state='running' THEN 'running' ELSE 'unavailable' END=$6)
  AND ($7='' OR ($7='mine' AND x.owner_account=$1) OR ($7='shared' AND x.owner_account<>$1) OR x.owner_account=$7)
  AND ($8::boolean IS NULL OR (x.desired_state<>'open' OR x.runtime_state IN ('closed','exited','deleted'))=$8)
  AND ($9='' OR x.machine_id=$9)`
+
+// terminalSessionInventory lists the catalog, with live detail unless sessions narrows it (their callers describe).
+func (s *Service) terminalSessionInventory(ctx context.Context, account string, sessions []string, opts InventoryOptions) ([]SharedTerminalSession, int, error) {
+	if opts.Limit < 1 || opts.Limit > maximumTerminalCatalog || opts.Offset < 0 {
+		return nil, 0, ErrTerminalSessionInvalidName
+	}
+	if scope, ok := workspace.FromContext(ctx); ok {
+		if err := workspace.Validate(ctx, s.db, account, scope); err != nil {
+			return nil, 0, err
+		}
+	}
+	workspaceSet, workspaceTeamID := workspaceTeamArgument(ctx)
+	var teamID any
+	if workspaceTeamID.Valid {
+		teamID = workspaceTeamID.String
+	}
 	var closed any
 	if opts.Closed != nil {
 		closed = *opts.Closed
@@ -153,16 +156,13 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
 	}
 	defer tx.Rollback(ctx)
 	var total int
-	if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+query+") inventory", args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
 	// Closed sessions list newest closed first (a session closed without a timestamp counts from its last update);
 	// the rest by name.
 	order := "lower(x.name),x.id"
 	if (opts.Closed != nil && *opts.Closed) || opts.State == "closed" {
 		order = "coalesce(x.closed_at,x.updated_at) DESC,x.id"
 	}
-	rows, err := tx.Query(ctx, query+" ORDER BY "+order+" LIMIT $10 OFFSET $11", append(args, opts.Limit, opts.Offset)...)
+	rows, err := tx.Query(ctx, terminalInventoryQuery+" ORDER BY "+order+" LIMIT $10 OFFSET $11", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -179,7 +179,7 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
 		var allMembers bool
 		var observedTerminal bool
 		var browserCandidate bool
-		if err = rows.Scan(&v.ID, &v.Name, &v.StartedIn, &v.DesiredState, &runtimeState, &lastActive, &closedAt, &closedReason, &isDefault, &v.OwnerAccount, &v.Target.Kind, &v.Target.ID, &v.Target.Name, &v.Target.MachineID, &v.Target.EnvironmentID, &v.Target.MachineGeneration, &state, &online, &observedTerminal, &v.Sharing.TeamID, &v.Sharing.Generation, &role, &v.CanManage, &allMembers, &browserCandidate, &v.CreatedAt, &v.UpdatedAt, &v.OwnerTeamID); err != nil {
+		if err = rows.Scan(&v.ID, &v.Name, &v.StartedIn, &v.DesiredState, &runtimeState, &lastActive, &closedAt, &closedReason, &isDefault, &v.OwnerAccount, &v.Target.Kind, &v.Target.ID, &v.Target.Name, &v.Target.MachineID, &v.Target.EnvironmentID, &v.Target.MachineGeneration, &state, &online, &observedTerminal, &v.Sharing.TeamID, &v.Sharing.Generation, &role, &v.CanManage, &allMembers, &browserCandidate, &v.CreatedAt, &v.UpdatedAt, &v.OwnerTeamID, &total); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}
@@ -230,6 +230,12 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
 		return nil, 0, err
 	}
 	rows.Close()
+	// A page past the end has no row to carry the count.
+	if total == 0 && opts.Offset > 0 {
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+terminalInventoryQuery+") inventory", args...).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, 0, err
 	}
