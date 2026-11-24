@@ -57,7 +57,7 @@ func (e commandPreparationFailure) Error() string {
 	case prepareOpenSSH:
 		return "A supported OpenSSH client is unavailable. Install OpenSSH or repair its PATH entry, then retry `pb ssh doctor`."
 	case prepareSSHConfiguration:
-		return "Paperboat's managed OpenSSH configuration is not ready. Run `pb login` again to rewrite it, then retry `pb ssh doctor`."
+		return "Paperboat's managed OpenSSH configuration is not ready. ~/.ssh/config needs the line `Include ~/.ssh/paperboat_config # paperboat-managed-ssh-include-v1` at the top, below an empty line; put it back if it is missing. Paperboat rewrites a missing ~/.ssh/paperboat_config while its service runs (`pb status`). Then retry `pb ssh doctor`."
 	case prepareSSHIdentity:
 		return "Paperboat's managed SSH key is not ready on this computer. Run `pb login` again, then retry `pb ssh doctor`."
 	case prepareSSHAgent:

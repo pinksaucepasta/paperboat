@@ -465,6 +465,15 @@ func TestOpenSSHConfigInstallReplacesAnEarlierFormatItWrote(t *testing.T) {
 	if !bytes.Contains(readOpenSSHTestFile(t, ownedPath), []byte("    CertificateFile ")) {
 		t.Fatal("the earlier fragment was not replaced")
 	}
+	if err := os.Remove(ownedPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatalf("restore a deleted fragment: %v", err)
+	}
+	if err := ValidateOpenSSHConfig(config); err != nil {
+		t.Fatal(err)
+	}
 	rewrite(append(readOpenSSHTestFile(t, ownedPath), "# edited\n"...), false)
 	if _, err := InstallOpenSSHConfig(config); !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("an edited fragment was replaced: %v", err)

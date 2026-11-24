@@ -64,6 +64,9 @@ func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []strin
 		if err != nil {
 			return managedssh.Destination{}, friendlyCommandError(err)
 		}
+		if err := requireManagedSSHConfiguration(); err != nil {
+			return managedssh.Destination{}, err
+		}
 		// The daemon already knows when managed SSH cannot work (for example the account's client-key limit):
 		// say so, instead of letting OpenSSH fail with "Permission denied (publickey)".
 		if err := sshTargetHealth(ctx.Context, machine.ID, machine.Alias); err != nil {

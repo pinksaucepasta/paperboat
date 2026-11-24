@@ -10,5 +10,8 @@ import (
 )
 
 func executeManagedSSH(cobraCommand *cobra.Command, _ *command.Context, _ api.UserMachine, destination managedssh.Destination, passthrough []string, includePassthrough bool, environment []string) error {
+	if err := requireManagedSSHConfiguration(); err != nil {
+		return err
+	}
 	return (managedssh.OpenSSHExecutor{}).Execute(cobraCommand.Context(), "ssh", openSSHArguments(destination, passthrough, includePassthrough), environment)
 }
