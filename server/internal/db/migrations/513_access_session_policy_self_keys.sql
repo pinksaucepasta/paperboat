@@ -1,25 +1,17 @@
 -- +goose Up
 -- An access session is read only by its own two endpoints' peer documents (peersessions/network.go grant query), but its
--- write published their bare ids, which are peer keys of every document of the account: prod 2026-11-25, ~31 session
--- writes/min kept a 310-peer account at ~450 document builds/min. A session write now names 'self:<endpoint id>', a key
--- only the endpoint's own document holds (policy_cache.go policyKeys), and the machine_access topic that follows it
--- wakes the host's daemon without naming the machine to the document cache. Everything else publishes as before.
+-- write published their bare ids, which are peer keys of every document of the account (prod 2026-11-25: ~31 session
+-- writes/min in a 310-peer account). Expand step: a session write names 'self:<endpoint id>' (a key only the endpoint's
+-- own document holds, policy_cache.go policyKeys) as well as the bare ids, which the previous server still needs during
+-- a rollout or after a rollback. The contract step drops the bare ids once no previous server can serve.
 -- Function bodies only; no table, trigger or data changes.
 SET LOCAL lock_timeout = '5s';
 SELECT pg_advisory_xact_lock(1885686843);
 
 -- +goose StatementBegin
--- publish_machine_topic('machine_access') for a session write: the session's own trigger already named its documents.
+-- publish_machine_topic('machine_access') for a session write; the contract step stops naming the machine to the cache.
 CREATE FUNCTION paperboat.publish_access_session_topic(machine_ids text[]) RETURNS void
-    LANGUAGE sql AS $$
- WITH bumped AS (
-  INSERT INTO paperboat.machine_topic_generations(machine_id,topic,generation,updated_at)
-  SELECT m.id,'machine_access',1,now() FROM paperboat.user_machines m
-  WHERE m.id = ANY (machine_ids)
-  ON CONFLICT (machine_id,topic) DO UPDATE SET generation=paperboat.machine_topic_generations.generation+1,updated_at=now()
-  RETURNING machine_id)
- SELECT pg_notify('machine_events',machine_id) FROM bumped;
-$$;
+    LANGUAGE sql AS $$ SELECT paperboat.publish_machine_topic(machine_ids, 'machine_access') $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
@@ -50,7 +42,7 @@ BEGIN
         terminal_role, terminal_grant_generation, terminal_binding_generation, terminal_membership_generation, machine_service_port FROM old_sessions
        EXCEPT SELECT id, user_machine_id, user_id, cli_client_session_id, state, revoked_at, expires_at, capabilities, team_id, terminal_session_id,
         terminal_role, terminal_grant_generation, terminal_binding_generation, terminal_membership_generation, machine_service_port FROM new_sessions)) c,
-      LATERAL unnest(ARRAY['self:' || c.user_machine_id, 'self:' || c.cli_client_session_id]) k));
+      LATERAL unnest(ARRAY[c.user_machine_id, c.cli_client_session_id, 'self:' || c.user_machine_id, 'self:' || c.cli_client_session_id]) k));
   RETURN NULL;
 END $$;
 -- +goose StatementEnd
@@ -86,7 +78,7 @@ BEGIN
   -- Grants and admissions name the client endpoint and the machine, before and after; not their accounts, so an exec
   -- does not drop every other document of the account. A lazy policy has no client endpoint: its account.
   WHEN 'user_machine_access_sessions' THEN
-    PERFORM paperboat.publish_peer_policy(ARRAY['self:' || r.user_machine_id, 'self:' || r.cli_client_session_id]);
+    PERFORM paperboat.publish_peer_policy(ARRAY[r.user_machine_id, r.cli_client_session_id, 'self:' || r.user_machine_id, 'self:' || r.cli_client_session_id]);
   WHEN 'inspector_credentials' THEN
     PERFORM paperboat.publish_peer_policy(ARRAY[r.native_machine_id, r.native_cli_session_id]
       || CASE WHEN TG_OP = 'UPDATE' THEN ARRAY[OLD.native_machine_id, OLD.native_cli_session_id] ELSE '{}'::text[] END);
