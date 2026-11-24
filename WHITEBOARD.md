@@ -1,8 +1,91 @@
 # Paperboat whiteboard
 
-Remaining items are post-launch scope (user decision 2026-09-13).
+Everything here is after launch unless its group says otherwise (user decision 2026-09-13).
 
-## Generic UDP support — later
+## Soon: right after the smoke
+
+### Plan grants in the customer console — after launch (2026-11-18)
+
+A support plan grant (admin panel, `plan_grant`) is a workspace row with a product but no Stripe customer or subscription, and the
+customer billing API does not say so. The console therefore shows a granted workspace like a paid one: Manage billing (the portal
+needs a Stripe customer), seat changes (need a subscription) and top-ups (need a customer) are offered and fail, and Upgrade is
+hidden while the product code is set. Add a `granted` flag to the customer workspace answer, hide those controls and show "Plan
+granted until <date>" with Upgrade still available (a checkout replaces the grant). Revoking a grant on a workspace that never had a
+customer resets it to Free, so only the running grant is affected.
+
+Decided for plan grants (2026-11-18): a grant keeps the workspace's `bandwidth_anchor`, as any cancelled-and-repurchased Stripe
+workspace does; seats are capped at the team member maximum (128) with no floor against current members; a revoke that races a
+succeeded checkout whose webhook has not arrived loses to the payment.
+
+### Drop control_tunnel_nodes.capacity_limit
+drop control_tunnel_nodes.capacity_limit one deploy after nothing reads it
+
+### Next server deploy after this release: drop recipes.source_format
+Migration 447 made `recipes.source_format` optional (the server no longer writes it: one HuJSON file format). The server of the deploy that ships 447 no longer reads the column either; the migration that drops the column ships one deploy later (AGENTS.md: a column the previous server reads is dropped one deploy after the code stops reading it): `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.recipes DROP COLUMN source_format;` (forward-only Down).
+
+### Global edges: verify without an own hostname (2026-11-24)
+Customer edges are verified by their pinned node identity, so they need no hostname or public certificate. Only a global (operator) edge must serve a
+publicly trusted certificate for its own name (`server/internal/selfhost/ingress.go`), so each new global edge needs one hand-made DNS record and
+`--endpoint-host`. Simplest fix: check global edges the same pinned way, or through the platform wildcard certificate every edge already holds.
+
+### Scale: peer-network config fan-out
+Machines get deltas since the signed configuration delta landed (`ConfigurationDelta`). Left: check in production that "peer network configuration
+slow" builds and predicate-lock pressure on a 100+ machine account are really gone; if not, cap the build cost per account.
+
+## Before launch: decide
+
+### DMCA designated agent — after launch (user 2026-11-19)
+
+- Register the agent at dmca.copyright.gov ($6, 3 years), using the address already on the legal pages and abuse@mail.paperboat.cloud.
+- The form needs a phone number: use a forwarding number (e.g. Google Voice), never a personal mobile. The site shows none.
+- Stripe requires a public support phone (shown on receipts) and will not remove it: swap it for the same forwarding number.
+- Amend the designation when the company is incorporated.
+
+### Flood protection (2026-11-20)
+Plan bandwidth limits stop big transfers, not floods of tiny requests; per-address limits stop one attacker, not a flood from many addresses (DDoS) against a preview or tunnel. Later: DDoS protection in front of the edges (e.g. Cloudflare Spectrum or an anycast scrubbing provider) and per-route request shedding.
+
+## Workspaces, plans and admin panel
+
+### Per-feature switches for a whole workspace (user 2026-11-24)
+
+A switch per feature that turns it fully on or off for a whole workspace (for example terminals, exec, SSH, file transfer, previews,
+tunnels, ENV, recordings). Off means off everywhere: the server refuses it, every `pb` command and console page says it is turned off,
+and what is already running stops. Open: who flips it (the workspace's owners and admins, Paperboat's operators in the admin panel, or
+both), whether a team can also lock a feature on, and how it sits next to the existing team access rules.
+
+### Every plan limit editable in the admin panel (user 2026-11-24)
+
+Today the panel changes the Free monthly allowance and a product's allowance, and overrides counts for one workspace. Plan-wide speed
+caps (slow speed after the allowance, relay speed, terminal cap), count limits (machines, previews and tunnels, browser terminals,
+public TCP, viewers) and the team per-seat allowance are server configuration and need a restart. Make all of them editable per plan
+in the panel, audited, and picked up by servers, edges and relays without a restart. Check first whether the panel's team allowance
+field changes a paid team's pool at all (the pool is TeamPerSeatBytes times seats).
+
+### Regions per plan (user 2026-11-24)
+
+Let operators choose, per plan, which managed regions a workspace may be placed in (for example Free only in one region), in the
+admin panel. Today a region can only be created, changed, enabled, disabled or replaced for everyone. Needs: the rule applied when a
+workspace's primary and fallback regions are chosen, a defined move when a plan changes (upgrade, downgrade, grant ending) or the rule
+changes, what the fallback is when only one region is allowed, and relays decided too (they carry traffic when machines cannot
+connect directly). Self-hosted regions are never limited.
+
+### More global preview/tunnel domains from the admin panel — after launch (user 2026-11-24)
+
+One global domain serves every preview and tunnel today (server setting; its wildcard certificate is issued, renewed and sent to every ready edge
+by the server). Later: a list of global domains managed in the admin panel (add, verify, pause, remove), one wildcard certificate and wildcard
+DNS record per domain on every edge, and a rule for which domain a new name gets (a default, or the user's choice).
+
+### Admin panel: actions with no backend yet — after launch (2026-11-18)
+
+Support, Sentry and abuse dispositions; backup and maintenance writes; selfhost verify-ingress and pools as an operator;
+usage-key and mint-key lists (the panel asks for ids today); release-authority approve/reject and staged rollout; SSH CA
+list and revoke; a server API to pre-mint or cancel a `pbh` enrolment code (today `pbh selfhost code` mints it on the
+node, 15 min). Launch-day operator needs (operator management and MFA reset, session revoke, plan grants, server-node
+resume) are being built before launch.
+
+## Previews, tunnels and network
+
+### Generic UDP support — later
 
 Recorded 2026-09-07 by Codex from the user's direction.
 
@@ -15,8 +98,45 @@ UDP is deferred, not part of the current HTTP/HTTPS/WebSocket and raw TCP delive
 Internal QUIC support does not constitute generic UDP forwarding. Define actual client UX,
 limits and acceptance before implementation; this note is not implementation/deployment evidence.
 
+### Tunnel redirect and rewrite rules like Cloudflare — after launch (user 2026-11-18)
 
-## CLI UX review and fixes — before customizable shortcuts
+Today a tunnel has simple path redirects plus header and URL rewrite rules. After launch, research what Cloudflare
+offers (Redirect Rules, Bulk Redirects, Page Rules, Transform Rules: www ↔ apex, HTTP → HTTPS, wildcard and regex
+matches, query-string handling, status codes 301/302/307/308, conditions on host/path/header/country) and implement
+the useful set for tunnels and custom domains.
+
+### Priority relays in more regions — after launch
+
+Recorded 2026-10-23 at the user's direction (a Pro extra, not affordable yet). More managed relay
+regions with priority capacity for paid plans, so relay-only paths stay fast far from today's edges.
+Revisit once revenue covers the extra servers.
+
+Container mode, recorded 2026-10-23 with the entry above: today `pb` runs in Docker only as a full
+systemd container (`--privileged`, systemd as PID 1). The standard shape (Tailscale, cloudflared) is an
+official image: `pb daemon` in the foreground as the main process, pairing from a one-time key in an
+environment variable, state on a volume, no extra privileges. Covers Docker hosts, Kubernetes and CI.
+
+### Dual-stack edges (IPv6) — after launch (coordinator decision 2026-11-12)
+
+The launch edges are Hetzner hosts with native IPv6 (falkenstein-1 already listens on it); no AAAA record points at them yet. Later: AAAA for the edge,
+API and preview wildcard names, then owner IP rules and `--host-header` checked with real IPv6 client addresses (the IPv6 part of row X-20).
+
+### Edge and relay regions by where machines are — after launch (user 2026-11-20)
+
+- Launch with one edge+relay region in the US and one in the EU; add the next region (likely Singapore for Asia/India) when machines there reach about 10–15% of active machines.
+- Record a country per machine and per sign-up: GeoIP of the connecting public IP at enrollment/attach (store the country only, never the address); admin shows active machines and sign-ups by country. Today nothing stores a location (`users`, `user_machines` have no country; PostHog GeoIP is on for the marketing site only).
+- Relays need no change: machines already measure every relay and pick the best (`cli/internal/peertransport/tailnet/regional_selection.go`).
+- Edges do: an account's edge pair is chosen when its first machine attaches and kept while healthy (`server/internal/edgeset/reconcile.go` `EnsureTx`, `select.go` `choose`), so a new closer edge only gets new accounts. Move existing accounts make-before-break: the machine opens a carrier to the new edge, the new edge serves once its previews/tunnels are ready, the old one drains its open requests and is dropped. Prior art: cloudflared keeps several connections to different colos and replaces them one at a time. Test: a preview keeps serving during the move.
+
+### Congestion control: BBRv3 in the quic-go fork — after launch, when funded
+
+- Today we ship BBRv1 (Hysteria's port) in our quic-go fork (`github.com/pinksaucepasta/quic-go`, branch `paperboat`); it is the only sender for every connection.
+- Later, when funded: port BBRv3 (Google, IETF draft-ietf-ccwg-bbr; Chrome quiche `bbr2` code) into the fork and re-run the benchmark, including the fairness and relay-limit tests.
+- Reason: v3 fixes v1's loss blindness and unfairness.
+
+## Terminal, console and CLI
+
+### CLI UX review and fixes — before customizable shortcuts
 
 Recorded 2026-09-08 by Codex from the user's direction.
 
@@ -33,7 +153,7 @@ interface rather than hiding confusing commands.
 
 This is a future discussion/review item, not implementation authorization or a new launch gate.
 
-## Browser terminal over WebTransport — planned direction
+### Browser terminal over WebTransport — planned direction
 
 Recorded 2026-09-26 at the user's direction. Use WebTransport for the browser terminal,
 over HTTP/3 and QUIC. Prefer one WebTransport path over maintaining WebTransport and WSS
@@ -48,31 +168,7 @@ plane. Before selecting a fallback, test real browsers and restrictive networks,
 output, resize, replay, background-tab recovery, reconnect, revocation and cleanup. This is
 planning direction only, not implementation or deployment evidence.
 
-## Remote desktop beta — deferred former Task 38
-
-Moved from TRACKER.md on 2026-09-08 by Codex at user direction. Not scheduled,
-not a launch requirement and not a Task 45 acceptance dependency.
-
-When selected, integrate one existing third-party implementation and an explicitly
-authorized native TCP/UDP adapter. Reuse Task 20/23 evidence and resolve current
-prerequisites at activation. Define supported OS/provider/protocol versions, a named
-owner and bounded effort before implementation. Do not build encoders, display/audio/input
-stacks, drivers or a streaming engine, or expand core transport support implicitly.
-
-Require actual pairing, per-resource control authorization, account/device isolation,
-revocation, audit, cleanup, latency and degraded relay behavior on the declared matrix.
-Userspace WireGuard alone does not prove compatibility. Preserve security and publish
-honest support limitations; the beta must not block native SSH/editor workflows.
-
-## Tunnel-only mode without a Paperboat machine (and an official container image)
-
-`pb tunnel run --token <token>` for a Docker container, Kubernetes pod or CI job, like
-`cloudflared tunnel run --token`: nothing joins the account and nothing installs into
-the system; it only forwards a tunnel to the app next to it. Needs a tunnel token with
-rotation and one more admission path. Decision (2026-10-20): not for launch; until then
-every tunnel runs on an enrolled Paperboat machine.
-
-## Console talks to the local `pb` (browser ↔ local daemon bridge)
+### Console talks to the local `pb` (browser ↔ local daemon bridge)
 
 When the console runs on a computer that has `pb` signed in to the same account, the page
 could use that local `pb` instead of our servers and edges. Candidate uses:
@@ -89,32 +185,16 @@ Private Network Access, Safari blocks), pairing so other websites can't use it, 
 fallback to the normal path when no local `pb` is present, and not ending up with two code
 paths per feature. Not for launch (user, 2026-10-21).
 
-## Priority relays in more regions — after launch
+### Terminal recordings: asciicast v3 and player features — after launch (user 2026-11-17)
 
-Recorded 2026-10-23 at the user's direction (a Pro extra, not affordable yet). More managed relay
-regions with priority capacity for paid plans, so relay-only paths stay fast far from today's edges.
-Revisit once revenue covers the extra servers.
+Today recordings are asciicast v2 segments, `pb recordings export` writes v2, and the console replays with the same
+wterm + Ghostty renderer as live sessions (seek, 1–8× speed; the CLI also has `--idle-limit`). Decision: keep v2 and our
+own player for launch (v2 is what most tools read; one renderer keeps replay identical to live). Later, in order:
+idle limit in the console player; markers and keyboard shortcuts in our player; optional
+`pb recordings export --format v3` (asciicast v3: relative intervals, marker/exit events, header term metadata) with v2
+staying the default. Not planned: switching to asciinema-player (it brings a second terminal emulator).
 
-Container mode, recorded 2026-10-23 with the entry above: today `pb` runs in Docker only as a full
-systemd container (`--privileged`, systemd as PID 1). The standard shape (Tailscale, cloudflared) is an
-official image: `pb daemon` in the foreground as the main process, pairing from a one-time key in an
-environment variable, state on a volume, no extra privileges. Covers Docker hosts, Kubernetes and CI.
-
-## Dual-stack edges (IPv6) — after launch (coordinator decision 2026-11-12)
-
-The launch edges are Hetzner hosts with native IPv6 (falkenstein-1 already listens on it); no AAAA record points at them yet. Later: AAAA for the edge,
-API and preview wildcard names, then owner IP rules and `--host-header` checked with real IPv6 client addresses (the IPv6 part of row X-20).
-
-## Batched integration queue — after launch (user decision 2026-11-12)
-
-Consider a bors-style queue that tests an actual combined batch once and bisects failed
-batches, if native GitHub per-PR queue throughput proves insufficient. Before launch keep
-GitHub's native queue with five concurrent speculative builds, rebase merges and the fast-PR /
-heavy-merge-group split. Native merge limits do not amortize CI across PRs. Prior art:
-[bors-ng batching](https://bors.tech/documentation/) and
-[GitHub merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
-
-## Exec round trips: what is left — after launch
+### Exec round trips: what is left — after launch
 
 Measured 2026-11-12: one `pb exec` over a 290 ms path took ~12 dependent round trips. Fixed 2026-11-16 (1f9007a39): the per-exec
 network refresh (2-5 round trips) is gone. Fixed 2026-11-16 (FIX-EXECRTT): exec runs on one stream whose credential, preface, hello and
@@ -124,7 +204,75 @@ start go out in one flight, and the peer association lingers 5 s after its last 
 
 - Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it).
 
-## Remove the reliance on the Tailscale fork — after launch (user decision 2026-11-13)
+### Remote desktop beta — deferred former Task 38
+
+Moved from TRACKER.md on 2026-09-08 by Codex at user direction. Not scheduled,
+not a launch requirement and not a Task 45 acceptance dependency.
+
+When selected, integrate one existing third-party implementation and an explicitly
+authorized native TCP/UDP adapter. Reuse Task 20/23 evidence and resolve current
+prerequisites at activation. Define supported OS/provider/protocol versions, a named
+owner and bounded effort before implementation. Do not build encoders, display/audio/input
+stacks, drivers or a streaming engine, or expand core transport support implicitly.
+
+Require actual pairing, per-resource control authorization, account/device isolation,
+revocation, audit, cleanup, latency and degraded relay behavior on the declared matrix.
+Userspace WireGuard alone does not prove compatibility. Preserve security and publish
+honest support limitations; the beta must not block native SSH/editor workflows.
+
+## Install and platforms
+
+### Tunnel-only mode without a Paperboat machine (and an official container image)
+
+`pb tunnel run --token <token>` for a Docker container, Kubernetes pod or CI job, like
+`cloudflared tunnel run --token`: nothing joins the account and nothing installs into
+the system; it only forwards a tunnel to the app next to it. Needs a tunnel token with
+rotation and one more admission path. Decision (2026-10-20): not for launch; until then
+every tunnel runs on an enrolled Paperboat machine.
+
+### macOS Developer ID signing — after launch
+
+Release builds are ad-hoc signed only (`.github/workflows/release.yml`), so macOS treats every `pb` update as a new app: the local-network permission prompt returns after each update and the identity macOS keys permissions on is not stable. Needs an Apple Developer Program membership (paid, user decision 2026-11-16: not now), a Developer ID Application certificate in CI secrets, `codesign --options runtime` with that identity and notarization (`notarytool`) in the release job, and a check that an update keeps the local-network grant.
+
+### Windows without App Installer: install OpenSSH from Microsoft's MSI (user 2026-11-21)
+On machines without App Installer/winget for LocalSystem (plain Windows Server, Windows Sandbox), `pb install` now fails visibly instead of setting up managed SSH. Direction: install Microsoft's signed OpenSSH MSI (PowerShell/Win32-OpenSSH release, pinned version, Authenticode check; `msiexec /i OpenSSH-Win64.msi /qn ADDLOCAL=Server`), as Ansible and Chocolatey do. Same rule for `pb update`, which now rolls back there. Start when the user says.
+
+## Servers and scale
+
+### Self-hosted control server through pbh — after launch (user 2026-11-19)
+
+- `pbh` already installs self-hosted relays and edges. Extend it to install the whole server (API, database, console), so a company can run Paperboat entirely on its own machines.
+- Needs real work first: database setup and upgrades, sign-in without our WorkOS account, email, TLS and domains, backups, and updates through the same signed release path.
+
+### Multi-region control servers — after launch (user 2026-11-19)
+
+- Route the one API address to the nearest healthy region with a DNS load balancer (e.g. Cloudflare geo steering), like Tailscale's single control address. `pb` and the console stay unchanged.
+- Each region's server already reads from its own replica once it has caught up with the client's commit position (`PAPERBOAT_DATABASE_REPLICA_DSN`); writes go to the primary.
+- Server test speed: split the PostgreSQL `-race` suite across hosts and cache unchanged packages (about 25–30 min today).
+
+### Before running a second server: per-server limits (2026-11-20)
+Relay speed sharing (each account's relay budget split by per-relay demand), sign-up/sign-in rate limits and abuse-report rate limits live in one server's memory. Before a second server runs, move them to Postgres or a shared store, so two servers do not double the limits.
+
+## SDK
+
+### SDK, direct API and MCP — after launch (user 2026-11-16)
+
+We need a Go SDK (sdk/go exists in part), a direct token-authenticated HTTP API that ships with it (scoped like a recipe,
+attributed in Activity; API tokens were replaced by recipes), and an MCP server / agent skill so AI agents can use Paperboat.
+Design each when it is picked up; earlier F24 design notes are in git history (WHITEBOARD before 2026-11-16).
+
+## Engineering and held items
+
+### Batched integration queue — after launch (user decision 2026-11-12)
+
+Consider a bors-style queue that tests an actual combined batch once and bisects failed
+batches, if native GitHub per-PR queue throughput proves insufficient. Before launch keep
+GitHub's native queue with five concurrent speculative builds, rebase merges and the fast-PR /
+heavy-merge-group split. Native merge limits do not amortize CI across PRs. Prior art:
+[bors-ng batching](https://bors.tech/documentation/) and
+[GitHub merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
+
+### Remove the reliance on the Tailscale fork — after launch (user decision 2026-11-13)
 
 The CLI's peer data plane builds on our fork github.com/pinksaucepasta/tailscale (WireGuard/magicsock/DERP-style relay, netstack). Carrying a fork means rebasing on every upstream release, owning its security fixes, and a large dependency surface for what we use. Goal: depend only on upstream libraries (wireguard-go, gvisor netstack, quic-go) or our own small packages, with no fork in go.mod. Steps to plan: inventory every fork package we import (cli/internal/peertransport/*, mesh, DERP map, tsnet-like pieces), classify each as "upstream library exists", "our code already replaces it", or "needs a small own implementation"; replace one area at a time behind the existing peer transport interfaces with device checks per area (direct path, relay, NAT rebind, update handover). Keep wire compatibility only with the current main (zero-users rule). Related: post-launch year plan (shed the fork).
 
@@ -148,33 +296,7 @@ benchmark lost up to 1.5 %. Tune before measuring under loss (two windows-test V
 loss + 100 ms: transfer rate, terminal echo, network switch). `cli/upstream/PATCHES.md` names fork commit
 ac1095ce while both go.mod files pin 2d32e5f0.
 
-## macOS Developer ID signing — after launch
-
-Release builds are ad-hoc signed only (`.github/workflows/release.yml`), so macOS treats every `pb` update as a new app: the local-network permission prompt returns after each update and the identity macOS keys permissions on is not stable. Needs an Apple Developer Program membership (paid, user decision 2026-11-16: not now), a Developer ID Application certificate in CI secrets, `codesign --options runtime` with that identity and notarization (`notarytool`) in the release job, and a check that an update keeps the local-network grant.
-
-## SDK, direct API and MCP — after launch (user 2026-11-16)
-
-We need a Go SDK (sdk/go exists in part), a direct token-authenticated HTTP API that ships with it (scoped like a recipe,
-attributed in Activity; API tokens were replaced by recipes), and an MCP server / agent skill so AI agents can use Paperboat.
-Design each when it is picked up; earlier F24 design notes are in git history (WHITEBOARD before 2026-11-16).
-
-## Terminal recordings: asciicast v3 and player features — after launch (user 2026-11-17)
-
-Today recordings are asciicast v2 segments, `pb recordings export` writes v2, and the console replays with the same
-wterm + Ghostty renderer as live sessions (seek, 1–8× speed; the CLI also has `--idle-limit`). Decision: keep v2 and our
-own player for launch (v2 is what most tools read; one renderer keeps replay identical to live). Later, in order:
-idle limit in the console player; markers and keyboard shortcuts in our player; optional
-`pb recordings export --format v3` (asciicast v3: relative intervals, marker/exit events, header term metadata) with v2
-staying the default. Not planned: switching to asciinema-player (it brings a second terminal emulator).
-
-## Tunnel redirect and rewrite rules like Cloudflare — after launch (user 2026-11-18)
-
-Today a tunnel has simple path redirects plus header and URL rewrite rules. After launch, research what Cloudflare
-offers (Redirect Rules, Bulk Redirects, Page Rules, Transform Rules: www ↔ apex, HTTP → HTTPS, wildcard and regex
-matches, query-string handling, status codes 301/302/307/308, conditions on host/path/header/country) and implement
-the useful set for tunnels and custom domains.
-
-## Held for after launch — decided 2026-11-18
+### Held for after launch — decided 2026-11-18
 
 - **Server breach readiness** (decided 2026-11-18): one break-glass operator action that rotates every account's
   SSH CA, the machine-trusted signing keys and session keys and signs out every browser, CLI, API and recipe session,
@@ -207,108 +329,3 @@ the useful set for tunnels and custom domains.
   console check of the narrow-terminal hint (headless runs are fixed at 120 columns).
 - **Edge error pages:** four 401 answers (bad/expired token, duplicate cookies, malformed machine token, anonymous
   non-navigation) — keep only if they never differ between an existing private name and a missing one.
-
-## Admin panel: actions with no backend yet — after launch (2026-11-18)
-
-Support, Sentry and abuse dispositions; backup and maintenance writes; selfhost verify-ingress and pools as an operator;
-usage-key and mint-key lists (the panel asks for ids today); release-authority approve/reject and staged rollout; SSH CA
-list and revoke; a server API to pre-mint or cancel a `pbh` enrolment code (today `pbh selfhost code` mints it on the
-node, 15 min). Launch-day operator needs (operator management and MFA reset, session revoke, plan grants, server-node
-resume) are being built before launch.
-
-## Plan grants in the customer console — after launch (2026-11-18)
-
-A support plan grant (admin panel, `plan_grant`) is a workspace row with a product but no Stripe customer or subscription, and the
-customer billing API does not say so. The console therefore shows a granted workspace like a paid one: Manage billing (the portal
-needs a Stripe customer), seat changes (need a subscription) and top-ups (need a customer) are offered and fail, and Upgrade is
-hidden while the product code is set. Add a `granted` flag to the customer workspace answer, hide those controls and show "Plan
-granted until <date>" with Upgrade still available (a checkout replaces the grant). Revoking a grant on a workspace that never had a
-customer resets it to Free, so only the running grant is affected.
-
-Decided for plan grants (2026-11-18): a grant keeps the workspace's `bandwidth_anchor`, as any cancelled-and-repurchased Stripe
-workspace does; seats are capped at the team member maximum (128) with no floor against current members; a revoke that races a
-succeeded checkout whose webhook has not arrived loses to the payment.
-
-## DMCA designated agent — after launch (user 2026-11-19)
-
-- Register the agent at dmca.copyright.gov ($6, 3 years), using the address already on the legal pages and abuse@mail.paperboat.cloud.
-- The form needs a phone number: use a forwarding number (e.g. Google Voice), never a personal mobile. The site shows none.
-- Stripe requires a public support phone (shown on receipts) and will not remove it: swap it for the same forwarding number.
-- Amend the designation when the company is incorporated.
-
-## Self-hosted control server through pbh — after launch (user 2026-11-19)
-
-- `pbh` already installs self-hosted relays and edges. Extend it to install the whole server (API, database, console), so a company can run Paperboat entirely on its own machines.
-- Needs real work first: database setup and upgrades, sign-in without our WorkOS account, email, TLS and domains, backups, and updates through the same signed release path.
-
-## Multi-region control servers — after launch (user 2026-11-19)
-
-- Route the one API address to the nearest healthy region with a DNS load balancer (e.g. Cloudflare geo steering), like Tailscale's single control address. `pb` and the console stay unchanged.
-- Each region's server already reads from its own replica once it has caught up with the client's commit position (`PAPERBOAT_DATABASE_REPLICA_DSN`); writes go to the primary.
-- Server test speed: split the PostgreSQL `-race` suite across hosts and cache unchanged packages (about 25–30 min today).
-
-## Scale: peer-network config fan-out
-Machines get deltas since the signed configuration delta landed (`ConfigurationDelta`). Left: check in production that "peer network configuration
-slow" builds and predicate-lock pressure on a 100+ machine account are really gone; if not, cap the build cost per account.
-
-## Drop control_tunnel_nodes.capacity_limit
-drop control_tunnel_nodes.capacity_limit one deploy after nothing reads it
-
-## Next server deploy after this release: drop recipes.source_format
-Migration 447 made `recipes.source_format` optional (the server no longer writes it: one HuJSON file format). The server of the deploy that ships 447 no longer reads the column either; the migration that drops the column ships one deploy later (AGENTS.md: a column the previous server reads is dropped one deploy after the code stops reading it): `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.recipes DROP COLUMN source_format;` (forward-only Down).
-
-## Edge and relay regions by where machines are — after launch (user 2026-11-20)
-
-- Launch with one edge+relay region in the US and one in the EU; add the next region (likely Singapore for Asia/India) when machines there reach about 10–15% of active machines.
-- Record a country per machine and per sign-up: GeoIP of the connecting public IP at enrollment/attach (store the country only, never the address); admin shows active machines and sign-ups by country. Today nothing stores a location (`users`, `user_machines` have no country; PostHog GeoIP is on for the marketing site only).
-- Relays need no change: machines already measure every relay and pick the best (`cli/internal/peertransport/tailnet/regional_selection.go`).
-- Edges do: an account's edge pair is chosen when its first machine attaches and kept while healthy (`server/internal/edgeset/reconcile.go` `EnsureTx`, `select.go` `choose`), so a new closer edge only gets new accounts. Move existing accounts make-before-break: the machine opens a carrier to the new edge, the new edge serves once its previews/tunnels are ready, the old one drains its open requests and is dropped. Prior art: cloudflared keeps several connections to different colos and replaces them one at a time. Test: a preview keeps serving during the move.
-
-## Before running a second server: per-server limits (2026-11-20)
-Relay speed sharing (each account's relay budget split by per-relay demand), sign-up/sign-in rate limits and abuse-report rate limits live in one server's memory. Before a second server runs, move them to Postgres or a shared store, so two servers do not double the limits.
-
-## Flood protection (2026-11-20)
-Plan bandwidth limits stop big transfers, not floods of tiny requests; per-address limits stop one attacker, not a flood from many addresses (DDoS) against a preview or tunnel. Later: DDoS protection in front of the edges (e.g. Cloudflare Spectrum or an anycast scrubbing provider) and per-route request shedding.
-
-## Congestion control: BBRv3 in the quic-go fork — after launch, when funded
-
-- Today we ship BBRv1 (Hysteria's port) in our quic-go fork (`github.com/pinksaucepasta/quic-go`, branch `paperboat`); it is the only sender for every connection.
-- Later, when funded: port BBRv3 (Google, IETF draft-ietf-ccwg-bbr; Chrome quiche `bbr2` code) into the fork and re-run the benchmark, including the fairness and relay-limit tests.
-- Reason: v3 fixes v1's loss blindness and unfairness.
-
-## Windows without App Installer: install OpenSSH from Microsoft's MSI (user 2026-11-21)
-On machines without App Installer/winget for LocalSystem (plain Windows Server, Windows Sandbox), `pb install` now fails visibly instead of setting up managed SSH. Direction: install Microsoft's signed OpenSSH MSI (PowerShell/Win32-OpenSSH release, pinned version, Authenticode check; `msiexec /i OpenSSH-Win64.msi /qn ADDLOCAL=Server`), as Ansible and Chocolatey do. Same rule for `pb update`, which now rolls back there. Start when the user says.
-
-## Global edges: verify without an own hostname (2026-11-24)
-Customer edges are verified by their pinned node identity, so they need no hostname or public certificate. Only a global (operator) edge must serve a
-publicly trusted certificate for its own name (`server/internal/selfhost/ingress.go`), so each new global edge needs one hand-made DNS record and
-`--endpoint-host`. Simplest fix: check global edges the same pinned way, or through the platform wildcard certificate every edge already holds.
-
-## Per-feature switches for a whole workspace (user 2026-11-24)
-
-A switch per feature that turns it fully on or off for a whole workspace (for example terminals, exec, SSH, file transfer, previews,
-tunnels, ENV, recordings). Off means off everywhere: the server refuses it, every `pb` command and console page says it is turned off,
-and what is already running stops. Open: who flips it (the workspace's owners and admins, Paperboat's operators in the admin panel, or
-both), whether a team can also lock a feature on, and how it sits next to the existing team access rules.
-
-## Every plan limit editable in the admin panel (user 2026-11-24)
-
-Today the panel changes the Free monthly allowance and a product's allowance, and overrides counts for one workspace. Plan-wide speed
-caps (slow speed after the allowance, relay speed, terminal cap), count limits (machines, previews and tunnels, browser terminals,
-public TCP, viewers) and the team per-seat allowance are server configuration and need a restart. Make all of them editable per plan
-in the panel, audited, and picked up by servers, edges and relays without a restart. Check first whether the panel's team allowance
-field changes a paid team's pool at all (the pool is TeamPerSeatBytes times seats).
-
-## Regions per plan (user 2026-11-24)
-
-Let operators choose, per plan, which managed regions a workspace may be placed in (for example Free only in one region), in the
-admin panel. Today a region can only be created, changed, enabled, disabled or replaced for everyone. Needs: the rule applied when a
-workspace's primary and fallback regions are chosen, a defined move when a plan changes (upgrade, downgrade, grant ending) or the rule
-changes, what the fallback is when only one region is allowed, and relays decided too (they carry traffic when machines cannot
-connect directly). Self-hosted regions are never limited.
-
-## More global preview/tunnel domains from the admin panel — after launch (user 2026-11-24)
-
-One global domain serves every preview and tunnel today (server setting; its wildcard certificate is issued, renewed and sent to every ready edge
-by the server). Later: a list of global domains managed in the admin panel (add, verify, pause, remove), one wildcard certificate and wildcard
-DNS record per domain on every edge, and a rule for which domain a new name gets (a default, or the user's choice).
