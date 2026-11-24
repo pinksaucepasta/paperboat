@@ -111,8 +111,8 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 	// kept whenever it fails.
 	// Owned loopback aliases and the PF enable token are recorded in state.
 	retirePlatformWithin(Config{StateDir: paths.StateDir}, time.Minute)
+	result = errors.Join(result, purgeStep("proxy", p.RestoreProxy(ctx))) // before the check below, which refuses its journal
 	result = errors.Join(result, purgeStep("addresses", darwinRetiredPlatformState(paths.StateDir)))
-	result = errors.Join(result, purgeStep("proxy", p.RestoreProxy(ctx)))
 	roots, err := uninstallRoots(paths.StateDir)
 	if err != nil {
 		result = errors.Join(result, purgeStep("trust", fmt.Errorf("read machine guard trust state: %w", err)))

@@ -96,7 +96,7 @@ func (f *darwinPurgeFixture) run(_ context.Context, name string, args ...string)
 
 func (f *darwinPurgeFixture) restoreProxy(context.Context) error {
 	f.calls = append(f.calls, "restore-proxy")
-	return nil
+	return os.RemoveAll(filepath.Join(f.paths.StateDir, previewProxyJournal)) // as the real restore does
 }
 
 func (f *darwinPurgeFixture) purge(ctx context.Context) error {
@@ -274,6 +274,10 @@ func TestPurgeDarwinRemovesStateSocketAndOwnedAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(f.paths.SocketDir, "control.sock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Every guard that set the system auto-proxy leaves this: the first purge refused it before restoring the proxy.
+	if err := os.WriteFile(filepath.Join(f.paths.StateDir, previewProxyJournal), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	f.dsclRecord[darwinBrokerAccount] = darwinAccountMarker
