@@ -95,8 +95,8 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		started = true
 		return nil
 	}
-	// renewAll renews what is due: the installation's own certificate and the browser HTTPS certificate; a renewal
-	// restarts the components so they load it. An unavailable CA keeps the current certificate and is retried at the
+	// renewAll renews what is due: the installation's own certificate and the browser HTTPS certificate; renewing
+	// the first, or obtaining the second for the first time, restarts the components so they load it. An unavailable CA keeps the current certificate and is retried at the
 	// next check; only a failed restart ends the run.
 	renewAll := func(now time.Time) error {
 		restart := false
@@ -111,6 +111,7 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 			fmt.Fprintln(output, "Infrastructure certificate renewed; runtime components restarted with the same TLS identity.")
 			restart = true
 		}
+		served := publicHTTPSUsable(dir, now)
 		publicRenewed, err := RenewPublicHTTPS(ctx, dir, PublicACMEDirectoryURL, now)
 		if err != nil {
 			if observe != nil {
@@ -119,8 +120,8 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 			fmt.Fprintln(output, "Browser HTTPS certificate renewal failed; the current certificate is retained; retry scheduled. Run pbh status for the reason.")
 		}
 		if publicRenewed {
-			fmt.Fprintln(output, "Browser HTTPS certificate renewed; runtime components restarted to load it.")
-			restart = true
+			fmt.Fprintln(output, "Browser HTTPS certificate renewed.")
+			restart = restart || !served // an edge serving the previous certificate loads the new one without a restart
 		}
 		if !restart {
 			return nil

@@ -7,7 +7,9 @@ WHERE d.deleted_at IS NULL
   AND NOT (d.certificate_state IN ('renewing','failed') AND d.certificate_retry_at > sqlc.arg(now)::timestamptz)
   AND (
     d.certificate_state IN ('issuing','renewing','failed')
-    OR d.certificate_expires_at <= sqlc.arg(now)::timestamptz + sqlc.arg(renew_before)::interval
+    OR d.certificate_expires_at <= sqlc.arg(now)::timestamptz
+    -- The workspace domain renewed: this hostname serves a copy of the certificate it replaced.
+    OR EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.certificate_expires_at<>d.certificate_expires_at)
     OR (
       d.certificate_state = 'ready'
       AND EXISTS (
@@ -122,7 +124,9 @@ WHERE d.deleted_at IS NULL
   AND (lease.user_deadline IS NULL OR lease.user_deadline > sqlc.arg(now))
   AND (
     d.certificate_state IN ('pending','issuing','renewing','failed')
-    OR d.certificate_expires_at <= sqlc.arg(now)::timestamptz + sqlc.arg(renew_before)::interval
+    OR d.certificate_expires_at <= sqlc.arg(now)::timestamptz
+    -- The workspace domain renewed: this hostname serves a copy of the certificate it replaced.
+    OR EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.certificate_expires_at<>d.certificate_expires_at)
     OR (
       d.certificate_state = 'ready'
       AND EXISTS (

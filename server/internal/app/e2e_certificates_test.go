@@ -40,8 +40,8 @@ func e2eCertificateRuntime(t *testing.T, database *db.DB, cfg config.Config) *tu
 		Database: database, Issuer: issuer, CAA: caa, Keys: secrets,
 		NodeCredentials:    nodeauth.Composite{selfhost.New(database, cfg.Secrets.EncryptionKey)},
 		MasterKeyReference: c.MasterKeyReference, DistributionCredential: []byte(cfg.Secrets.EdgeControlCredential),
-		IssuerName: c.Issuer, OwnerID: c.OwnerID, RenewBefore: c.RenewBefore, LockTTL: c.LockTTL,
-		DistributionTimeout: c.DistributionTimeout, ExpiryAlertWindow: c.ExpiryAlertWindow, MaxCertificateLifetime: c.MaxCertificateLifetime,
+		IssuerName: c.Issuer, OwnerID: c.OwnerID, LockTTL: c.LockTTL,
+		DistributionTimeout: c.DistributionTimeout, MaxCertificateLifetime: c.MaxCertificateLifetime,
 		PlatformBases:       tunnelcert.PlatformCertificateBases{PreviewBaseDomain: cfg.Preview.BaseDomain, TunnelBaseDomain: cfg.Tunnel.BaseDomain, RuntimeBaseDomain: cfg.RuntimeBaseDomain},
 		PlatformEdgeTargets: edges.Resolve,
 	})

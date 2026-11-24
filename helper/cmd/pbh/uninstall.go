@@ -51,18 +51,18 @@ var (
 // uninstallEnv is everything uninstall touches outside its own logic, so a test points it at a temp tree and fakes
 // the commands.
 type uninstallEnv struct {
-	systemctl, run               commander
-	unitDir, certEnv, runtimeDir string
-	paths                        hostPaths
-	binaries, binary             string
-	teardown                     func(context.Context) error
-	removeLocal                  func() error
+	systemctl, run      commander
+	unitDir, runtimeDir string
+	paths               hostPaths
+	binaries, binary    string
+	teardown            func(context.Context) error
+	removeLocal         func() error
 }
 
 func defaultUninstallEnv() uninstallEnv {
 	return uninstallEnv{
 		systemctl: systemctlCommander, run: execCommander,
-		unitDir: systemUnitDir, certEnv: certificateEnvFile, runtimeDir: systemdRuntimeDir,
+		unitDir: systemUnitDir, runtimeDir: systemdRuntimeDir,
 		paths: defaultHostPaths(defaultState), binaries: defaultBinaries, binary: "/usr/local/bin/pbh",
 		teardown:    func(ctx context.Context) error { return containers.Teardown(ctx, defaultState) },
 		removeLocal: func() error { return selfhost.RemoveLocal(defaultState) },
@@ -71,7 +71,7 @@ func defaultUninstallEnv() uninstallEnv {
 
 // runUninstall is safe to rerun: a step that already happened is skipped, a failed one leaves what a rerun needs.
 func runUninstall(ctx context.Context, env uninstallEnv, removeData bool, out io.Writer) error {
-	touched, err := stopServices(ctx, env.systemctl, env.unitDir, env.certEnv, removeData)
+	touched, err := stopServices(ctx, env.systemctl, env.unitDir)
 	if err != nil {
 		return err
 	}
@@ -107,28 +107,19 @@ func runUninstall(ctx context.Context, env uninstallEnv, removeData bool, out io
 }
 
 const (
-	systemUnitDir      = "/etc/systemd/system"
-	selfhostUnitName   = "paperboat-selfhost.service"
-	certificateEnvFile = "/etc/paperboat-edge-certificate.env"
+	systemUnitDir    = "/etc/systemd/system"
+	selfhostUnitName = "paperboat-selfhost.service"
 )
 
-// certificateUnits run edge-ip-certificate.py from the directory uninstall deletes (deploy/README.md), so they
-// are disabled and removed with it; the env file is configuration and goes only with --remove-data.
-var certificateUnits = []string{"paperboat-edge-certificate.timer", "paperboat-edge-certificate.service"}
-
-// stopServices stops everything that could start the node again, certificate renewal first (it restarts the
-// service), then the service. An absent unit is an expected state on a rerun; touched reports a unit existed.
-func stopServices(ctx context.Context, run commander, unitDir, envFile string, removeData bool) (touched bool, err error) {
-	touched, err = removeCertificateUnits(ctx, run, unitDir, envFile, removeData)
-	if err != nil {
-		return touched, err
-	}
+// stopServices stops the service so nothing starts the node again. An absent unit is an expected state on a rerun;
+// touched reports it existed.
+func stopServices(ctx context.Context, run commander, unitDir string) (touched bool, err error) {
 	exists, err := unitExists(filepath.Join(unitDir, selfhostUnitName))
 	if err != nil || !exists {
-		return touched, err
+		return false, err
 	}
 	if _, err := run(ctx, "systemctl", "stop", selfhostUnitName); err != nil {
-		return true, fmt.Errorf("%w: %w", commandError("could not stop self-host service; the edge certificate units may already be removed, rerun pbh uninstall after fixing the cause"), err)
+		return true, fmt.Errorf("%w: %w", commandError("could not stop self-host service; rerun pbh uninstall after fixing the cause"), err)
 	}
 	return true, nil
 }
@@ -180,36 +171,4 @@ func unitExists(path string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
-}
-
-func removeCertificateUnits(ctx context.Context, run commander, unitDir, envFile string, removeData bool) (touched bool, err error) {
-	var errs []error
-	for _, unit := range certificateUnits {
-		path := filepath.Join(unitDir, unit)
-		exists, statErr := unitExists(path)
-		if statErr != nil {
-			errs = append(errs, statErr)
-			continue
-		}
-		if !exists {
-			continue
-		}
-		touched = true
-		if _, err := run(ctx, "systemctl", "disable", "--now", unit); err != nil {
-			errs = append(errs, fmt.Errorf("disable %s: %w", unit, err))
-			continue
-		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-	}
-	if removeData && len(errs) == 0 { // the env file the units read stays until both are gone
-		if err := os.Remove(envFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-	}
-	if len(errs) > 0 {
-		return touched, fmt.Errorf("%w: %w", commandError("could not remove the edge certificate timer and service; fix the cause and rerun pbh uninstall"), errors.Join(errs...))
-	}
-	return touched, nil
 }

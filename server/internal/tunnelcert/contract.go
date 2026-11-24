@@ -125,6 +125,8 @@ type Domain struct {
 	CertificateReference  string
 	CertificateGeneration uint64
 	RenewalDue            bool
+	// Replaces is the served certificate a renewal replaces (ARI); the order names it to the CA.
+	Replaces              *x509.Certificate
 	AllowOnDemandFallback bool
 	// LeafHostname is an ephemeral exact SNI requested under a verified
 	// one-label wildcard binding. It is never persisted as the wildcard

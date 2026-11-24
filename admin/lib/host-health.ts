@@ -61,8 +61,8 @@ export function openAlerts(reports: Reports | undefined, now: number): Alert[] {
     const edge = `edge node ${node}`
     const stale = isStale(cert, now)
     // Only an explicit success is healthy: a malformed report reads as a failure, and a failure stays critical until a success arrives.
-    if (cert.payload.ok !== true) alerts.push({ id: `edge-certificate:${node}`, level: "critical", title: `Certificate renewal is failing on ${edge}`, body: `${typeof cert.payload.error === "string" && cert.payload.error ? cert.payload.error : "The renewal failed."}${stale ? " The edge has also stopped reporting checks." : ""} Browsers will refuse this edge when its certificate expires. Read public-acme/renew.log on the edge, fix the cause, then start paperboat-edge-certificate.service.`, since: cert.reported_at })
-    else if (stale) alerts.push({ id: `edge-certificate-stale:${node}`, level: "warning", title: `${edge} has not checked its certificate`, body: "No certificate renewal check arrived for a day. Check the paperboat-edge-certificate timer on that edge.", since: cert.reported_at })
+    if (cert.payload.ok !== true) alerts.push({ id: `edge-certificate:${node}`, level: "critical", title: `Certificate renewal is failing on ${edge}`, body: `${typeof cert.payload.error === "string" && cert.payload.error ? cert.payload.error : "The renewal failed."}${stale ? " The edge has also stopped reporting checks." : ""} Browsers will refuse this edge when its certificate expires. Run pbh doctor on the edge, fix the cause, then restart paperboat-selfhost.service.`, since: cert.reported_at })
+    else if (stale) alerts.push({ id: `edge-certificate-stale:${node}`, level: "warning", title: `${edge} has not checked its certificate`, body: "No certificate renewal check arrived for a day. Run pbh doctor on that edge.", since: cert.reported_at })
   }
   return alerts.sort((a, b) => Number(b.level === "critical") - Number(a.level === "critical"))
 }

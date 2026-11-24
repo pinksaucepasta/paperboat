@@ -276,6 +276,11 @@ func (s *PlatformCertificateStore) ListPlatformTargets(ctx context.Context, limi
 	return result, nil
 }
 
+// SetRenewalAt moves an active certificate's renewal time to the one the CA suggests.
+func (s *PlatformCertificateStore) SetRenewalAt(ctx context.Context, id string, at time.Time) error {
+	return s.db.Queries().SetPlatformCertificateRenewalAt(ctx, dbsqlc.SetPlatformCertificateRenewalAtParams{ID: id, RenewalAt: at.UTC()})
+}
+
 func (s *PlatformCertificateStore) MarkPlatformCertificateReady(ctx context.Context, targetID, certificateReference string, expiresAt, now time.Time) error {
 	if s == nil || s.db == nil || !validIdentifier(targetID) || !validMetadata(certificateReference, 256) || expiresAt.IsZero() || now.IsZero() || !expiresAt.After(now) {
 		return ErrInvalid

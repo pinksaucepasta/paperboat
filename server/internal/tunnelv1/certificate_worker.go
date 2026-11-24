@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
@@ -23,7 +22,6 @@ import (
 type CertificateWorker struct {
 	db          *db.DB
 	coordinator *tunnelcert.Coordinator
-	renewBefore time.Duration
 	issuerName  string
 	now         func() time.Time
 	mu          sync.Mutex
@@ -47,12 +45,9 @@ func (w *CertificateWorker) SetTelemetryObserver(observer func(context.Context, 
 	return nil
 }
 
-func NewCertificateWorker(database *db.DB, coordinator *tunnelcert.Coordinator, renewBefore time.Duration, now func() time.Time, issuerName ...string) (*CertificateWorker, error) {
+func NewCertificateWorker(database *db.DB, coordinator *tunnelcert.Coordinator, now func() time.Time, issuerName ...string) (*CertificateWorker, error) {
 	if database == nil || coordinator == nil {
 		return nil, fmt.Errorf("%w: certificate database and coordinator are required", ErrInvalidInput)
-	}
-	if renewBefore <= 0 || renewBefore >= 365*24*time.Hour {
-		renewBefore = 30 * 24 * time.Hour
 	}
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -61,7 +56,7 @@ func NewCertificateWorker(database *db.DB, coordinator *tunnelcert.Coordinator, 
 	if len(issuerName) > 0 && issuerName[0] != "" {
 		configuredIssuer = issuerName[0]
 	}
-	return &CertificateWorker{db: database, coordinator: coordinator, renewBefore: renewBefore, issuerName: configuredIssuer, now: now}, nil
+	return &CertificateWorker{db: database, coordinator: coordinator, issuerName: configuredIssuer, now: now}, nil
 }
 
 func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, error) {
@@ -69,8 +64,7 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		return 0, ErrInvalidInput
 	}
 	now := w.now().UTC()
-	interval := pgtype.Interval{Microseconds: renewBeforeMicros(w.renewBefore)}
-	rows, err := w.db.Queries().ListDueTunnelCertificateDomainsV1(ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: now, RenewBefore: interval, RowLimit: int32(limit)})
+	rows, err := w.db.Queries().ListDueTunnelCertificateDomainsV1(ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: now, RowLimit: int32(limit)})
 	if err != nil {
 		return 0, err
 	}
@@ -85,7 +79,11 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		}
 		// A failure of one domain backs that domain off and the pass goes on,
 		// so one bad row at the front cannot stop the rows after it.
-		domain, err := certificateDomainWithConfig(row, edges, now, w.renewBefore, w.issuerName)
+		source, err := w.sourceExpiry(ctx, row.WorkspaceDomainID)
+		if err != nil {
+			return changed, err
+		}
+		domain, err := certificateDomainWithConfig(row, edges, now, source, w.issuerName)
 		if err != nil {
 			retryAt := certificateRetryAt(now, row.CertificateFailureAttempts+1, err)
 			if markErr := w.markDomainCertificateFailure(ctx, row, "certificate_domain_invalid", now, retryAt); markErr != nil && !isSolePostgresNoRows(markErr) {
@@ -157,7 +155,7 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 	if remaining <= 0 {
 		return changed, nil
 	}
-	previewRows, err := w.db.Queries().ListDuePreviewCertificateDomainsV1(ctx, dbsqlc.ListDuePreviewCertificateDomainsV1Params{Now: now, RenewBefore: interval, RowLimit: int32(remaining)})
+	previewRows, err := w.db.Queries().ListDuePreviewCertificateDomainsV1(ctx, dbsqlc.ListDuePreviewCertificateDomainsV1Params{Now: now, RowLimit: int32(remaining)})
 	if err != nil {
 		return changed, err
 	}
@@ -173,7 +171,11 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		if err != nil {
 			return changed, err
 		}
-		domain, err := previewCertificateDomainWithConfig(row, lease, edges, now, w.renewBefore, w.issuerName)
+		source, err := w.sourceExpiry(ctx, row.WorkspaceDomainID)
+		if err != nil {
+			return changed, err
+		}
+		domain, err := previewCertificateDomainWithConfig(row, lease, edges, now, source, w.issuerName)
 		if err != nil {
 			return changed, err
 		}
@@ -296,7 +298,11 @@ func (w *CertificateWorker) RequestExactLeaf(ctx context.Context, nodeID, proces
 		if !foundTarget {
 			continue
 		}
-		domain, domainErr := certificateDomainWithConfig(row, []dbsqlc.ListReadyTunnelCertificateEdgesV1Row{target}, now, w.renewBefore, w.issuerName)
+		source, sourceErr := w.sourceExpiry(ctx, row.WorkspaceDomainID)
+		if sourceErr != nil {
+			return sourceErr
+		}
+		domain, domainErr := certificateDomainWithConfig(row, []dbsqlc.ListReadyTunnelCertificateEdgesV1Row{target}, now, source, w.issuerName)
 		if domainErr != nil {
 			return domainErr
 		}
@@ -308,7 +314,7 @@ func (w *CertificateWorker) RequestExactLeaf(ctx context.Context, nodeID, proces
 		} else if activeErr != nil {
 			return activeErr
 		} else {
-			domain.RenewalDue = !active.RenewalAt.After(now) || !active.ExpiresAt.After(now)
+			domain.RenewalDue = copyDue(active.ExpiresAt, source, now)
 		}
 		if _, ensureErr := w.coordinator.Ensure(ctx, domain); ensureErr != nil {
 			return ensureErr
@@ -344,7 +350,11 @@ func (w *CertificateWorker) RequestExactLeaf(ctx context.Context, nodeID, proces
 		if !foundTarget {
 			continue
 		}
-		domain, domainErr := previewCertificateDomainWithConfig(row, lease, []dbsqlc.ListReadyPreviewCertificateEdgesV1Row{target}, now, w.renewBefore, w.issuerName)
+		source, sourceErr := w.sourceExpiry(ctx, row.WorkspaceDomainID)
+		if sourceErr != nil {
+			return sourceErr
+		}
+		domain, domainErr := previewCertificateDomainWithConfig(row, lease, []dbsqlc.ListReadyPreviewCertificateEdgesV1Row{target}, now, source, w.issuerName)
 		if domainErr != nil {
 			return domainErr
 		}
@@ -359,7 +369,7 @@ func (w *CertificateWorker) RequestExactLeaf(ctx context.Context, nodeID, proces
 		if activeErr != nil {
 			return activeErr
 		}
-		domain.RenewalDue = !activeFound || !active.RenewalAt.After(now) || !active.ExpiresAt.After(now)
+		domain.RenewalDue = !activeFound || copyDue(active.ExpiresAt, source, now)
 		if _, ensureErr := w.coordinator.Ensure(ctx, domain); ensureErr != nil {
 			return ensureErr
 		}
@@ -382,7 +392,11 @@ func (w *CertificateWorker) requestCustomDomainLeaf(ctx context.Context, nodeID,
 	if err != nil {
 		return err
 	}
-	domain, err := certificateDomainWithConfig(row, edges, now, w.renewBefore, w.issuerName)
+	source, err := w.sourceExpiry(ctx, row.WorkspaceDomainID)
+	if err != nil {
+		return err
+	}
+	domain, err := certificateDomainWithConfig(row, edges, now, source, w.issuerName)
 	if err != nil {
 		return err
 	}
@@ -451,8 +465,25 @@ func (w *CertificateWorker) Worker(interval time.Duration, limit int) workers.Wo
 	}
 }
 
-// renewBefore and issuerName arrive normalized by NewCertificateWorker, the one place that defaults them.
-func certificateDomainWithConfig(row dbsqlc.TunnelDomain, edges []dbsqlc.ListReadyTunnelCertificateEdgesV1Row, now time.Time, renewBefore time.Duration, issuerName string) (tunnelcert.Domain, error) {
+// sourceExpiry is when the workspace domain's current certificate ends; the hostnames under it serve copies of it.
+func (w *CertificateWorker) sourceExpiry(ctx context.Context, workspaceDomainID sql.NullString) (sql.NullTime, error) {
+	if !workspaceDomainID.Valid {
+		return sql.NullTime{}, nil
+	}
+	expiry, err := w.db.Queries().GetWorkspaceDomainCertificateExpiry(ctx, workspaceDomainID.String)
+	if isSolePostgresNoRows(err) {
+		return sql.NullTime{}, nil
+	}
+	return expiry, err
+}
+
+// copyDue reports whether a hostname's copy is replaced: it ended, or its workspace domain holds another certificate.
+func copyDue(expiresAt time.Time, source sql.NullTime, now time.Time) bool {
+	return !expiresAt.After(now) || source.Valid && !source.Time.Equal(expiresAt)
+}
+
+// issuerName arrives normalized by NewCertificateWorker, the one place that defaults it.
+func certificateDomainWithConfig(row dbsqlc.TunnelDomain, edges []dbsqlc.ListReadyTunnelCertificateEdgesV1Row, now time.Time, source sql.NullTime, issuerName string) (tunnelcert.Domain, error) {
 	strategy, err := certificateStrategy(row.CertificateStrategy)
 	if err != nil {
 		return tunnelcert.Domain{}, err
@@ -467,10 +498,10 @@ func certificateDomainWithConfig(row dbsqlc.TunnelDomain, edges []dbsqlc.ListRea
 	for _, edge := range edges {
 		targets = append(targets, tunnelcert.EdgeTarget{NodeID: edge.EdgeNodeID, ProcessEpoch: edge.EdgeProcessEpoch, Generation: uint64(edge.AssignmentGeneration)})
 	}
-	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TunnelID: row.TunnelID, TargetKind: tunnelcert.TargetDurableRoute, RouteID: row.RouteID, Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, CertificateGeneration: 0, RenewalDue: !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: onDemandPolicy, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
+	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TunnelID: row.TunnelID, TargetKind: tunnelcert.TargetDurableRoute, RouteID: row.RouteID, Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, CertificateGeneration: 0, RenewalDue: !row.CertificateExpiresAt.Valid || copyDue(row.CertificateExpiresAt.Time, source, now), AllowOnDemandFallback: onDemandPolicy, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
 }
 
-func previewCertificateDomainWithConfig(row dbsqlc.PreviewDomain, lease dbsqlc.PreviewLease, edges []dbsqlc.ListReadyPreviewCertificateEdgesV1Row, now time.Time, renewBefore time.Duration, issuerName string) (tunnelcert.Domain, error) {
+func previewCertificateDomainWithConfig(row dbsqlc.PreviewDomain, lease dbsqlc.PreviewLease, edges []dbsqlc.ListReadyPreviewCertificateEdgesV1Row, now time.Time, source sql.NullTime, issuerName string) (tunnelcert.Domain, error) {
 	strategy, err := certificateStrategy(row.CertificateStrategy)
 	if err != nil {
 		return tunnelcert.Domain{}, err
@@ -489,7 +520,7 @@ func previewCertificateDomainWithConfig(row dbsqlc.PreviewDomain, lease dbsqlc.P
 	for _, edge := range edges {
 		targets = append(targets, tunnelcert.EdgeTarget{NodeID: edge.EdgeNodeID, ProcessEpoch: edge.EdgeProcessEpoch, Generation: uint64(edge.AttachmentGeneration)})
 	}
-	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TargetKind: tunnelcert.TargetPreviewLease, PreviewID: row.PreviewID, PreviewGeneration: uint64(row.PreviewGeneration), PreviewOwnerMachineID: lease.OwnerMachineID, PreviewOwnerSessionID: lease.OwnerSessionID, PreviewState: "active", PreviewExpiresAt: expiresAt.UTC(), Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, RenewalDue: row.CertificateState != "ready" || !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: strategy == tunnelcert.StrategyOnDemandLeaf, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
+	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TargetKind: tunnelcert.TargetPreviewLease, PreviewID: row.PreviewID, PreviewGeneration: uint64(row.PreviewGeneration), PreviewOwnerMachineID: lease.OwnerMachineID, PreviewOwnerSessionID: lease.OwnerSessionID, PreviewState: "active", PreviewExpiresAt: expiresAt.UTC(), Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, RenewalDue: row.CertificateState != "ready" || !row.CertificateExpiresAt.Valid || copyDue(row.CertificateExpiresAt.Time, source, now), AllowOnDemandFallback: strategy == tunnelcert.StrategyOnDemandLeaf, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
 }
 
 func certificateStrategy(value string) (tunnelcert.Strategy, error) {
@@ -615,10 +646,6 @@ func soleWrappedCertificateOutcome(err, want error) (expected bool) {
 		err = wrapped.Unwrap()
 	}
 	return false
-}
-
-func renewBeforeMicros(value time.Duration) int64 {
-	return value.Microseconds()
 }
 
 // Slow-stage diagnostics identify an authority or edge operation that stopped

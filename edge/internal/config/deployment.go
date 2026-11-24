@@ -38,7 +38,7 @@ type Deployment struct {
 	CredentialIssuer       string `json:"credential_issuer"`
 	ControlCredentialFile  string `json:"control_credential_file"`
 	// CertificateRenewalStatusFile is where the host's certificate renewal timer writes its last check
-	// (deploy/edge-ip-certificate.py); each heartbeat carries it so the admin panel alerts per node. Empty: none.
+	// (pbh's public-acme/renew-status.json); each heartbeat carries it so the admin panel alerts per node. Empty: none.
 	CertificateRenewalStatusFile string `json:"certificate_renewal_status_file,omitempty"`
 	ControlCAFile                string `json:"control_ca_file"`
 	JWKSFile                     string `json:"jwks_file"`

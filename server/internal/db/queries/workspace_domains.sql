@@ -66,16 +66,33 @@ WHERE id = sqlc.arg(id);
 SELECT * FROM workspace_domains
 WHERE ownership_state = 'verified'
   AND (certificate_retry_at IS NULL OR certificate_retry_at <= sqlc.arg(now))
-  AND (certificate_expires_at IS NULL OR certificate_expires_at <= sqlc.arg(renew_after))
-ORDER BY certificate_expires_at NULLS FIRST, id
+  AND (certificate_expires_at IS NULL OR certificate_renewal_at <= sqlc.arg(now))
+ORDER BY certificate_renewal_at NULLS FIRST, id
 LIMIT sqlc.arg(row_limit);
+
+-- name: ListWorkspaceDomainsToPlanRenewal :many
+SELECT * FROM workspace_domains
+WHERE ownership_state = 'verified' AND certificate_expires_at IS NOT NULL
+  AND (certificate_renewal_check_at IS NULL OR certificate_renewal_check_at <= sqlc.arg(now))
+ORDER BY certificate_renewal_check_at NULLS FIRST, id
+LIMIT sqlc.arg(row_limit);
+
+-- Only the certificate that was asked about: a renewal finishing meanwhile wins.
+-- name: SetWorkspaceDomainRenewalPlan :exec
+UPDATE workspace_domains
+SET certificate_renewal_at = coalesce(sqlc.narg(renewal_at), certificate_renewal_at), certificate_renewal_check_at = sqlc.arg(check_at)
+WHERE id = sqlc.arg(id) AND certificate_fingerprint = sqlc.arg(certificate_fingerprint);
+
+-- name: GetWorkspaceDomainCertificateExpiry :one
+SELECT certificate_expires_at FROM workspace_domains WHERE id = sqlc.arg(id);
 
 -- name: StoreWorkspaceDomainCertificate :execrows
 UPDATE workspace_domains
 SET certificate_state = 'ready', certificate_failure_code = NULL, certificate_attempts = 0, certificate_retry_at = NULL,
     master_key_reference = sqlc.arg(master_key_reference), certificate_ciphertext = sqlc.arg(certificate_ciphertext),
     private_key_ciphertext = sqlc.arg(private_key_ciphertext), certificate_fingerprint = sqlc.arg(certificate_fingerprint),
-    certificate_expires_at = sqlc.arg(certificate_expires_at), updated_at = sqlc.arg(now)
+    certificate_expires_at = sqlc.arg(certificate_expires_at), certificate_renewal_at = sqlc.arg(certificate_renewal_at),
+    certificate_renewal_check_at = NULL, updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id) AND ownership_state = 'verified';
 
 -- A failure keeps the last good certificate: only a domain without one shows failed.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -145,6 +146,27 @@ func TestInfrastructureTLSNoSNIAndNamedRouteSelection(t *testing.T) {
 					t.Fatalf("TLS handshake: %v", err)
 				}
 			})
+		}
+	}
+	// A renewed file pair is served without a restart; a pair that does not match keeps the served one.
+	defer func(previous time.Duration) { publicHTTPSReload = previous }(publicHTTPSReload)
+	publicHTTPSReload = 0
+	server, err := infrastructureTLS(config.Deployment{ConnectorAdvertiseHost: "infra.example.test", PublicHTTPSCertFile: certPath, PublicHTTPSKeyFile: keyPath}, tls.Certificate{}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewed, renewedPEM, renewedKeyPEM := makeCertificate("infra.example.test", nil)
+	for _, step := range []struct {
+		path string
+		data []byte
+		want tls.Certificate
+	}{{keyPath, renewedKeyPEM, infrastructure}, {certPath, renewedPEM, renewed}} {
+		if err := os.WriteFile(step.path, step.data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := server.GetCertificate(&tls.ClientHelloInfo{ServerName: "infra.example.test"})
+		if err != nil || !bytes.Equal(got.Certificate[0], step.want.Certificate[0]) {
+			t.Fatalf("after writing %s: %v, wrong certificate served", step.path, err)
 		}
 	}
 }

@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/getsentry/sentry-go v0.49.0
 	github.com/google/uuid v1.6.0
+	github.com/mholt/acmez/v3 v3.1.7
 	github.com/quic-go/quic-go v0.61.0
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/xeipuuv/gojsonschema v1.2.0

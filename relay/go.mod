@@ -22,6 +22,7 @@ require (
 	github.com/jsimonetti/rtnetlink v1.4.2 // indirect
 	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.7.0 // indirect
+	github.com/mholt/acmez/v3 v3.1.7 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/net v0.62.0 // indirect

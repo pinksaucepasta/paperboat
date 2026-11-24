@@ -3,19 +3,20 @@ package tunnelcert
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
 const (
 	defaultLockTTL           = 2 * time.Minute
-	defaultRenewBefore       = 30 * 24 * time.Hour
 	defaultDistributionLimit = 20 * time.Second
-	defaultExpiryAlertWindow = 14 * 24 * time.Hour
 )
 
 type CAAResult struct {
@@ -362,9 +363,7 @@ type Config struct {
 	IssuerName             string
 	OwnerID                string
 	LockTTL                time.Duration
-	RenewBefore            time.Duration
 	DistributionTimeout    time.Duration
-	ExpiryAlertWindow      time.Duration
 	MaxCertificateLifetime time.Duration
 	Now                    func() time.Time
 }
@@ -480,7 +479,7 @@ func (c *Coordinator) CommitDomainCertificateReady(ctx context.Context, accountI
 }
 
 func (c *Coordinator) RecoverDomainCertificateReady(ctx context.Context, domain Domain, certificate StoredCertificate, now time.Time) error {
-	if c == nil || c.config.Store == nil || domain.Validate() != nil || domain.Target().KindValue() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || !certificate.ExpiresAt.After(now) || !certificate.RenewalAt.After(now) {
+	if c == nil || c.config.Store == nil || domain.Validate() != nil || domain.Target().KindValue() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || !certificate.ExpiresAt.After(now) {
 		return ErrCertificateNotReady
 	}
 	recovery, ok := c.config.Store.(CertificateDomainRecovery)
@@ -636,14 +635,8 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 	if config.LockTTL <= 0 || config.LockTTL > 15*time.Minute {
 		config.LockTTL = defaultLockTTL
 	}
-	if config.RenewBefore <= 0 || config.RenewBefore >= 365*24*time.Hour {
-		config.RenewBefore = defaultRenewBefore
-	}
 	if config.DistributionTimeout <= 0 || config.DistributionTimeout > 2*time.Minute {
 		config.DistributionTimeout = defaultDistributionLimit
-	}
-	if config.ExpiryAlertWindow <= 0 || config.ExpiryAlertWindow > 90*24*time.Hour {
-		config.ExpiryAlertWindow = defaultExpiryAlertWindow
 	}
 	if config.MaxCertificateLifetime <= 0 || config.MaxCertificateLifetime > 90*24*time.Hour {
 		config.MaxCertificateLifetime = 90 * 24 * time.Hour
@@ -661,8 +654,8 @@ type WorkspaceCertificateSource interface {
 }
 
 // workspaceBundle is the certificate a hostname under a workspace domain stores
-// as its own: the domain's wildcard. A renewal waits until the domain holds a
-// newer certificate than the hostname already serves.
+// as its own: the domain's wildcard. A renewal waits until the domain holds
+// another certificate than the hostname already serves.
 func (c *Coordinator) workspaceBundle(ctx context.Context, domain Domain, current StoredCertificate, found bool, now time.Time) (CertificateBundle, error) {
 	if c.config.WorkspaceCertificates == nil {
 		return CertificateBundle{}, fmt.Errorf("%w: workspace certificates are not configured", ErrIssuerUnavailable)
@@ -676,11 +669,43 @@ func (c *Coordinator) workspaceBundle(ctx context.Context, domain Domain, curren
 		wipeCertificateBundle(&bundle)
 		return CertificateBundle{}, err
 	}
-	if found && current.State == StateActive && current.ExpiresAt.After(now) && !identity.NotAfter.After(current.ExpiresAt) {
+	if found && current.State == StateActive && current.ExpiresAt.After(now) && identity.Fingerprint == current.Fingerprint {
 		wipeCertificateBundle(&bundle)
 		return CertificateBundle{}, ErrWorkspaceCertificatePending
 	}
 	return bundle, nil
+}
+
+// servedLeaf is the certificate a renewal replaces. Naming it to the CA is an optimisation (no rate limits), so a
+// certificate that cannot be opened only loses that.
+func (c *Coordinator) servedLeaf(ctx context.Context, current StoredCertificate) *x509.Certificate {
+	opened, err := OpenParts(ctx, c.config.Keys, current.MasterKeyReference, current.CertificateCiphertext, current.PrivateKeyCiphertext)
+	if err != nil {
+		return nil
+	}
+	defer wipeCertificateBundle(&opened)
+	leaf, err := certrenewal.Leaf(opened.CertificatePEM)
+	if err != nil {
+		return nil
+	}
+	return leaf
+}
+
+// PlanRenewal is when the current certificate is renewed. The CA's advice moves the stored renewal time; without any
+// the stored time (the shared fallback, set at issue) stands.
+func (c *Coordinator) PlanRenewal(ctx context.Context, current StoredCertificate, schedule *certrenewal.Schedule, now time.Time) (time.Time, error) {
+	store, ok := c.config.Store.(interface {
+		SetRenewalAt(context.Context, string, time.Time) error
+	})
+	leaf := c.servedLeaf(ctx, current)
+	if schedule == nil || !ok || leaf == nil {
+		return current.RenewalAt, nil
+	}
+	plan := schedule.Plan(ctx, leaf, now)
+	if !plan.FromCA || plan.RenewAt.Equal(current.RenewalAt) {
+		return current.RenewalAt, nil
+	}
+	return plan.RenewAt, store.SetRenewalAt(ctx, current.ID, plan.RenewAt)
 }
 
 func (c *Coordinator) recoverDistributionBundle(ctx context.Context, domain Domain, now time.Time) (CertificateBundle, error) {
@@ -788,7 +813,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 			if err := c.alertExpiry(ctx, domain, current, now); err != nil {
 				return Result{}, err
 			}
-			if exactLeafMatches && !domain.RenewalDue && current.RenewalAt.After(now) && current.ExpiresAt.After(now) {
+			if exactLeafMatches && !domain.RenewalDue && current.ExpiresAt.After(now) {
 				needed, err := c.activeDistributionNeeded(ctx, current, domain)
 				if err != nil {
 					return Result{}, err
@@ -850,7 +875,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 		return Result{}, ErrGenerationConflict
 	}
 	exactLeafMatches := activeCertificateMatchesDomain(current, domain)
-	if found && current.State == StateActive && current.DomainGeneration <= domain.Generation && exactLeafMatches && !domain.RenewalDue && current.RenewalAt.After(now) && current.ExpiresAt.After(now) {
+	if found && current.State == StateActive && current.DomainGeneration <= domain.Generation && exactLeafMatches && !domain.RenewalDue && current.ExpiresAt.After(now) {
 		needed, err := c.activeDistributionNeeded(ctx, current, domain)
 		if err != nil {
 			return Result{}, err
@@ -898,6 +923,9 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 			}
 			challengePtr = &challenge
 		}
+	}
+	if !reused && found && current.State == StateActive && domain.LeafHostname == "" {
+		domain.Replaces = c.servedLeaf(ctx, current)
 	}
 	if reused {
 		// The valid issued leaf resumes through the ordinary current-generation
@@ -989,8 +1017,13 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	if err != nil {
 		return Result{}, err
 	}
+	leaf, err := certrenewal.Leaf(bundle.CertificatePEM)
+	if err != nil {
+		return Result{}, err
+	}
+	renewalAt := certrenewal.Fallback(leaf)
 	certID := certificateID(domain, certGeneration, identity.Fingerprint)
-	stored := StoredCertificate{ID: certID, DomainID: domain.ID, AccountID: domain.AccountID, TunnelID: domain.TunnelID, TargetKind: domain.TargetKind, RouteID: domain.RouteID, PreviewID: domain.PreviewID, PreviewGeneration: domain.PreviewGeneration, PreviewState: domain.PreviewState, PreviewExpiresAt: domain.PreviewExpiresAt, Hostname: identity.Hostname, LeafHostname: domain.LeafHostname, DomainGeneration: domain.Generation, CertificateGeneration: certGeneration, Strategy: domain.Strategy, State: StateStaged, CertificateReference: "tcert_" + certID, MasterKeyReference: c.config.MasterKeyReference, CertificateCiphertext: certificateCiphertext, PrivateKeyCiphertext: privateKeyCiphertext, Envelope: append([]byte(nil), certificateCiphertext...), Fingerprint: identity.Fingerprint, Issuer: identity.Issuer, NotBefore: identity.NotBefore, ExpiresAt: identity.NotAfter, RenewalAt: identity.NotAfter.Add(-c.config.RenewBefore)}
+	stored := StoredCertificate{ID: certID, DomainID: domain.ID, AccountID: domain.AccountID, TunnelID: domain.TunnelID, TargetKind: domain.TargetKind, RouteID: domain.RouteID, PreviewID: domain.PreviewID, PreviewGeneration: domain.PreviewGeneration, PreviewState: domain.PreviewState, PreviewExpiresAt: domain.PreviewExpiresAt, Hostname: identity.Hostname, LeafHostname: domain.LeafHostname, DomainGeneration: domain.Generation, CertificateGeneration: certGeneration, Strategy: domain.Strategy, State: StateStaged, CertificateReference: "tcert_" + certID, MasterKeyReference: c.config.MasterKeyReference, CertificateCiphertext: certificateCiphertext, PrivateKeyCiphertext: privateKeyCiphertext, Envelope: append([]byte(nil), certificateCiphertext...), Fingerprint: identity.Fingerprint, Issuer: identity.Issuer, NotBefore: identity.NotBefore, ExpiresAt: identity.NotAfter, RenewalAt: renewalAt}
 	stored.UpdatedAt = now
 	// Keep the already issued leaf in memory across a bounded heartbeat CAS
 	// race. A changed owner/domain binding is rejected by the authority source.
@@ -1319,7 +1352,8 @@ func (c *Coordinator) alertExpiry(ctx context.Context, domain Domain, current St
 	if remaining <= 0 {
 		return c.emitExpiryAlert(ctx, ExpiryAlert{DomainID: domain.ID, Hostname: domain.Hostname, CertificateRef: current.CertificateReference, CertificateGeneration: current.CertificateGeneration, ExpiresAt: current.ExpiresAt, Code: "certificate_expired"})
 	}
-	if remaining <= c.config.ExpiryAlertWindow {
+	// Half the margin kept for renewing is gone: renewal has been failing for that long.
+	if remaining <= certrenewal.Margin(current.NotBefore, current.ExpiresAt)/2 {
 		return c.emitExpiryAlert(ctx, ExpiryAlert{DomainID: domain.ID, Hostname: domain.Hostname, CertificateRef: current.CertificateReference, CertificateGeneration: current.CertificateGeneration, ExpiresAt: current.ExpiresAt, Code: "certificate_expiring"})
 	}
 	return nil

@@ -451,10 +451,8 @@ type Certificates struct {
 	CAAResolver                     string        `json:"caa_resolver"`
 	DistributionCredentialReference string        `json:"distribution_credential_reference"`
 	OwnerID                         string        `json:"owner_id"`
-	RenewBefore                     time.Duration `json:"renew_before"`
 	LockTTL                         time.Duration `json:"lock_ttl"`
 	DistributionTimeout             time.Duration `json:"distribution_timeout"`
-	ExpiryAlertWindow               time.Duration `json:"expiry_alert_window"`
 	MaxCertificateLifetime          time.Duration `json:"max_certificate_lifetime"`
 	ACMETimeout                     time.Duration `json:"acme_timeout"`
 	PropagationTimeout              time.Duration `json:"propagation_timeout"`
@@ -1135,7 +1133,7 @@ func (c Certificates) Validate(environment Environment) error {
 	if c.AccountEmail != "" && (strings.TrimSpace(c.AccountEmail) != c.AccountEmail || strings.ContainsAny(c.AccountEmail, "\r\n\x00") || len(c.AccountEmail) > 256) {
 		errs = append(errs, fmt.Errorf("certificates.account_email is invalid"))
 	}
-	if c.RenewBefore < 0 || c.RenewBefore >= 365*24*time.Hour || c.LockTTL < 0 || c.LockTTL > 15*time.Minute || c.DistributionTimeout < 0 || c.DistributionTimeout > 2*time.Minute || c.ExpiryAlertWindow < 0 || c.ExpiryAlertWindow > 90*24*time.Hour || c.MaxCertificateLifetime < 0 || c.MaxCertificateLifetime > 90*24*time.Hour || c.ACMETimeout < 0 || c.ACMETimeout > 10*time.Minute || c.PropagationTimeout < 0 || c.PropagationTimeout > 10*time.Minute || c.CleanupTimeout < 0 || c.CleanupTimeout > 2*time.Minute || c.PollInterval < 0 || c.PollInterval > time.Minute || c.RetryBase < 0 || c.RetryBase > time.Minute || c.RetryMax < 0 || c.RetryMax > 2*time.Minute || c.MaxAttempts < 0 || c.MaxAttempts > 8 {
+	if c.LockTTL < 0 || c.LockTTL > 15*time.Minute || c.DistributionTimeout < 0 || c.DistributionTimeout > 2*time.Minute || c.MaxCertificateLifetime < 0 || c.MaxCertificateLifetime > 90*24*time.Hour || c.ACMETimeout < 0 || c.ACMETimeout > 10*time.Minute || c.PropagationTimeout < 0 || c.PropagationTimeout > 10*time.Minute || c.CleanupTimeout < 0 || c.CleanupTimeout > 2*time.Minute || c.PollInterval < 0 || c.PollInterval > time.Minute || c.RetryBase < 0 || c.RetryBase > time.Minute || c.RetryMax < 0 || c.RetryMax > 2*time.Minute || c.MaxAttempts < 0 || c.MaxAttempts > 8 {
 		errs = append(errs, fmt.Errorf("certificates timing and retry bounds are invalid"))
 	}
 	return errors.Join(errs...)

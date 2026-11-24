@@ -73,13 +73,13 @@ anything is saved; the service then restarts, and the previous certificate is re
 cannot. Carrier identity and enrollment do not change. With --https-cert/--https-key the certificate
 owner renews the files and reruns this command.
 With --acme the node obtains the certificate itself (ACME HTTP-01: TCP port 80 of the endpoint host
-must reach this node) and renews it after two thirds of its lifetime; a failing renewal shows in
+must reach this node) and renews it when the CA says so; a failing renewal shows in
 pbh doctor and, as root, in pbh status, and the current certificate serves until it expires.
 Examples:
   pbh configure-tls --acme
   pbh configure-tls --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
-	"uninstall": `Stop the service and remove its containers, host firewall rules, the edge certificate timer and
-service, and the pbh executables. Protected identity,
+	"uninstall": `Stop the service and remove its containers, host firewall rules and the pbh
+executables. Protected identity,
 credentials and configuration are kept for a reinstall unless both --remove-data and
 --confirm-remove-data are given, which deletes them permanently. Remove the node from
 Dashboard → Network to revoke its registration. Needs root (it re-runs itself with sudo).`,

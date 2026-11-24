@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 	"golang.org/x/crypto/acme"
 )
 
@@ -412,7 +413,7 @@ func (i *ACMEIssuer) issueDNS01CSR(ctx context.Context, domain Domain, names []s
 	if err != nil {
 		return CertificateBundle{}, err
 	}
-	order, err := client.AuthorizeOrder(ctx, acme.DomainIDs(names...))
+	order, err := certrenewal.AuthorizeOrder(ctx, client, acme.DomainIDs(names...), domain.Replaces, "")
 	if err != nil {
 		return CertificateBundle{}, mapACMEError(err)
 	}

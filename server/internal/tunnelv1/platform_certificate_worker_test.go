@@ -122,18 +122,6 @@ func TestPlatformCertificateRevokePreservesMarkerFailureWithCoordinatorCause(t *
 	}
 }
 
-func TestPlatformRetryDelayIsBoundedAndExponential(t *testing.T) {
-	if got := platformRetryDelay(1); got != time.Minute {
-		t.Fatalf("first retry delay = %s", got)
-	}
-	if got := platformRetryDelay(3); got != 4*time.Minute {
-		t.Fatalf("third retry delay = %s", got)
-	}
-	if got := platformRetryDelay(100); got != time.Hour {
-		t.Fatalf("bounded retry delay = %s", got)
-	}
-}
-
 // The worker reconciles every tick; a target that already records the current certificate as ready must not be
 // rewritten (it was 4 writes a second on two rows in production).
 func TestPlatformTargetAlreadyReadyOnlyWhenNothingWouldChange(t *testing.T) {

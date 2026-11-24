@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
 // AddressPublisher is tunnelcert.AddressReconciler: it makes a hostname's A/AAAA records exactly a set.
@@ -27,11 +28,13 @@ type RegionalDNS struct {
 	Domain    string
 	Now       func() time.Time
 	// Issuer and Key, when set, also keep the regional wildcard certificate issued (EnsureCertificate); a failed
-	// issuance waits 10 minutes before the next attempt (ACME failure rate limits).
-	Issuer       DNS01Issuer
-	Key          string
-	Logger       *slog.Logger
-	issueBackoff time.Time
+	// issuance waits certrenewal.RetryDelay before the next attempt.
+	Issuer        DNS01Issuer
+	Renewals      *certrenewal.Schedule
+	Key           string
+	Logger        *slog.Logger
+	issueBackoff  time.Time
+	issueFailures int
 	// reconciled is each region's last successfully published address set and when; a region is published again
 	// only when its set changes or after regionalRefresh, so the provider is not rewritten every tick.
 	reconciled map[string]regionPublication
@@ -49,11 +52,15 @@ const regionalRefresh = 5 * time.Minute
 func (r *RegionalDNS) Sync(ctx context.Context) error {
 	var certErr error
 	if r.Issuer != nil && time.Now().After(r.issueBackoff) {
-		if certErr = EnsureCertificate(ctx, r.DB, r.Key, r.Domain, r.Issuer, time.Now()); certErr != nil {
-			r.issueBackoff = time.Now().Add(10 * time.Minute)
+		if certErr = EnsureCertificate(ctx, r.DB, r.Key, r.Domain, r.Issuer, r.Renewals, time.Now()); certErr != nil {
+			r.issueFailures++
+			delay := certrenewal.RetryDelay(r.issueFailures)
+			r.issueBackoff = time.Now().Add(delay)
 			if r.Logger != nil {
-				r.Logger.Warn("regional certificate not issued; retrying in 10 minutes", "name", wildcardName(r.Domain), "error", certErr)
+				r.Logger.Warn("regional certificate not issued", "name", wildcardName(r.Domain), "error", certErr, "retry_in", delay)
 			}
+		} else {
+			r.issueFailures = 0
 		}
 	}
 	rows, err := r.DB.Pool().Query(ctx, `SELECT region, coalesce(array_agg(coalesce(public_address, endpoint_host) ORDER BY coalesce(public_address, endpoint_host))
