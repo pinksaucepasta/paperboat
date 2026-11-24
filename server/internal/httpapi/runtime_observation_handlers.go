@@ -268,6 +268,9 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 					req.Availability.ObservedAt = normalized
 					if err := availability.RecordAvailabilityObservation(r.Context(), req.EnvironmentID, req.ResourceID, *req.Availability); err != nil {
 						switch {
+						case expectedHTTPErrorOnly(err, usermachines.ErrNotFound):
+							writeError(w, r, http.StatusNotFound, "machine_not_found", "Machine was not found.")
+							return
 						case errors.Is(err, usermachines.ErrAvailabilityInvalid):
 							auxiliaryRejections = append(auxiliaryRejections, runtimeAuxiliaryRejection{Observation: "availability", Code: "availability_observation_invalid"})
 						case errors.Is(err, usermachines.ErrAvailabilityObservationStale):
@@ -332,6 +335,11 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 			response["machine_services_policy"] = *servicesPolicy
 		} else if machineServices != nil {
 			policy, err := machineServices.RuntimePolicy(r.Context(), req.EnvironmentID, req.ResourceID)
+			// The projection denies only a machine removed since its identity was verified.
+			if expectedHTTPErrorOnly(err, machineservices.ErrDenied) {
+				writeError(w, r, http.StatusNotFound, "machine_not_found", "Machine was not found.")
+				return
+			}
 			if err != nil {
 				writeError(w, r, 503, "machine_services_unavailable", "Machine service policy is unavailable; retry.", err)
 				return
@@ -343,6 +351,10 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 		}
 		if machineCapabilities != nil {
 			policy, policyErr := machineCapabilities.ResolveMachineCapabilities(r.Context(), req.ResourceID, req.EnvironmentID)
+			if expectedHTTPErrorOnly(policyErr, usermachines.ErrNotFound) {
+				writeError(w, r, http.StatusNotFound, "machine_not_found", "Machine was not found.")
+				return
+			}
 			if policyErr != nil {
 				writeError(w, r, http.StatusServiceUnavailable, "capabilities_unavailable", "Machine capability policy is temporarily unavailable.", policyErr)
 				return

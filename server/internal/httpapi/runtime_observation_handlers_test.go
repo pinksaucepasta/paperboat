@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/metering"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
@@ -555,6 +556,46 @@ func TestRuntimeObservationReporterHash(t *testing.T) {
 			}
 			if test.code == http.StatusAccepted && (repository.recorded == nil || repository.recorded.ReporterSHA256 != test.hash) {
 				t.Fatalf("recorded %#v", repository.recorded)
+			}
+		})
+	}
+}
+
+type fakeMachineCapabilitiesRepository struct{ err error }
+
+func (*fakeMachineCapabilitiesRepository) MachineCapabilitiesEnabled() bool { return true }
+
+func (f *fakeMachineCapabilitiesRepository) ResolveMachineCapabilities(context.Context, string, string) (usermachines.MachineCapabilityPolicy, error) {
+	return usermachines.MachineCapabilityPolicy{}, f.err
+}
+
+func (*fakeMachineCapabilitiesRepository) RecordMachineCapabilitiesObservation(context.Context, string, string, usermachines.MachineCapabilitiesObservation) error {
+	return nil
+}
+
+// A machine removed while its heartbeat is in flight is an expected 404 at every later read, never a service failure.
+func TestRuntimeObservationOfRemovedMachineIsNotFound(t *testing.T) {
+	availability := `,"availability":{"schema":"paperboat.availability/v1","observed_at":"2026-07-14T01:00:00Z"}`
+	for name, tc := range map[string]struct {
+		sink   any
+		extra  string
+		status int
+	}{
+		"availability":        {&fakeAvailabilityObservationRepository{err: usermachines.ErrNotFound}, availability, http.StatusNotFound},
+		"service policy":      {&fakeMachineServicesRepository{policyErr: machineservices.ErrDenied}, "", http.StatusNotFound},
+		"capabilities":        {&fakeMachineCapabilitiesRepository{err: usermachines.ErrNotFound}, "", http.StatusNotFound},
+		"service outage":      {&fakeMachineServicesRepository{policyErr: errors.Join(machineservices.ErrDenied, syscall.EIO)}, "", http.StatusServiceUnavailable},
+		"capabilities outage": {&fakeMachineCapabilitiesRepository{err: errors.Join(usermachines.ErrNotFound, syscall.EIO)}, "", http.StatusServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := `{"environment_id":"prj_test","resource_id":"machine_test","sampled_at":"2026-07-14T01:00:01Z"` + tc.extra + `}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/runtime-observations", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer machine-token")
+			addRuntimeProof(request)
+			recorder := httptest.NewRecorder()
+			runtimeObservation(&fakeRuntimeObservationRepository{}, &fakeRuntimeIdentity{}, 10, tc.sink).ServeHTTP(recorder, request)
+			if recorder.Code != tc.status || tc.status == http.StatusNotFound && !strings.Contains(recorder.Body.String(), `"machine_not_found"`) {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
 		})
 	}

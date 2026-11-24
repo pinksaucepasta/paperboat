@@ -270,6 +270,7 @@ type fakeMachineServicesRepository struct {
 	environment, machine string
 	observedAt           time.Time
 	policyCalls          int
+	policyErr            error
 }
 
 func (f *fakeMachineServicesRepository) RecordMachineServices(_ context.Context, environment, machine string, snapshot wire.Snapshot, observedAt time.Time) (wire.RuntimePolicy, error) {
@@ -283,7 +284,7 @@ func (f *fakeMachineServicesRepository) RecordMachineServices(_ context.Context,
 
 func (f *fakeMachineServicesRepository) RuntimePolicy(context.Context, string, string) (wire.RuntimePolicy, error) {
 	f.policyCalls++
-	return f.policy, nil
+	return f.policy, f.policyErr
 }
 
 func machineServiceObservationBody(t *testing.T, sampledAt time.Time, snapshot wire.Snapshot) string {
