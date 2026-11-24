@@ -4,21 +4,8 @@ Everything here is after launch unless its group says otherwise (user decision 2
 
 ## Soon: right after the smoke
 
-### Plan grants in the customer console — after launch (2026-11-18)
-
-A support plan grant (admin panel, `plan_grant`) is a workspace row with a product but no Stripe customer or subscription, and the
-customer billing API does not say so. The console therefore shows a granted workspace like a paid one: Manage billing (the portal
-needs a Stripe customer), seat changes (need a subscription) and top-ups (need a customer) are offered and fail, and Upgrade is
-hidden while the product code is set. Add a `granted` flag to the customer workspace answer, hide those controls and show "Plan
-granted until <date>" with Upgrade still available (a checkout replaces the grant). Revoking a grant on a workspace that never had a
-customer resets it to Free, so only the running grant is affected.
-
-Decided for plan grants (2026-11-18): a grant keeps the workspace's `bandwidth_anchor`, as any cancelled-and-repurchased Stripe
-workspace does; seats are capped at the team member maximum (128) with no floor against current members; a revoke that races a
-succeeded checkout whose webhook has not arrived loses to the payment.
-
 ### Drop control_tunnel_nodes.capacity_limit
-drop control_tunnel_nodes.capacity_limit one deploy after nothing reads it
+Do not drop `control_tunnel_nodes.capacity_limit`: it is in use. Overload protection: `node_load_percent` (migration 487) takes the worse of sustained CPU and connections as a share of this declared size, and the load rule takes a node out of rotation (wildcard DNS, relay candidate list) at `load_out_percent`; the registry check also requires it > 0. Keep it. (A removal on 2026-11-25 was dropped for exactly this.)
 
 ### Global edges: verify without an own hostname (2026-11-24)
 Customer edges are verified by their pinned node identity, so they need no hostname or public certificate. Only a global (operator) edge must serve a
