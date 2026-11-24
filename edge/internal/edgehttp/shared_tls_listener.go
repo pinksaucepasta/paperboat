@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
-	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
@@ -60,10 +58,9 @@ type SharedTLSListener struct {
 	routeGrace   func() time.Duration
 	holdableName func(string) bool
 	held         *holdSet
-	// handshakes is the per-address TLS handshake rate; names caps one name's share of the slots, so a
-	// flood aimed at one preview cannot starve every other name (edge abuse plan, L2 and L5).
+	// handshakes is the per-address TLS handshake rate. A name has no connection limit: floods are bounded per
+	// client address (edge abuse plan, L2; Tailscale's derper limits each client, not the server).
 	handshakes *addrlimit.Limiter
-	names      *holdSet
 }
 
 // holdSet bounds the connections held during a takeover grace: overall, per name, and with a reserve of slots only
@@ -101,24 +98,6 @@ func (h *holdSet) acquire(name string, known bool) (release func(), ok bool) {
 	}, true
 }
 
-// acquireWithin is acquire for a known name that waits up to wait for room.
-func (h *holdSet) acquireWithin(ctx context.Context, name string, wait time.Duration) (func(), bool) {
-	deadline := time.Now().Add(wait)
-	for {
-		if release, ok := h.acquire(name, true); ok {
-			return release, true
-		}
-		if !time.Now().Before(deadline) {
-			return nil, false
-		}
-		select {
-		case <-ctx.Done():
-			return nil, false
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
 // takeoverHoldMax, takeoverHoldPerName and takeoverHoldReserve size the TLS holds: 256 at once, at most 16 per
 // name, the last 64 for names the authority knows.
 const (
@@ -127,18 +106,6 @@ const (
 	takeoverHoldReserve = 64
 )
 
-// tlsNameConnections is the most connections one TLS name (one preview or tunnel) may hold at once, so a flood aimed at one
-// name cannot starve the rest. It bounds a name, not the node: the node has no connection limit (Tailscale's derper limits each
-// client, not the server).
-const tlsNameConnections = 1024
-
-// nameShareWait is how long a connection to a name at its share waits for one of the name's
-// connections to end. A connection's share is given back only when the HTTP server notices the
-// client left, a moment after the client closed; a client that reconnects at once would otherwise be
-// refused while its old connection is still counted.
-const nameShareWait = 500 * time.Millisecond
-
-var errNameShareFull = errors.New("one name holds its full share of the edge's TLS slots")
 var errHandshakeRate = errors.New("client address over its TLS handshake rate")
 
 // ServeUnknownNamesWithPage sets the TLS config (the edge certificate selector, wildcard fallback) used to
@@ -161,7 +128,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
-		handshakes: addrlimit.New(addressHandshakeRate, addrlimit.Rate{}, 0), names: newHoldSet(math.MaxInt, tlsNameConnections, 0)}
+		handshakes: addrlimit.New(addressHandshakeRate, addrlimit.Rate{}, 0)}
 	l.hello, l.cancelHello = context.WithCancel(ctx)
 	go l.run()
 	return l
@@ -236,18 +203,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, forwarded bool) {
 		return
 	}
 	host := info.host
-	releaseName, ok := l.names.acquireWithin(l.ctx, host, nameShareWait)
-	if !ok {
-		l.observe("tls_name_share", errNameShareFull)
-		edgetelemetry.NoteRefusal(host)
-		return
-	}
-	// The name's share is held for the connection's whole life; ownership moves with the connection.
-	defer func() {
-		if owned {
-			releaseName()
-		}
-	}()
 	adm, ok := l.resolveHost(host)
 	if !ok {
 		return
@@ -260,13 +215,12 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, forwarded bool) {
 		l.workers.Add(1)
 		go func() {
 			defer l.workers.Done()
-			defer releaseName()
 			defer conn.Close()
 			l.observe("public_tcp_stream", l.forward(l.ctx, replay, decision, l.authority.ResolveDecision))
 		}()
 		return
 	}
-	if !authorizedHTTPS && !infrastructureHTTPS && !https && !forwarded && l.forwardVisitor(hooks, conn, replay, host, releaseName) {
+	if !authorizedHTTPS && !infrastructureHTTPS && !https && !forwarded && l.forwardVisitor(hooks, conn, replay, host) {
 		owned = false
 		return
 	}
@@ -281,7 +235,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, forwarded bool) {
 		}
 	}
 	owned = false
-	replay.(*replayTLSConn).release = releaseName
 	select {
 	case l.ready <- replay:
 	case <-l.ctx.Done():

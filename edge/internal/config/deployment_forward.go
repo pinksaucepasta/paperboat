@@ -16,7 +16,7 @@ const (
 	// five refresh intervals while refreshes fail.
 	DefaultForwardPeerStaleAfter    = 50 * time.Second
 	DefaultForwardSeedInterval      = 5 * time.Minute
-	DefaultForwardMaxStreamsPerPeer = 4096
+	DefaultForwardMaxStreamsPerPeer = 16384
 )
 
 // ForwardOn reports whether this node forwards visitors to, and accepts forwards from, other managed nodes.

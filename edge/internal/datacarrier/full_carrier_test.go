@@ -10,11 +10,11 @@ import (
 	"time"
 )
 
-// F21-168: a carrier takes its configured stream count, 1,024 by default, all open at once (an account with 1,000
+// F21-168: a carrier takes its configured default stream count (16,384), all open at once (an account with 1,000
 // previews and tunnels reaches the edge over its carrier pair): every stream does a round trip while all are
 // held open, the next open is refused with the bounded stream-limit error, and closing the streams returns every
 // permit.
-func TestOneCarrierHoldsTheDefaultThousandAndTwentyFourStreamsAtOnce(t *testing.T) {
+func TestOneCarrierHoldsTheDefaultStreamsAtOnce(t *testing.T) {
 	edge, connector := dataCarrierPair(t, testCarrierConfig(defaultMaximumStreams))
 	go func() {
 		for {

@@ -126,11 +126,7 @@ func (c *DataCarrierPreviewCarrier) forwardBrowser(ctx context.Context, stream *
 // serves browser, public and replay registration so destination and TLS
 // policy cannot drift between them.
 func (c *DataCarrierPreviewCarrier) previewHTTPRoute(routeID string, target LeaseTarget, verification string, dialWait time.Duration) hoststate.TunnelConfigRoute {
-	maxStreams := 0
-	if c != nil {
-		maxStreams = c.max
-	}
-	route := hoststate.TunnelConfigRoute{ID: routeID, Protocol: "http", OriginScheme: target.Scheme, OriginAddress: target.Address, TLSVerification: verification, PreserveHost: true, ConnectTimeoutMs: int32(dialWait / time.Millisecond), IdleTimeoutMs: 90000, MaxConcurrentStreams: int32(maxStreams), DesiredState: "active"}
+	route := hoststate.TunnelConfigRoute{ID: routeID, Protocol: "http", OriginScheme: target.Scheme, OriginAddress: target.Address, TLSVerification: verification, PreserveHost: true, ConnectTimeoutMs: int32(dialWait / time.Millisecond), IdleTimeoutMs: 90000, DesiredState: "active"}
 	if target.HostHeader != "" { // pb preview --host-header: the origin sees this Host, the visitor keeps the public one
 		route.HostOverride = &target.HostHeader
 	}

@@ -367,7 +367,7 @@ type ConfigRoute struct {
 	TLSPin                  *string `json:"tls_pin"`
 	ConnectTimeoutMs        int32   `json:"connect_timeout_ms"`
 	IdleTimeoutMs           int32   `json:"idle_timeout_ms"`
-	MaxConcurrentStreams    int32   `json:"max_concurrent_streams"`
+	MaxConcurrentStreams    int32   `json:"max_concurrent_streams"` // 0 is no limit
 	DesiredState            string  `json:"desired_state"`
 }
 
@@ -526,7 +526,7 @@ func validateWireConfigRoute(route ConfigRoute) error {
 	if route.MTLSCredentialReference != nil && (ValidateCredentialReference(*route.MTLSCredentialReference) != nil || !safeSnapshotCredentialReference(*route.MTLSCredentialReference)) || route.TLSCA != nil && ValidateOriginCA(*route.TLSCA) != nil {
 		return ErrInvalidInput
 	}
-	if route.ConnectTimeoutMs < 100 || route.ConnectTimeoutMs > 120000 || route.IdleTimeoutMs < 1000 || route.IdleTimeoutMs > 3600000 || route.MaxConcurrentStreams < 1 || route.MaxConcurrentStreams > 100000 || route.DesiredState != "active" && route.DesiredState != "disabled" && route.DesiredState != "deleted" {
+	if route.ConnectTimeoutMs < 100 || route.ConnectTimeoutMs > 120000 || route.IdleTimeoutMs < 1000 || route.IdleTimeoutMs > 3600000 || route.MaxConcurrentStreams < 0 || route.MaxConcurrentStreams > 100000 || route.DesiredState != "active" && route.DesiredState != "disabled" && route.DesiredState != "deleted" {
 		return ErrInvalidInput
 	}
 	return nil

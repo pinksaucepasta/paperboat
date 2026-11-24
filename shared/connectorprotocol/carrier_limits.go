@@ -7,8 +7,8 @@ import "time"
 // section 5). The Max* values bound what a configuration may ask for; DataCarrierMaxStreamWindow (carrier_window.go)
 // is the separate auto-tuning ceiling of a stream's flow-control window.
 const (
-	DataCarrierDefaultStreams       = 1024
-	DataCarrierDefaultAcceptBacklog = 16
+	DataCarrierDefaultStreams       = 16384
+	DataCarrierDefaultAcceptBacklog = 256 // opens in flight per round trip, yamux's own default
 	DataCarrierDefaultQueueDepth    = 16
 	DataCarrierDefaultStreamWindow  = 256 << 10
 	DataCarrierDefaultKeepAlive     = 30 * time.Second
@@ -16,7 +16,7 @@ const (
 	DataCarrierDefaultOpenLimit     = 10 * time.Second
 	DataCarrierDefaultCloseLimit    = 5 * time.Second
 
-	DataCarrierMaxStreams          = 1024
+	DataCarrierMaxStreams          = 16384
 	DataCarrierMaxAcceptBacklog    = 1024
 	DataCarrierMaxQueueDepth       = 1024
 	DataCarrierMaxConfiguredWindow = 16 << 20

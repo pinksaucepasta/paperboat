@@ -263,12 +263,12 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 		if in.IdleTimeoutMS != 0 && (in.IdleTimeoutMS < 1000 || in.IdleTimeoutMS > 3600000) {
 			return errors.New("idle timeout is out of range")
 		}
-		if in.MaxConcurrentStreams != 0 && (in.MaxConcurrentStreams < 1 || in.MaxConcurrentStreams > 10000) {
+		if in.MaxConcurrentStreams < 0 || in.MaxConcurrentStreams > 10000 {
 			return errors.New("stream limit is out of range")
 		}
 		return nil
 	}
-	if in.ConnectTimeoutMS < 100 || in.ConnectTimeoutMS > 120000 || in.IdleTimeoutMS < 1000 || in.IdleTimeoutMS > 3600000 || in.MaxConcurrentStreams < 1 || in.MaxConcurrentStreams > 10000 {
+	if in.ConnectTimeoutMS < 100 || in.ConnectTimeoutMS > 120000 || in.IdleTimeoutMS < 1000 || in.IdleTimeoutMS > 3600000 || in.MaxConcurrentStreams < 0 || in.MaxConcurrentStreams > 10000 {
 		return errors.New("route timeout or stream limit is out of range")
 	}
 	return nil

@@ -35,7 +35,7 @@ func testCarrierIdentity() Identity {
 func testCarrierConfig(maximumStreams int) Config {
 	return Config{
 		MaximumStreams:       maximumStreams,
-		AcceptBacklog:        maximumStreams,
+		AcceptBacklog:        min(maximumStreams, maxAcceptBacklog),
 		QueueDepth:           4,
 		StreamWindow:         256 << 10,
 		KeepAliveInterval:    20 * time.Millisecond,

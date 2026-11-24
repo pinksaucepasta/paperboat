@@ -282,7 +282,7 @@ func (c *Client) PatchTunnelRouteV1(ctx context.Context, tunnel, id, etag, key s
 	if in.IdleTimeoutMS != nil && (*in.IdleTimeoutMS < 1000 || *in.IdleTimeoutMS > 3600000) {
 		return TunnelRouteMutation{}, errors.New("idle timeout is out of range")
 	}
-	if in.MaxConcurrentStreams != nil && (*in.MaxConcurrentStreams < 1 || *in.MaxConcurrentStreams > 10000) {
+	if in.MaxConcurrentStreams != nil && (*in.MaxConcurrentStreams < 0 || *in.MaxConcurrentStreams > 10000) {
 		return TunnelRouteMutation{}, errors.New("stream limit is out of range")
 	}
 	if in.DesiredState != nil && *in.DesiredState != "active" && *in.DesiredState != "disabled" {

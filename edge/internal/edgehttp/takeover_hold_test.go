@@ -3,12 +3,9 @@ package edgehttp
 import (
 	"context"
 	"crypto/tls"
-	"errors"
-	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -164,9 +161,9 @@ func TestHTTPRouteHoldIsBounded(t *testing.T) {
 	}
 }
 
-// One name may hold only its share of connections for their lives, so a flood aimed at one preview cannot take
-// the node; a closed connection gives its share back. (The test narrows the share to two: one connection plus a reconnect.)
-func TestSharedTLSNameShareIsBounded(t *testing.T) {
+// A name has no connection limit: 1,100 visitors from many addresses hold connections to one preview at once. One
+// address is still bounded by its handshake rate.
+func TestSharedTLSNameHasNoConnectionLimit(t *testing.T) {
 	match, _ := browserTestMatch()
 	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
 	clientTLS.ServerName = match.Host
@@ -177,48 +174,26 @@ func TestSharedTLSNameShareIsBounded(t *testing.T) {
 	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, "", func(string) bool { return true }, nil, nil)
-	shared.names = newHoldSet(math.MaxInt, 2, 0)
-	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
+	server := &http.Server{TLSConfig: serverTLS, Handler: http.NotFoundHandler()}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
-	dial := func() (*tls.Conn, error) {
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 2 * time.Second}, "tcp", raw.Addr().String(), clientTLS)
-		if err != nil {
-			return nil, err
+	dial := func(source net.IP) error {
+		dialer := &net.Dialer{Timeout: 5 * time.Second, LocalAddr: &net.TCPAddr{IP: source}}
+		conn, err := tls.DialWithDialer(dialer, "tcp", raw.Addr().String(), clientTLS)
+		if err == nil {
+			t.Cleanup(func() { _ = conn.Close() })
 		}
-		// A refused connection is closed after the handshake would have started; a read shows which.
-		_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-		if _, err := conn.Read(make([]byte, 1)); err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
-			_ = conn.Close()
-			return nil, err
+		return err
+	}
+	for i := range 1100 {
+		if err := dial(net.IPv4(127, 0, 1, byte(1+i/25))); err != nil {
+			t.Fatalf("visitor %d of one name refused: %v", i+1, err)
 		}
-		_ = conn.SetReadDeadline(time.Time{})
-		return conn, nil
 	}
-	// Four slots: the share is two (one connection plus a reconnect).
-	first, err := dial()
-	if err != nil {
-		t.Fatalf("first connection: %v", err)
+	for range 20 * int(addressHandshakeRate.Burst) {
+		if dial(net.IPv4(127, 0, 2, 1)) != nil {
+			return
+		}
 	}
-	second, err := dial()
-	if err != nil {
-		t.Fatalf("second connection inside the 2-slot share: %v", err)
-	}
-	started := time.Now()
-	if third, err := dial(); err == nil {
-		third.Close()
-		t.Fatal("a third connection to the same name passed its 2-slot share")
-	}
-	if waited := time.Since(started); waited < nameShareWait {
-		t.Fatalf("refused after %v, before the %v share wait", waited, nameShareWait)
-	}
-	// A reconnect right after a close is admitted: it waits for the closed connection's share to come
-	// back instead of being refused while the server has not yet noticed the close.
-	first.Close()
-	reconnect, err := dial()
-	if err != nil {
-		t.Fatalf("immediate reconnect after a close refused: %v", err)
-	}
-	reconnect.Close()
-	second.Close()
+	t.Fatal("a flood from one address was never refused")
 }

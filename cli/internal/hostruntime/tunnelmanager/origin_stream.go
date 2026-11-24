@@ -150,7 +150,9 @@ func (f OriginStreamForwarder) StartFrom(parent context.Context, source StreamSo
 func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, identity connector.DataCarrierIdentity, routes map[string]hoststate.TunnelConfigRoute, running *RunningOriginStreams, transport *OriginHTTPTransport) {
 	permits := make(map[string]chan struct{}, len(routes))
 	for id, route := range routes {
-		permits[id] = make(chan struct{}, max(1, int(route.MaxConcurrentStreams)))
+		if route.MaxConcurrentStreams > 0 {
+			permits[id] = make(chan struct{}, route.MaxConcurrentStreams)
+		}
 	}
 	for {
 		stream, open, err := active.AcceptStream(ctx)
@@ -216,10 +218,13 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 			defer running.wg.Done()
 			defer stream.Close()
 			// The accept loop never waits: a full route makes only this stream wait for the permit.
-			if !acquireRoutePermit(ctx, permit, routePermitWait) {
-				return
+			// A route without a stream limit has no permits.
+			if permit != nil {
+				if !acquireRoutePermit(ctx, permit, routePermitWait) {
+					return
+				}
+				defer func() { <-permit }()
 			}
-			defer func() { <-permit }()
 			stopCancel := context.AfterFunc(ctx, func() { _ = stream.Close() })
 			defer stopCancel()
 			streamCtx := ctx

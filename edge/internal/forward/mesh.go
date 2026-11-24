@@ -151,7 +151,7 @@ func New(cfg Config) (*Mesh, error) {
 		cfg.HeldInterval = heldInterval
 	}
 	if cfg.MaxStreamsPerPeer <= 0 {
-		cfg.MaxStreamsPerPeer = 4096
+		cfg.MaxStreamsPerPeer = 16384
 	}
 	if cfg.Dial == nil {
 		cfg.Dial = (&net.Dialer{}).DialContext

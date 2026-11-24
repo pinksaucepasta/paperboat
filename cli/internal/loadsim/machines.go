@@ -427,7 +427,7 @@ func (r *runner) attach(ctx context.Context, m *machine) error {
 			return err
 		}
 		route := hoststate.TunnelConfigRoute{ID: a.Binding.RouteID, Protocol: "http", MatchType: "exact", MatchHostname: a.Hostname, OriginScheme: "http", OriginAddress: r.f.origin,
-			PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, MaxConcurrentStreams: 256, DesiredState: "active"}
+			PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, DesiredState: "active"}
 		forwarder := tunnelmanager.OriginStreamForwarder{Transport: r.transport, EngineRoutes: engine}
 		if store != nil {
 			if err := store.SetPolicy(a.Binding.RouteID, inspector.ResourcePolicy{Enabled: true, CaptureRequestBody: true, CaptureResponseBody: true}); err != nil {

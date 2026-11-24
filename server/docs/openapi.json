@@ -3050,7 +3050,7 @@
           },
           "max_concurrent_streams": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 10000
           },
           "rewrite_rules": {
@@ -3458,7 +3458,7 @@
           },
           "max_concurrent_streams": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 10000
           },
           "rewrite_rules": {
@@ -3514,7 +3514,7 @@
           },
           "max_concurrent_streams": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 10000
           },
           "rewrite_rules": {

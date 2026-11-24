@@ -716,7 +716,7 @@
         },
         "max_concurrent_streams": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 10000
         },
         "desired_state": {
@@ -1443,7 +1443,7 @@
         },
         "max_concurrent_streams": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 10000
         },
         "desired_state": {

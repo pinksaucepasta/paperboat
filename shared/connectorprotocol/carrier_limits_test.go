@@ -9,3 +9,10 @@ func TestDataCarrierDefaultsAreWithinTheirLimits(t *testing.T) {
 		t.Fatal("a data-carrier default exceeds its limit")
 	}
 }
+
+// One machine serves 10,000 visitors at once over one carrier.
+func TestOneCarrierCarriesTenThousandStreams(t *testing.T) {
+	if DataCarrierDefaultStreams < 10000 {
+		t.Fatalf("a carrier opens only %d streams at once", DataCarrierDefaultStreams)
+	}
+}

@@ -12,7 +12,7 @@ tcp_private.
 Origin options: --host-header or --preserve-host choose the Host the app sees; --tls-verification
 (system, custom_ca, pinned or insecure) with --tls-ca, --tls-pin and --tls-server-name decide
 how the origin's certificate is trusted; --connect-timeout (default 10s), --idle-timeout
-(default 5m) and --max-streams (default 1024) bound the connection. Header, redirect and
+(default 5m) and --max-streams (default no limit) bound the connection. Header, redirect and
 path-rewrite rules are repeatable (--request-header and --response-header up to 8, --redirect up
 to 4).
 
@@ -47,7 +47,7 @@ pb tunnel route add <tunnel> [flags]
       --host-header string                   override the origin Host header
       --idle-timeout duration                stream idle timeout (default 5m0s)
       --json                                 print canonical JSON
-      --max-streams int32                    maximum concurrent streams (default 1024)
+      --max-streams int32                    maximum concurrent streams (0: no limit)
       --name string                          route name (required)
       --path string                          HTTP path prefix, optionally ending in *
       --preserve-host                        preserve the incoming Host header (default true)

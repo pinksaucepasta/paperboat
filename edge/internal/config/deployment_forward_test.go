@@ -12,7 +12,7 @@ func TestForwardKeysDefaultAndValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !deployment.ForwardOn() || deployment.ForwardDial() != 3*time.Second || deployment.ForwardOpen() != 3*time.Second ||
-		deployment.ForwardPeers() != 10*time.Second || deployment.ForwardSeed() != 5*time.Minute || deployment.ForwardMaxStreams() != 4096 {
+		deployment.ForwardPeers() != 10*time.Second || deployment.ForwardSeed() != 5*time.Minute || deployment.ForwardMaxStreams() != 16384 {
 		t.Fatalf("defaults = %v %v %v %v %v %v", deployment.ForwardOn(), deployment.ForwardDial(), deployment.ForwardOpen(), deployment.ForwardPeers(), deployment.ForwardSeed(), deployment.ForwardMaxStreams())
 	}
 	explicit := strings.TrimSuffix(validDeploymentJSON(), "}") + `,"forward_enabled":false,"forward_dial_timeout":1000000000,"forward_open_timeout":2000000000,"forward_peer_interval":5000000000,"forward_seed_interval":60000000000,"forward_max_streams_per_peer":8}`

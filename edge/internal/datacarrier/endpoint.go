@@ -545,7 +545,7 @@ func (s *quicStreamLink) StreamID() uint32 {
 }
 
 // connectionReceiveWindow bounds what one peer may have in flight to this process. Streams beyond
-// the first 256 share that window instead of growing it, so 1024 streams cost no more memory.
+// the first 256 share that window instead of growing it, so 16384 streams cost no more memory.
 func connectionReceiveWindow(config Config) uint64 {
 	return uint64(config.StreamWindow) * uint64(min(config.MaximumStreams, 256)+config.QueueDepth+1)
 }

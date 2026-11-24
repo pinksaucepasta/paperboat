@@ -9,7 +9,6 @@ import (
 	"net"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
@@ -58,16 +57,6 @@ type replayTLSConn struct {
 	hostname       string
 	hello          []byte // the bytes inspected, replayed first by reader
 	sharedListener bool
-	release        func() // frees the shared listener's HTTPS slot once, on Close
-	releaseOnce    sync.Once
-}
-
-func (c *replayTLSConn) Close() error {
-	err := c.Conn.Close()
-	if c.release != nil {
-		c.releaseOnce.Do(c.release)
-	}
-	return err
 }
 
 // ClientHello is the visitor's ClientHello as read: a forwarder sends it to the holder before the holder acks.

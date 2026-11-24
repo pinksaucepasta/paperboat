@@ -19,7 +19,7 @@ import (
 
 func TestOriginStreamForwarderBindsRouteAndStreamsHTTP(t *testing.T) {
 	var originHits atomic.Int32
-	holdStarted := make(chan struct{}, 1)
+	holdStarted := make(chan struct{}, 2)
 	origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		originHits.Add(1)
 		if request.URL.Path == "/hold" {
@@ -63,7 +63,7 @@ func TestOriginStreamForwarderBindsRouteAndStreamsHTTP(t *testing.T) {
 	}
 	defer active.Close(context.Background())
 	defer edge.Close()
-	route := hoststate.TunnelConfigRoute{ID: "route_01", Name: "default", Protocol: "http", MatchType: "exact", MatchHostname: "public.example.test", OriginScheme: "http", OriginAddress: address, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, MaxConcurrentStreams: 4, DesiredState: "active"}
+	route := hoststate.TunnelConfigRoute{ID: "route_01", Name: "default", Protocol: "http", MatchType: "exact", MatchHostname: "public.example.test", OriginScheme: "http", OriginAddress: address, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
 	running, err := (OriginStreamForwarder{Transport: &OriginHTTPTransport{}}).Start(ctx, active, []hoststate.TunnelConfigRoute{route})
 	if err != nil {
 		t.Fatal(err)
@@ -107,29 +107,32 @@ func TestOriginStreamForwarderBindsRouteAndStreamsHTTP(t *testing.T) {
 	if originHits.Load() != 1 {
 		t.Fatalf("origin hits=%d", originHits.Load())
 	}
-	held, err := edge.OpenStream(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := connectorprotocol.WriteStreamOpen(held, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: route.ID, RequestID: "request_hold", Kind: "http"}); err != nil {
-		t.Fatal(err)
-	}
-	heldRequest, _ := http.NewRequest(http.MethodGet, "http://public.example.test/hold", nil)
-	heldRequest.Host = "public.example.test"
-	if err := heldRequest.Write(held); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-holdStarted:
-	case <-time.After(time.Second):
-		t.Fatal("held origin request did not start")
+	// The route sets no stream limit (0): a second stream is served while the first is held.
+	for range 2 {
+		held, err := edge.OpenStream(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := connectorprotocol.WriteStreamOpen(held, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: route.ID, RequestID: "request_hold", Kind: "http"}); err != nil {
+			t.Fatal(err)
+		}
+		heldRequest, _ := http.NewRequest(http.MethodGet, "http://public.example.test/hold", nil)
+		heldRequest.Host = "public.example.test"
+		if err := heldRequest.Write(held); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-holdStarted:
+		case <-time.After(time.Second):
+			t.Fatal("held origin request did not start")
+		}
+		defer held.Close()
 	}
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), time.Second)
 	defer closeCancel()
 	if err := running.Close(closeCtx); err != nil {
 		t.Fatalf("close held stream: %v", err)
 	}
-	_ = held.Close()
 }
 
 func TestOriginStreamForwarderRejectsUnknownRouteBeforeOrigin(t *testing.T) {

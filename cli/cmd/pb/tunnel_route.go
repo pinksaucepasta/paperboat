@@ -106,8 +106,8 @@ func routeAddCommand() *cobra.Command {
 		if idleTimeout < time.Second || idleTimeout > time.Hour {
 			return errors.New("idle-timeout must be between 1s and 1h")
 		}
-		if maxStreams < 1 || maxStreams > 10000 {
-			return errors.New("max-streams must be between 1 and 10000")
+		if maxStreams < 0 || maxStreams > 10000 {
+			return errors.New("max-streams must be between 0 (no limit) and 10000")
 		}
 		key, e := tunnelKey(command.Context())
 		if e != nil {
@@ -210,7 +210,7 @@ func routeAddCommand() *cobra.Command {
 	command.Flags().Int32("priority", 0, "route priority")
 	command.Flags().Duration("connect-timeout", 10*time.Second, "origin connect timeout")
 	command.Flags().Duration("idle-timeout", 5*time.Minute, "stream idle timeout")
-	command.Flags().Int32("max-streams", 1024, "maximum concurrent streams")
+	command.Flags().Int32("max-streams", 0, "maximum concurrent streams (0: no limit)")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command
@@ -312,8 +312,8 @@ func routeUpdateCommand() *cobra.Command {
 		}
 		if command.Flags().Changed("max-streams") {
 			v, _ := command.Flags().GetInt32("max-streams")
-			if v < 1 || v > 10000 {
-				return errors.New("max-streams must be between 1 and 10000")
+			if v < 0 || v > 10000 {
+				return errors.New("max-streams must be between 0 (no limit) and 10000")
 			}
 			patch.MaxConcurrentStreams = &v
 			changed = true
@@ -424,7 +424,7 @@ func routeUpdateCommand() *cobra.Command {
 	command.Flags().Int32("priority", 0, "new route priority")
 	command.Flags().Duration("connect-timeout", 0, "new origin connect timeout")
 	command.Flags().Duration("idle-timeout", 0, "new stream idle timeout")
-	command.Flags().Int32("max-streams", 0, "new maximum concurrent streams")
+	command.Flags().Int32("max-streams", 0, "new maximum concurrent streams (0: no limit)")
 	command.Flags().Bool("enable", false, "enable the route")
 	command.Flags().Bool("disable", false, "disable the route")
 	tunnelRouteOriginFlags(command, true)

@@ -56,7 +56,6 @@ const (
 	// One route can receive a burst as large as the carrier takes at once (F21-168: 1,000 simultaneous
 	// connections lost ~1% to a queue of 16, closed silently).
 	defaultDataCarrierPreviewQueue        = 1024
-	defaultDataCarrierPreviewStreams      = 1024
 	defaultDataCarrierPreviewDialTimeout  = 10 * time.Second
 	defaultDataCarrierPreviewCloseTimeout = 5 * time.Second
 )
@@ -407,7 +406,6 @@ type DataCarrierPreviewCarrier struct {
 	inspector              *inspector.Store
 	registry               *inspector.Registry
 	inspectorHTTP          tunnelmanager.AuthenticatedInspectorHTTP
-	max                    int
 	dialWait               time.Duration
 	closeWait              time.Duration
 	observe                func(error)
@@ -440,7 +438,6 @@ type DataCarrierPreviewCarrierConfig struct {
 	Inspector          *inspector.Store
 	Registry           *inspector.Registry
 	InspectorHTTP      tunnelmanager.AuthenticatedInspectorHTTP
-	MaxStreams         int
 	OriginDialTimeout  time.Duration
 	OriginCloseTimeout time.Duration
 	ObserveStreamError func(error)
@@ -476,12 +473,6 @@ func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*Data
 	if config.RouteID != "" && connectorprotocol.ValidateIdentifier(config.RouteID) != nil {
 		return nil, ErrDataCarrierPreviewInvalid
 	}
-	if config.MaxStreams == 0 {
-		config.MaxStreams = defaultDataCarrierPreviewStreams
-	}
-	if config.MaxStreams < 1 || config.MaxStreams > 1024 {
-		return nil, ErrDataCarrierPreviewInvalid
-	}
 	if config.OriginDialTimeout == 0 {
 		config.OriginDialTimeout = defaultDataCarrierPreviewDialTimeout
 	}
@@ -491,7 +482,7 @@ func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*Data
 	if config.OriginDialTimeout <= 0 || config.OriginCloseTimeout <= 0 {
 		return nil, ErrDataCarrierPreviewInvalid
 	}
-	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub, originProbeInterval: config.OriginProbeInterval, inboxPath: config.InboxPath}, nil
+	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub, originProbeInterval: config.OriginProbeInterval, inboxPath: config.InboxPath}, nil
 }
 
 func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
@@ -615,7 +606,6 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 		}
 	}()
 
-	permits := make(chan struct{}, c.max)
 	inspectorPermits := make(chan struct{}, 4)
 	var streams sync.WaitGroup
 	for {
@@ -666,37 +656,31 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 			_ = stream.Close()
 			continue
 		}
-		select {
-		case permits <- struct{}{}:
-			streams.Add(1)
-			go func(stream *connector.DataCarrierStream) {
-				defer streams.Done()
-				defer func() { <-permits }()
-				streamCtx := runCtx
-				streamDone := func() {}
-				if lease.LazyLifecycle != nil {
-					deadline := time.Time{}
-					if open.Kind == "http_browser" {
-						// Browser ingress revalidates and enforces its own shorter
-						// authorization deadline inside forwardBrowser.
-						deadline = lease.LeaseDeadline
-					}
-					streamCtx, streamDone = lease.LazyLifecycle.BeginStream(runCtx, deadline)
-				}
-				defer streamDone()
-				var err error
+		streams.Add(1)
+		go func(stream *connector.DataCarrierStream) {
+			defer streams.Done()
+			streamCtx := runCtx
+			streamDone := func() {}
+			if lease.LazyLifecycle != nil {
+				deadline := time.Time{}
 				if open.Kind == "http_browser" {
-					err = c.forwardBrowser(streamCtx, stream, open, lease)
-				} else {
-					err = c.forward(streamCtx, stream, lease.Target, lease.LazyLifecycle != nil, lease)
+					// Browser ingress revalidates and enforces its own shorter
+					// authorization deadline inside forwardBrowser.
+					deadline = lease.LeaseDeadline
 				}
-				if err != nil && c.observe != nil {
-					c.observe(err)
-				}
-			}(stream)
-		default:
-			_ = stream.Close()
-		}
+				streamCtx, streamDone = lease.LazyLifecycle.BeginStream(runCtx, deadline)
+			}
+			defer streamDone()
+			var err error
+			if open.Kind == "http_browser" {
+				err = c.forwardBrowser(streamCtx, stream, open, lease)
+			} else {
+				err = c.forward(streamCtx, stream, lease.Target, lease.LazyLifecycle != nil, lease)
+			}
+			if err != nil && c.observe != nil {
+				c.observe(err)
+			}
+		}(stream)
 	}
 }
 

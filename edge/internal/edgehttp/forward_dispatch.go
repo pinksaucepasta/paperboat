@@ -57,14 +57,13 @@ func (l *SharedTLSListener) Inject(conn net.Conn, visitor net.Addr) error {
 
 // forwardVisitor passes the visitor to the node that holds host. It reports whether it took ownership of the
 // connection; false (no forwarding, no holder) leaves the visitor to the local paths.
-func (l *SharedTLSListener) forwardVisitor(hooks *ForwardHooks, conn, replay net.Conn, host string, releaseName func()) bool {
+func (l *SharedTLSListener) forwardVisitor(hooks *ForwardHooks, conn, replay net.Conn, host string) bool {
 	if hooks == nil || hooks.Forwarder == nil || len(hooks.Forwarder.Holders(host)) == 0 {
 		return false
 	}
 	// Not a listener worker: run waits for its workers when the listener closes, and a forwarded visitor must outlive a
 	// drain (the mesh ends it, not the listener).
 	go func() {
-		defer releaseName()
 		defer conn.Close()
 		if err := hooks.Forwarder.Forward(l.ctx, replay, host); err != nil {
 			l.forwardFailed(replay, host, err)

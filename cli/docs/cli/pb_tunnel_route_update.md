@@ -47,7 +47,7 @@ pb tunnel route update <tunnel> <route> [flags]
       --host-header string                   override the origin Host header
       --idle-timeout duration                new stream idle timeout
       --json                                 print canonical JSON
-      --max-streams int32                    new maximum concurrent streams
+      --max-streams int32                    new maximum concurrent streams (0: no limit)
       --name string                          new route name
       --path string                          new HTTP path prefix
       --preserve-host                        preserve the incoming Host header (default true)

@@ -926,7 +926,7 @@ func createInitialRoute(ctx context.Context, queries *dbsqlc.Queries, input Crea
 		MatchType: matchType, MatchHostname: matchHostname,
 		Priority: 100, OriginScheme: input.Origin.Scheme, OriginAddress: input.Origin.Address,
 		PreserveHost: preserveHost, HostOverride: hostOverride, TlsVerification: tlsVerification,
-		ConnectTimeoutMs: 10000, IdleTimeoutMs: 90000, MaxConcurrentStreams: DefaultRouteStreams,
+		ConnectTimeoutMs: 10000, IdleTimeoutMs: 90000,
 		DesiredState: DesiredActive, CreatedByActorID: input.ActorID, UpdatedByActorID: input.ActorID, Now: now,
 		PublicTcpListenerID: nullableString(input.PublicTCPListenerID), PublicTcpPortMin: input.PublicTCPPortMin, PublicTcpPortMax: input.PublicTCPPortMax,
 	})

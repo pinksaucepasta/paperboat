@@ -44,7 +44,6 @@ type MachinePreviewRuntimeConfig struct {
 	SessionFactory  DataCarrierSessionSourceFactory
 
 	QueueDepth         int
-	MaxStreams         int
 	OriginDial         PreviewOriginDialer
 	OriginDialTimeout  time.Duration
 	OriginCloseTimeout time.Duration
@@ -139,7 +138,7 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
 	route := DataCarrierPreviewCarrierConfig{
-		DialOrigin: config.OriginDial, MaxStreams: config.MaxStreams, OriginDialTimeout: config.OriginDialTimeout,
+		DialOrigin: config.OriginDial, OriginDialTimeout: config.OriginDialTimeout,
 		OriginCloseTimeout: config.OriginCloseTimeout, ObserveStreamError: config.ObserveStreamError,
 		BrowserIngress: browserIngress, BrowserRouteGeneration: endpointRouteRevision,
 		Inspector: config.Inspector, Registry: config.Registry, InspectorHTTP: config.InspectorHTTP,
