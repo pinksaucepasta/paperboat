@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,15 +45,24 @@ func leafAt(t *testing.T, serial int64, from time.Time, lifetime time.Duration) 
 // ca answers the directory, renewal information and orders.
 type ca struct {
 	*httptest.Server
+	mu                sync.Mutex                    // a handler of a timed-out request may still run during the next one
 	window            func() (time.Time, time.Time) // nil: renewal information answers 503
 	ari               int
 	replaces, plain   int
 	refuseReplacement bool
 }
 
+func (c *ca) setWindow(window func() (time.Time, time.Time)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.window = window
+}
+
 func newCA(t *testing.T, ari bool) *ca {
 	c := &ca{}
 	c.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 		w.Header().Set("Replay-Nonce", fmt.Sprintf("n%d", time.Now().UnixNano()))
 		reply := func(code int, v any) {
 			if w.Header().Get("Content-Type") == "" {
@@ -178,7 +188,7 @@ func TestPlanFollowsAndOutlivesTheCA(t *testing.T) {
 	leaf := leafAt(t, 7, now, 64*day)
 	c := newCA(t, true)
 	s := New(c.URL+"/directory", nil)
-	c.window = func() (time.Time, time.Time) { return now.Add(30 * day), now.Add(31 * day) }
+	c.setWindow(func() (time.Time, time.Time) { return now.Add(30 * day), now.Add(31 * day) })
 	first := s.Plan(t.Context(), leaf, now)
 	if !first.FromCA || first.RenewAt.Before(now.Add(30*day-time.Second)) || first.RenewAt.After(now.Add(31*day)) {
 		t.Fatalf("plan %+v", first)
@@ -186,18 +196,18 @@ func TestPlanFollowsAndOutlivesTheCA(t *testing.T) {
 	if asked := c.ari; s.Plan(t.Context(), leaf, now.Add(time.Minute)) != first || c.ari != asked {
 		t.Fatal("asked again before the answer was due for a check")
 	}
-	c.window = nil
+	c.setWindow(nil)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second) // the client backs off between its attempts
 	if plan := s.Plan(ctx, leaf, now.Add(7*time.Hour)); plan.RenewAt != first.RenewAt {
 		t.Fatalf("unreachable renewal information moved the plan to %+v", plan)
 	}
 	cancel()
-	c.window = func() (time.Time, time.Time) { return now.Add(-2 * day), now.Add(-day) }
+	c.setWindow(func() (time.Time, time.Time) { return now.Add(-2 * day), now.Add(-day) })
 	if plan := s.Plan(t.Context(), leaf, now.Add(9*time.Hour)); plan.RenewAt.After(now) {
 		t.Fatalf("a window in the past is renewed now, got %+v", plan)
 	}
 	late := leafAt(t, 8, now, 64*day)
-	c.window = func() (time.Time, time.Time) { return now.Add(100 * day), now.Add(101 * day) }
+	c.setWindow(func() (time.Time, time.Time) { return now.Add(100 * day), now.Add(101 * day) })
 	if plan := s.Plan(t.Context(), late, now); plan.RenewAt.After(late.NotAfter.Add(-10 * day)) {
 		t.Fatalf("a window past the expiry was followed: %+v", plan)
 	}
