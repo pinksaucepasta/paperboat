@@ -34,8 +34,5 @@ SELECT operation_id,request_hash,state,result,COALESCE(error_code,''),completed_
 -- name: GetOperation :one
 SELECT operation_id,request_hash,state,result,COALESCE(error_code,''),completed_at,expires_at FROM operation_results WHERE operation_id=?;
 
--- name: ListInputDecisions :many
-SELECT session_id,client_id,attachment_id,generation,input_id,request_hash,status,bytes_written,COALESCE(error_code,''),created_at FROM input_decisions WHERE session_id=? ORDER BY generation,created_at;
-
 -- name: ReplayOutput :many
 SELECT channel,start_sequence,end_sequence,data FROM output_events WHERE session_id=? AND end_sequence>? ORDER BY start_sequence;

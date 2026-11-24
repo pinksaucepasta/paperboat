@@ -215,8 +215,9 @@ func TestManagerRetireRetriesPersistenceAndRestoresStoppedHistory(t *testing.T) 
 	if !bytes.Contains(replay, []byte("archive-prefix")) || !bytes.Contains(replay, []byte("archive-suffix")) {
 		t.Fatalf("restored replay missing archived output: %q", replay)
 	}
-	if decision, err := restored.QueryInput(created.ID, key); err != nil || decision.Status != InputAccepted {
-		t.Fatalf("restored input decision=%#v err=%v", decision, err)
+	var stale *StaleGenerationError
+	if decision, err := restored.Write(created.ID, key, []byte("again")); !errors.As(err, &stale) { // a resent key of the dead process is never typed again
+		t.Fatalf("resent key after recovery: %#v err=%v", decision, err)
 	}
 	restarted, err := restored.Restart(created.ID)
 	if err != nil || restarted.ID != created.ID || restarted.Generation != created.Generation+1 || restarted.State != Running {

@@ -211,58 +211,6 @@ func (j *InputJournal) Query(key InputKey) (InputDecision, error) {
 	return publicDecision(decision), nil
 }
 
-func (j *InputJournal) Admit(key InputKey) error {
-	key, _ = normalizeInputKey(key)
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if _, exists := j.decisions[key]; exists {
-		return nil
-	}
-	if len(j.decisions) >= j.max {
-		return ErrInputJournalFull
-	}
-	if key.InputSequence != 0 {
-		cursor := inputCursor{clientID: key.ClientID, attachmentID: key.AttachmentID, generation: key.Generation}
-		if last := j.last[cursor]; last != 0 {
-			if previous, ok := j.decisions[InputKey{ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputSequence: last}]; ok && previous.Status == InputUncertain {
-				return ErrInputUncertain
-			}
-			if key.InputSequence != last+1 {
-				return ErrInputSequence
-			}
-		}
-	}
-	return nil
-}
-
-func (j *InputJournal) Restore(key InputKey, hash []byte, status InputStatus, bytesWritten int, errorCode string) error {
-	key, _ = normalizeInputKey(key)
-	if len(hash) != sha256.Size || key.ClientID == "" || key.AttachmentID == "" || (key.InputSequence == 0 && key.InputID == "") || key.Generation == 0 {
-		return ErrInvalidInput
-	}
-	if status != InputAccepted && status != InputRejected && status != InputUncertain {
-		return ErrInvalidInput
-	}
-	var digest [sha256.Size]byte
-	copy(digest[:], hash)
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if _, exists := j.decisions[key]; exists {
-		return ErrInputConflict
-	}
-	if len(j.decisions) >= j.max {
-		return ErrInputJournalFull
-	}
-	j.decisions[key] = InputDecision{Status: status, InputSequence: key.InputSequence, BytesWritten: bytesWritten, WriteError: errorCode, hash: digest}
-	if key.InputSequence != 0 {
-		cursor := inputCursor{clientID: key.ClientID, attachmentID: key.AttachmentID, generation: key.Generation}
-		if key.InputSequence > j.last[cursor] {
-			j.last[cursor] = key.InputSequence
-		}
-	}
-	return nil
-}
-
 // LastSequence returns the highest durable sequence for one terminal input
 // identity. A reconnect uses it to resume at the next sequence without
 // replaying an input whose delivery result is unknown.

@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"path/filepath"
@@ -424,4 +425,47 @@ func TestManagerOldCaptureCannotStopReplacementPersistence(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("old capture stopped the replacement's output persistence")
+}
+
+// A typed key must not wait for the disk: a store whose write lock is held (a slow fsync, 1-6 s echo on an eMMC host
+// while output flowed) leaves input untouched.
+func TestInputDoesNotWaitForTheStore(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	state, err := store.Open(t.Context(), store.Config{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = state.Close() })
+	workspace := t.TempDir()
+	adapter, err := pty.NewAdapter(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(ManagerConfig{Store: state, Launch: func(command pty.Command) (PTYProcess, error) { return adapter.Start(command) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	snapshot, err := manager.Create(t.Context(), CreateRequest{Name: "slow-disk", Command: pty.Command{Path: "/bin/cat", CWD: workspace, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.AttachLive(snapshot.ID, "att"); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := sql.Open("sqlite", "file:"+filepath.Join(root, "state.db")+"?_txlock=immediate&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	tx, err := lock.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	started := time.Now()
+	decision, err := manager.Write(snapshot.ID, InputKey{ClientID: "cli", AttachmentID: "att", Generation: snapshot.Generation, InputSequence: 1}, []byte("x"))
+	if err != nil || decision.Status != InputAccepted || time.Since(started) > time.Second {
+		t.Fatalf("key with the store locked: decision=%+v err=%v after %v", decision, err, time.Since(started))
+	}
 }

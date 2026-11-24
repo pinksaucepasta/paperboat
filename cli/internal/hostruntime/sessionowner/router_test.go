@@ -696,3 +696,66 @@ func TestCreateRefusedByTheIndexDeletesTheShellTheOwnerStarted(t *testing.T) {
 		t.Fatalf("the owner still holds %d session(s) the router refused: %#v", len(left), left)
 	}
 }
+
+// A worker restarted mid-typing is a new router over the same owner: the owner's memory alone answers a resent key, so
+// none is typed twice and the next ones go through.
+func TestKeysAreTypedOnceAcrossAWorkerRestart(t *testing.T) {
+	manager, workspace, shell := newRouterTestManager(t)
+	gen := generation(41)
+	owner := authenticatedRouterOwner(t, gen, manager, workspace, shell)
+	worker := func() *session.RemoteManager {
+		t.Helper()
+		router, err := NewRouter(gen, map[string]Owner{gen: {Descriptor: owner.Descriptor}}, 8, ensureRouterOwner(map[string]Owner{gen: owner}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		remote, err := router.Service()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return remote
+	}
+	before := worker()
+	typed := filepath.Join(workspace, "typed")
+	created, err := before.Create(t.Context(), session.CreateRequest{Name: "typing", Command: routerShellCommand(shell, workspace, "exec cat > typed")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := before.AttachLive(created.ID, "att"); err != nil {
+		t.Fatal(err)
+	}
+	want := ""
+	write := func(remote *session.RemoteManager, sequence uint64) {
+		t.Helper()
+		key := session.InputKey{ClientID: "cli", AttachmentID: "att", Generation: created.Generation, InputSequence: sequence}
+		decision, err := remote.Write(created.ID, key, fmt.Appendf(nil, "%d\n", sequence))
+		if err != nil || decision.Status != session.InputAccepted {
+			t.Fatalf("key %d: %+v, %v", sequence, decision, err)
+		}
+	}
+	for sequence := uint64(1); sequence <= 20; sequence++ {
+		write(before, sequence)
+		want += fmt.Sprintf("%d\n", sequence)
+	}
+	after := worker()
+	last, err := after.InputSequence(created.ID, "cli", "att", created.Generation)
+	if err != nil || last != 20 {
+		t.Fatalf("last sequence after the restart = %d, %v", last, err)
+	}
+	write(after, 20) // its answer was lost with the old worker
+	for sequence := uint64(21); sequence <= 30; sequence++ {
+		write(after, sequence)
+		want += fmt.Sprintf("%d\n", sequence)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, _ := os.ReadFile(typed)
+		if string(got) == want {
+			return
+		}
+		if len(got) > len(want) || time.Now().After(deadline) {
+			t.Fatalf("typed %q, want %q", got, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

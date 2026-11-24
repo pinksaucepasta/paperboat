@@ -27,19 +27,6 @@ type FileTransfer struct {
 	ExpiresAt            int64
 }
 
-type InputDecision struct {
-	SessionID    string
-	ClientID     string
-	AttachmentID string
-	Generation   int64
-	InputID      string
-	RequestHash  []byte
-	Status       string
-	BytesWritten int64
-	ErrorCode    sql.NullString
-	CreatedAt    int64
-}
-
 type OperationResult struct {
 	OperationID string
 	RequestHash []byte

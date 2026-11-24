@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"io"
-	"strconv"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
@@ -74,20 +73,6 @@ func (m *Manager) recoverSessions(ctx context.Context) error {
 			return err
 		}
 		inputJournal := NewBoundedInputJournal(record.Generation, m.config.MaxInputDecisions)
-		decisions, err := m.config.Store.InputDecisions(ctx, record.ID)
-		if err != nil {
-			return err
-		}
-		for _, decision := range decisions {
-			key := InputKey{ClientID: decision.ClientID, AttachmentID: decision.AttachmentID, Generation: decision.Generation, InputID: decision.InputID}
-			if sequence, parseErr := strconv.ParseUint(decision.InputID, 10, 64); parseErr == nil && sequence > 0 {
-				key.InputSequence = sequence
-				key.InputID = ""
-			}
-			if err := inputJournal.Restore(key, decision.Hash, InputStatus(decision.Status), decision.BytesWritten, decision.ErrorCode); err != nil {
-				return err
-			}
-		}
 		session := &managedSession{id: record.ID, name: record.Name, command: pty.Command{Path: record.CommandPath, Args: record.CommandArgs, Env: record.CommandEnv, CWD: record.CWD, Dimensions: pty.Dimensions{Columns: record.Columns, Rows: record.Rows}}, lifecycle: lifecycle, persistedState: recovered, history: retained, fanout: NewFanout(), inputs: inputJournal, participants: make(map[string]Participant), sizes: newWindowSizes()}
 		if record.ExitCode != nil {
 			session.exit = &pty.ExitResult{Code: *record.ExitCode, Signal: record.ExitSignal}

@@ -8,64 +8,6 @@ import (
 	"time"
 )
 
-func (s *Store) PutInputDecision(ctx context.Context, decision InputDecision) (insertedResult bool, resultErr error) {
-	defer protectStoreError(&resultErr)
-	result, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO input_decisions(session_id,client_id,attachment_id,generation,input_id,request_hash,status,bytes_written,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, decision.SessionID, decision.ClientID, decision.AttachmentID, decision.Generation, decision.InputID, decision.Hash, decision.Status, decision.BytesWritten, nullableString(decision.ErrorCode), decision.CreatedAt.UnixNano())
-	if err != nil {
-		return false, err
-	}
-	changed, affectedErr := result.RowsAffected()
-	if affectedErr != nil {
-		return false, affectedErr
-	}
-	if changed == 1 {
-		return true, nil
-	}
-	var hash []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT request_hash FROM input_decisions WHERE session_id=? AND client_id=? AND attachment_id=? AND generation=? AND input_id=?`, decision.SessionID, decision.ClientID, decision.AttachmentID, decision.Generation, decision.InputID).Scan(&hash); err != nil {
-		return false, err
-	}
-	if !bytes.Equal(hash, decision.Hash) {
-		return false, ErrConflict
-	}
-	return false, nil
-}
-
-func (s *Store) InputDecisions(ctx context.Context, sessionID string) (decisionResults []InputDecision, resultErr error) {
-	defer protectStoreError(&resultErr)
-	rows, err := s.q.ListInputDecisions(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	decisions := make([]InputDecision, 0, len(rows))
-	for _, row := range rows {
-		decisions = append(decisions, InputDecision{
-			SessionID: row.SessionID, ClientID: row.ClientID, AttachmentID: row.AttachmentID,
-			Generation: uint64(row.Generation), InputID: row.InputID, Hash: row.RequestHash,
-			Status: row.Status, BytesWritten: int(row.BytesWritten), ErrorCode: row.ErrorCode,
-			CreatedAt: time.Unix(0, row.CreatedAt).UTC(),
-		})
-	}
-	return decisions, nil
-}
-
-// UpdateInputDecisions records several input outcomes in one transaction (one fsync for a burst of typing). A row
-// already pruned from the journal window is skipped.
-func (s *Store) UpdateInputDecisions(ctx context.Context, decisions []InputDecision) (resultErr error) {
-	defer protectStoreError(&resultErr)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer retainRollback(tx, &resultErr)
-	for _, decision := range decisions {
-		if _, err := tx.ExecContext(ctx, `UPDATE input_decisions SET status=?,bytes_written=?,error_code=? WHERE session_id=? AND client_id=? AND attachment_id=? AND generation=? AND input_id=? AND request_hash=?`, decision.Status, decision.BytesWritten, nullableString(decision.ErrorCode), decision.SessionID, decision.ClientID, decision.AttachmentID, decision.Generation, decision.InputID, decision.Hash); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
 func (s *Store) PutOperation(ctx context.Context, operation OperationResult) (resultErr error) {
 	defer protectStoreError(&resultErr)
 	_, _, err := s.ReserveOperation(ctx, operation.OperationID, operation.RequestHash, operation.ExpiresAt)
@@ -247,20 +189,4 @@ func (s *Store) operation(ctx context.Context, operationID string) (operationRes
 		return OperationResult{}, err
 	}
 	return operationFromSQLC(row.OperationID, row.RequestHash, row.State, row.Result, row.ErrorCode, row.CompletedAt, row.ExpiresAt), nil
-}
-
-// PruneInputDecisions deletes one client's sequenced input decisions of a generation up to and including
-// sequence upTo. Unsequenced (named) decisions are kept.
-func (s *Store) PruneInputDecisions(ctx context.Context, sessionID, clientID, attachmentID string, generation, upTo uint64) (resultErr error) {
-	defer protectStoreError(&resultErr)
-	_, err := s.db.ExecContext(ctx, `DELETE FROM input_decisions WHERE session_id=? AND client_id=? AND attachment_id=? AND generation=? AND input_id NOT GLOB '*[^0-9]*' AND input_id<>'' AND CAST(input_id AS INTEGER)<=?`, sessionID, clientID, attachmentID, generation, upTo)
-	return err
-}
-
-// DeleteInputDecisionsOutsideGeneration deletes a session's input decisions of every other generation:
-// input of an older process generation is refused as stale.
-func (s *Store) DeleteInputDecisionsOutsideGeneration(ctx context.Context, sessionID string, generation uint64) (resultErr error) {
-	defer protectStoreError(&resultErr)
-	_, err := s.db.ExecContext(ctx, `DELETE FROM input_decisions WHERE session_id=? AND generation<>?`, sessionID, generation)
-	return err
 }

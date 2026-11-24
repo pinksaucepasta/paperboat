@@ -223,57 +223,6 @@ func (q *Queries) GetOperation(ctx context.Context, operationID string) (GetOper
 	return i, err
 }
 
-const listInputDecisions = `-- name: ListInputDecisions :many
-SELECT session_id,client_id,attachment_id,generation,input_id,request_hash,status,bytes_written,COALESCE(error_code,''),created_at FROM input_decisions WHERE session_id=? ORDER BY generation,created_at
-`
-
-type ListInputDecisionsRow struct {
-	SessionID    string
-	ClientID     string
-	AttachmentID string
-	Generation   int64
-	InputID      string
-	RequestHash  []byte
-	Status       string
-	BytesWritten int64
-	ErrorCode    string
-	CreatedAt    int64
-}
-
-func (q *Queries) ListInputDecisions(ctx context.Context, sessionID string) ([]ListInputDecisionsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listInputDecisions, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListInputDecisionsRow
-	for rows.Next() {
-		var i ListInputDecisionsRow
-		if err := rows.Scan(
-			&i.SessionID,
-			&i.ClientID,
-			&i.AttachmentID,
-			&i.Generation,
-			&i.InputID,
-			&i.RequestHash,
-			&i.Status,
-			&i.BytesWritten,
-			&i.ErrorCode,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listOperations = `-- name: ListOperations :many
 SELECT operation_id,request_hash,state,result,COALESCE(error_code,''),completed_at,expires_at FROM operation_results ORDER BY CASE state WHEN 'pending' THEN 0 ELSE 1 END,completed_at ASC LIMIT ?
 `

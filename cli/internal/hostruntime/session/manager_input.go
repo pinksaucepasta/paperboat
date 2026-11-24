@@ -2,16 +2,13 @@ package session
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
 
 func (m *Manager) Write(sessionID string, key InputKey, data []byte) (InputDecision, error) {
@@ -61,21 +58,9 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	} else if !errors.Is(queryErr, ErrInputUnknown) {
 		return InputDecision{}, queryErr
 	}
-	if err := session.inputs.Admit(key); err != nil {
-		return InputDecision{}, err
-	}
-	hash := sha256.Sum256(data)
-	storageID := inputStorageID(key)
-	if m.config.Store != nil {
-		inserted, err := m.config.Store.PutInputDecision(context.Background(), store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(InputUncertain), CreatedAt: time.Now().UTC()})
-		if err != nil {
-			return InputDecision{}, err
-		}
-		if !inserted {
-			return InputDecision{}, ErrInputConflict
-		}
-	}
-	// Again after the store's write: a Ctrl-C during it discards this frame too.
+	// The decision lives in memory only: the process that holds it also holds the PTY, so a crash ends the generation and no
+	// resend can match it. A disk write here made every key wait for an fsync (1-6 s echo on a machine with slow storage).
+	// Again right before the write: a Ctrl-C that landed since the first check discards this frame too.
 	if now := session.interrupt.Load(); now != nil && sameInputCursor(*now, key) && key.InputSequence != 0 && key.InputSequence < now.InputSequence {
 		process = discardedInput{}
 	}
@@ -88,18 +73,6 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	}
 	if len(data) == 1 && data[0] == 0x03 && decision.Status == InputAccepted {
 		session.answerInterrupt(key, &decision)
-	}
-	if m.config.Store != nil {
-		// The outcome joins the next group commit instead of a second fsync per key (N11: 2 000 keys 10 ms apart
-		// backed up 5 s on a disk that takes ~5 ms per fsync).
-		m.writer().decided(store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(decision.Status), BytesWritten: decision.BytesWritten, ErrorCode: decision.WriteError})
-		// The journal keeps only the last InputDecisionWindow sequenced decisions of a client; the
-		// durable rows follow it in batches so a long session stays bounded (audit H2).
-		if key.InputSequence > InputDecisionWindow && key.InputSequence%inputPruneBatch == 0 {
-			if pruneErr := m.config.Store.PruneInputDecisions(context.Background(), sessionID, key.ClientID, key.AttachmentID, key.Generation, key.InputSequence-InputDecisionWindow); pruneErr != nil {
-				observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", pruneErr))
-			}
-		}
 	}
 	return decision, nil
 }
@@ -197,10 +170,6 @@ type discardedInput struct{}
 
 func (discardedInput) Write([]byte) (int, error) { return 0, pty.ErrInterrupted }
 
-// inputPruneBatch is how many sequenced writes pass between deletions of durable decisions that left
-// the window.
-const inputPruneBatch = 64
-
 // InputSequence returns the highest sequence recorded for an attachment. The
 // stream server uses it when rebinding a persistent attachment after a
 // transport reconnect so a duplicate delivery is answered from the journal.
@@ -210,13 +179,6 @@ func (m *Manager) InputSequence(sessionID, clientID, attachmentID string, genera
 		return 0, err
 	}
 	return session.inputs.LastSequence(clientID, attachmentID, generation), nil
-}
-
-func inputStorageID(key InputKey) string {
-	if key.InputSequence != 0 {
-		return strconv.FormatUint(key.InputSequence, 10)
-	}
-	return key.InputID
 }
 
 // WriteStream writes ordered live terminal input without creating an

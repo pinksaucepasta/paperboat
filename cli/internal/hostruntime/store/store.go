@@ -71,18 +71,6 @@ func (e *GapError) Error() string {
 }
 func (e *GapError) Unwrap() error { return ErrReplayGap }
 
-type InputDecision struct {
-	SessionID    string
-	ClientID     string
-	AttachmentID string
-	Generation   uint64
-	InputID      string
-	Hash         []byte
-	Status       string
-	BytesWritten int
-	ErrorCode    string
-	CreatedAt    time.Time
-}
 type OperationResult struct {
 	OperationID string
 	RequestHash []byte

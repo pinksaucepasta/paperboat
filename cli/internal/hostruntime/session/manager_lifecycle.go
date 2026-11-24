@@ -250,13 +250,6 @@ func (m *Manager) launchRestartLocked(ctx context.Context, session *managedSessi
 	}
 	_, generation := session.lifecycle.Snapshot()
 	session.inputs.SetGeneration(generation)
-	if m.config.Store != nil {
-		session.opMu.Unlock()
-		if pruneErr := m.config.Store.DeleteInputDecisionsOutsideGeneration(context.Background(), session.id, generation); pruneErr != nil {
-			observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", pruneErr))
-		}
-		session.opMu.Lock()
-	}
 	session.screen = xterm.New(xterm.WithCols(int(session.command.Dimensions.Columns)), xterm.WithRows(int(session.command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))
 	session.continuation.reset()
 	session.process, session.exit = process, nil

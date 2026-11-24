@@ -84,8 +84,9 @@ func TestManagerRecoversHistoryInputAndRestartGeneration(t *testing.T) {
 	if err != nil || len(attached.Replay.Events) != 0 {
 		t.Fatalf("attach=%#v err=%v", attached, err)
 	}
-	if decision, err := recoveredManager.QueryInput(created.ID, key); err != nil || decision.Status != InputAccepted {
-		t.Fatalf("query=%#v err=%v", decision, err)
+	var stale *StaleGenerationError
+	if decision, err := recoveredManager.Write(created.ID, key, []byte("again")); !errors.As(err, &stale) { // a resent key of the dead process is never typed again
+		t.Fatalf("resent key after recovery: %#v err=%v", decision, err)
 	}
 	restarted, err := recoveredManager.Restart(created.ID)
 	if err != nil || restarted.ID != created.ID || restarted.Generation != 2 {
