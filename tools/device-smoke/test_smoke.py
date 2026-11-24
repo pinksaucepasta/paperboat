@@ -747,6 +747,20 @@ TLIST=($DEVICES)
         self.assertEqual(t.file_size_for(1000 * mib), t.MAX_FILE_SIZE)  # never past the Automatic 2 GB bound
         self.assertLess(t.FILES * t.MAX_FILE_SIZE, 2 * 10 ** 9)
 
+    def test_version_rows_match_the_whole_version_and_the_update_survives_a_dead_terminal(self):
+        text = (HERE / 'smoke.sh').read_text()
+        line = next(l for l in text.splitlines() if l.startswith('has_version()'))
+
+        def has(version, output):
+            return subprocess.run(['bash', '-c', line + '\nhas_version "$1" <<<"$2"', 'x', version, output]).returncode == 0
+        self.assertTrue(has('1.2.3', 'Version 1.2.3'))
+        self.assertFalse(has('1.2', 'Version 1.2.3'))  # a prefix is not the version
+        self.assertFalse(has('dev-0de96a1e1', 'pb dev-0de96a1e1f'))
+        self.assertTrue(has('dev-0de96a1e1', 'pb dev-0de96a1e1 (commit x)'))
+        body = text[text.index('update_target() {'):text.index('# Each source gets one compressed fixture upload')]
+        self.assertNotIn('    return\n  fi\n  start_long_ssh', body)  # a dead terminal no longer ends the update early
+        self.assertIn('terminal_ready=0', body)
+
     def test_network_inventory_waits_for_relay_sync_bounded(self):
         import network_inventory
         syncing = SimpleNamespace(returncode=1, stdout=json.dumps(

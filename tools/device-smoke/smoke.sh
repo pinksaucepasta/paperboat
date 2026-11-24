@@ -229,12 +229,14 @@ command_ok() {
   [ "$1" = 0 ] && [ "$(tr -d '\r' <<<"$2" | tail -n 1)" = rc=0 ]
 }
 marker_present() { grep -Fxq -- "$2" <<<"$(tr -d '\r' <<<"$1")"; }
+# The version as a whole word of stdin ("1.2" is not in "1.2.3", "dev-abc" is not a prefix of "dev-abcdef").
+has_version() { grep -qE "(^|[^[:alnum:]._-])${1//./\\.}([^[:alnum:]._-]|\$)"; }
 
 # ---------------------------------------------------------------- tests
 check_device() { # doctor + version on the device itself
   local d=$1 t0 out
   t0=$(now); out=$(pb_on "$d" --version 2>&1)
-  if grep -q "$EXPECT_VERSION" <<<"$out"; then record "version:$d" PASS $(( $(now)-t0 ))
+  if has_version "$EXPECT_VERSION" <<<"$out"; then record "version:$d" PASS $(( $(now)-t0 ))
   else record "version:$d" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; fi
   t0=$(now); out=$(pb_on "$d" doctor 2>&1)
   if grep -q "doctor: healthy" <<<"$out"; then record "doctor:$d" PASS $(( $(now)-t0 ))
@@ -490,12 +492,14 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
     "${WINDOWS_TARGET}") SSHPASS="$SMOKE_WINDOWS_PASSWORD" sshpass -e scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "${SMOKE_WINDOWS_SSH:?set the Windows SSH login}:$dst" ;;
   esac
   # Verify shell identity before activation, then query that same PTY after it.
+  # A terminal that never got ready is its own FAIL; the update and the ssh/exec held across it still run and report.
+  local terminal_ready=1
   if ! start_update_terminal "$t"; then
+    terminal_ready=0
     record "during-update-terminal:$t" FAIL 120 "terminal did not become ready before update"
     on "$CLIENT" "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
     collect "reap-update-terminal:$t" "upd-term-$t" TERMINAL_OK
     cleanup_terminal "$t" "smoke-update-$RUN_ID" cleanup-update-terminal
-    return
   fi
   start_long_ssh "$t" "upd-ssh-$t" 240
   start_long_exec "$t" "upd-exec-$t" 240
@@ -506,11 +510,13 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
     *) out=$(on "$t" "chmod +x $dst && $( [ "$t" = "$MACOS_TARGET" ] && echo "$PB_MACOS" || echo "$PB_LINUX" ) update --from $dst; echo rc=\$?" 2>&1) ;;
   esac
   local ver; ver=$(pb_on "$t" --version 2>&1)
-  if grep -q "$UPDATE_VERSION" <<<"$ver"; then record "update:$t" PASS $(( $(now)-t0 ))
+  if has_version "$UPDATE_VERSION" <<<"$ver"; then record "update:$t" PASS $(( $(now)-t0 ))
   else record "update:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; fi
-  on "$CLIENT" "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
-  collect "during-update-terminal:$t" "upd-term-$t" TERMINAL_OK
-  cleanup_terminal "$t" "smoke-update-$RUN_ID" cleanup-update-terminal
+  if [ "$terminal_ready" = 1 ]; then
+    on "$CLIENT" "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
+    collect "during-update-terminal:$t" "upd-term-$t" TERMINAL_OK
+    cleanup_terminal "$t" "smoke-update-$RUN_ID" cleanup-update-terminal
+  fi
   collect "during-update-ssh:$t" "upd-ssh-$t" SSHFINAL 240
   test_terminal "$t" after-update-terminal
   test_exec "$t" after-update-exec
