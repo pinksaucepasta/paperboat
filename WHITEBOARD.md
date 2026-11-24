@@ -304,3 +304,9 @@ admin panel. Today a region can only be created, changed, enabled, disabled or r
 workspace's primary and fallback regions are chosen, a defined move when a plan changes (upgrade, downgrade, grant ending) or the rule
 changes, what the fallback is when only one region is allowed, and relays decided too (they carry traffic when machines cannot
 connect directly). Self-hosted regions are never limited.
+
+## More global preview/tunnel domains from the admin panel — after launch (user 2026-11-24)
+
+One global domain serves every preview and tunnel today (server setting; its wildcard certificate is issued, renewed and sent to every ready edge
+by the server). Later: a list of global domains managed in the admin panel (add, verify, pause, remove), one wildcard certificate and wildcard
+DNS record per domain on every edge, and a rule for which domain a new name gets (a default, or the user's choice).
