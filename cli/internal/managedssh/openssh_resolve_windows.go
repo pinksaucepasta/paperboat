@@ -18,6 +18,9 @@ var windowsOpenSSHCandidatePaths = []string{
 	`C:\Program Files\OpenSSH-Win64\ssh.exe`,
 }
 
+// ResolveOpenSSH is the trusted native ssh.exe pb starts.
+func ResolveOpenSSH() (string, error) { return resolveOpenSSHExecutable("ssh") }
+
 func resolveOpenSSHExecutable(value string) (string, error) {
 	if value == "" {
 		value = "ssh.exe"

@@ -17,11 +17,7 @@ import (
 )
 
 func executeManagedSSHTool(ctx context.Context, tool string, arguments, environment []string) error {
-	path, err := exec.LookPath(tool)
-	if err != nil {
-		return managedssh.NativeLaunchError{Err: err}
-	}
-	path, err = filepath.Abs(path)
+	path, err := managedToolPath(tool)
 	if err != nil {
 		return managedssh.NativeLaunchError{Err: err}
 	}
@@ -57,6 +53,25 @@ func executeManagedSSHTool(ctx context.Context, tool string, arguments, environm
 		environment = withDefaultEnvironment(environment, "MSYS2_ARG_CONV_EXCL", "*")
 	}
 	return (managedssh.OpenSSHExecutor{}).Execute(ctx, path, arguments, environment)
+}
+
+// managedToolPath is the program pb starts for a tool. scp and sftp are those beside the OpenSSH pb ssh uses: Git for
+// Windows' may be first on PATH, and its ssh cannot use Paperboat's agent (a named pipe) or proxy.
+func managedToolPath(tool string) (string, error) {
+	if tool != "rsync" {
+		ssh, err := managedssh.ResolveOpenSSH()
+		if err != nil {
+			return "", errors.Join(managedssh.ErrOpenSSHUnavailable, err)
+		}
+		path := filepath.Join(filepath.Dir(ssh), tool+".exe")
+		_, err = os.Stat(path)
+		return path, err
+	}
+	path, err := exec.LookPath(tool)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(path)
 }
 
 // cygpathUnder converts with the cygpath beside rsync.exe; a native rsync without one keeps the path.
