@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -116,5 +117,20 @@ func TestExecEnvironmentValidationDoesNotExposeValues(t *testing.T) {
 	result, err := parseExecEnvironment([]string{"TOKEN=PRIVATE_ENV_VALUE=with-equals"})
 	if err != nil || result["TOKEN"] != "PRIVATE_ENV_VALUE=with-equals" {
 		t.Fatal("valid environment assignment changed")
+	}
+}
+
+// A locked login keychain (every command that pb exec runs on a Mac) was reported as the generic failure.
+func TestUnreadableCredentialStoreNamesTheKeychain(t *testing.T) {
+	locked := &sessionauth.CredentialFailure{Cause: fmt.Errorf("read access token: %w",
+		errors.Join(config.ErrCredentialStoreUnavailable, errors.New("login keychain locked")))}
+	if got := userFacingError(locked); !strings.Contains(got, "security unlock-keychain") || !strings.Contains(got, "pb exec") {
+		t.Fatalf("message = %q", got)
+	}
+	if got := userFacingError(&sessionauth.CredentialFailure{Cause: syscall.EIO}); strings.Contains(got, "keychain") {
+		t.Fatalf("unrelated failure names the keychain: %q", got)
+	}
+	if got := userFacingError(config.ErrCredentialStoreUnavailable); strings.Contains(got, "keychain") {
+		t.Fatalf("a store failure outside the sign-in names the keychain: %q", got)
 	}
 }

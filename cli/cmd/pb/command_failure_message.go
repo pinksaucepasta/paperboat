@@ -157,6 +157,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 			return rejected.Error()
 		}
 	}
+	if credentialStoreUnreadable(err) {
+		return "Paperboat could not read this machine's sign-in from the system credential store. " + credentialStoreRecovery
+	}
 	// The classifier's owner (a bounded walk; errors.Is never ends on a cyclic join) is the bare or the wrapped form.
 	if gone, ok := failure.owner.(accessTunnelCauseError); failure.kind == commandOperational && (failure.owner == ErrAccessTunnelGone || ok && gone.classification == ErrAccessTunnelGone) {
 		return accessTunnelGoneMessage
@@ -478,3 +481,17 @@ func nativeLaunchMessage(launch managedssh.NativeLaunchError) string {
 // previewSessionLimitMessage names the limit the local service hit: previews this computer keeps open (the daemon's own
 // cap, separate from the plan limit the server enforces), so a user at the cap is not told the service is restarting.
 const previewSessionLimitMessage = "This computer already keeps the most previews open that its Paperboat service allows. Stop one you no longer need (pb preview stop), then retry."
+
+// Commands that `pb exec` runs on a Mac have no login session, so the login keychain reads as locked to them.
+const credentialStoreRecovery = "On macOS the login keychain is locked or out of reach here (commands run by `pb exec` cannot use it): run the command in the Mac's own Terminal or in an SSH session whose keychain is unlocked (`security unlock-keychain`)."
+
+func credentialStoreUnreadable(err error) bool {
+	if _, ok := soleCommandOwner(err).(*sessionauth.CredentialFailure); !ok {
+		return false
+	}
+	found := false
+	return onlyEnvironmentFailureLeaves(err, func(leaf error) bool {
+		found = found || leaf == config.ErrCredentialStoreUnavailable
+		return true
+	}) && found
+}
