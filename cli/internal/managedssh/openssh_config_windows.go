@@ -98,13 +98,14 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (result OpenSSHConfigResult, res
 		return OpenSSHConfigResult{}, conflict
 	}
 	includeLine := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
+	lfMain := lfOpenSSHInclude(main)
 	var nextMain []byte
 	var includeChunk string
 	if recordSet {
-		if record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || ownedSet && record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
+		if record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || ownedSet && record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(lfMain, []byte(record.IncludeChunk)) != 1 {
 			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 		}
-		nextMain, includeChunk = main, record.IncludeChunk
+		nextMain, includeChunk = lfMain, record.IncludeChunk
 	} else {
 		if ownedSet || bytes.Contains(main, []byte(openSSHIncludeMarker)) || bytes.Contains(main, []byte(openSSHBeginMarker)) {
 			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
@@ -220,16 +221,23 @@ func UninstallOpenSSHConfig(home string, _ uint32) (result OpenSSHConfigResult, 
 		}
 		return OpenSSHConfigResult{}, nil
 	}
+	lfMain := lfOpenSSHInclude(main)
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
+	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(lfMain, []byte(record.IncludeChunk)) != 1 {
 		return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 	}
-	nextMain := bytes.Replace(main, []byte(record.IncludeChunk), nil, 1)
+	nextMain := bytes.Replace(lfMain, []byte(record.IncludeChunk), nil, 1)
 	nextMainSet := record.MainExisted || len(nextMain) != 0
 	if err := writeWindowsSSHTransaction(directory, sid, main, true, owned, true, record, optionalWindowsSSHBytes(nextMain, nextMainSet), nil, nil); err != nil {
 		return OpenSSHConfigResult{}, err
 	}
 	return OpenSSHConfigResult{Changed: true}, nil
+}
+
+// lfOpenSSHInclude is the config with pb's Include line as pb wrote it, also after PowerShell or an editor saved CRLF.
+func lfOpenSSHInclude(main []byte) []byte {
+	const line = "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker
+	return bytes.ReplaceAll(main, []byte(line+"\r\n"), []byte(line+"\n"))
 }
 
 func windowsOpenSSHStateAbsent(home string) (bool, error) {

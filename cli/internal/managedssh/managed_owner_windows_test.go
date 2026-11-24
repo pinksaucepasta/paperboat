@@ -3,6 +3,8 @@
 package managedssh
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -98,4 +100,39 @@ func assertWindowsManagedSSHStateOwner(t *testing.T, home string, owner *windows
 
 func windowsOwnerMatches(path string, owner *windows.SID) bool {
 	return windowssecurity.OwnerMatchesSID(path, owner)
+}
+
+// PowerShell's Set-Content saves the user's config with CRLF: pb's Include line is still its own.
+func TestWindowsOpenSSHConfigSavedWithCRLFIsRepairedAndUninstalled(t *testing.T) {
+	home := managedSSHWindowsTestHome(t)
+	config := managedSSHWindowsTestConfig(home)
+	main := filepath.Join(home, ".ssh", "config")
+	saveCRLF := func() {
+		t.Helper()
+		value, err := os.ReadFile(main)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value = bytes.ReplaceAll(value, []byte("\n"), []byte("\r\n"))
+		if err := os.WriteFile(main, value, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	saveCRLF()
+	if err := os.Remove(filepath.Join(home, ".ssh", "paperboat_config")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatalf("install over a CRLF config: %v", err)
+	}
+	if err := ValidateOpenSSHConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	saveCRLF()
+	if _, err := UninstallOpenSSHConfig(home, 0); err != nil {
+		t.Fatalf("uninstall a CRLF config: %v", err)
+	}
 }
