@@ -116,7 +116,7 @@ def paths(expected):
     # pb ping reports the carrier of each sample: direct or relay.
     end = time.time() + 120
     while True:
-        report = json.loads(subprocess.check_output(['pb', 'ping', alias, '--json'], timeout=90))
+        report = json.loads(subprocess.run(['pb', 'ping', alias, '--json'], stdout=subprocess.PIPE, timeout=90).stdout)
         report = report.get('data', report)
         seen = {sample['path'] for sample in report['samples'] if not sample['lost']}
         if seen and (seen == {'direct'} if expected == 'direct' else 'direct' not in seen):

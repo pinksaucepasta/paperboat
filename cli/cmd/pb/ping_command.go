@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
@@ -141,16 +142,23 @@ func actionPing(command *cobra.Command, args []string) error {
 		report.AverageRTTMS = float64(total) / float64(time.Millisecond) / float64(report.Received)
 	}
 	report.LossPercent = float64(report.Lost) * 100 / float64(report.Sent)
+	return writePingReport(command.OutOrStdout(), report, jsonOutput)
+}
+
+func writePingReport(out io.Writer, report pingReport, jsonOutput bool) error {
 	if jsonOutput {
-		encoder := json.NewEncoder(command.OutOrStdout())
+		encoder := json.NewEncoder(out)
 		encoder.SetEscapeHTML(false)
-		return encoder.Encode(report)
+		if err := encoder.Encode(report); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(out, "summary: sent=%d received=%d loss=%.1f%%", report.Sent, report.Received, report.LossPercent)
+		if report.Received > 0 {
+			fmt.Fprintf(out, " rtt min/avg/max=%.2f/%.2f/%.2fms", report.MinRTTMS, report.AverageRTTMS, report.MaxRTTMS)
+		}
+		fmt.Fprintln(out)
 	}
-	fmt.Fprintf(command.OutOrStdout(), "summary: sent=%d received=%d loss=%.1f%%", report.Sent, report.Received, report.LossPercent)
-	if report.Received > 0 {
-		fmt.Fprintf(command.OutOrStdout(), " rtt min/avg/max=%.2f/%.2f/%.2fms", report.MinRTTMS, report.AverageRTTMS, report.MaxRTTMS)
-	}
-	fmt.Fprintln(command.OutOrStdout())
 	if report.Received == 0 {
 		return exitCodeError{code: 1}
 	}

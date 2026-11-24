@@ -29,7 +29,7 @@ import time
 import uuid
 
 from install_lifecycle import registration
-from pairing_lifecycle import command_diagnostic, invoke
+from pairing_lifecycle import command_diagnostic, command_result, invoke
 from preview_lifecycle import exposed
 import winhost
 
@@ -272,7 +272,11 @@ def ping_paths(binary, alias, expected):
     """`pb ping` names the carrier of each sample: wait until every delivered one is direct, or none is."""
     deadline = time.monotonic() + 120
     while True:
-        samples = invoke(binary, 'ping', alias, '--json', timeout=90)['samples']
+        # Exit 1 with a report = every sample lost: keep polling.
+        result = command_result(binary, 'ping', alias, '--json', timeout=90)
+        report = json.loads(result.stdout)
+        assert 'samples' in report, command_diagnostic([str(binary), 'ping', alias], result.stdout, result.stderr)
+        samples = report['samples']
         seen = {sample['path'] for sample in samples if not sample['lost']}
         if seen and (seen == {'direct'} if expected == 'direct' else 'direct' not in seen):
             return

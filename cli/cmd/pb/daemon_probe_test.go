@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -45,5 +47,21 @@ func TestPingCountsAMachineThatStoppedAnsweringAsLost(t *testing.T) {
 	redial := &localapi.RemoteError{Code: "peer_probe_unavailable"}
 	if !pingLost(redial, true) || pingLost(redial, false) || !pingLost(context.DeadlineExceeded, false) || pingLost(localapi.ErrPermission, true) {
 		t.Fatal("wrong lost samples")
+	}
+}
+
+func TestPingExitsOneWhenEverySampleIsLost(t *testing.T) {
+	for _, jsonOutput := range []bool{false, true} {
+		for received, want := range []int{1, 0} {
+			var out bytes.Buffer
+			var exit exitCodeError
+			err := writePingReport(&out, pingReport{Sent: 1, Received: received, Lost: 1 - received}, jsonOutput)
+			if errors.As(err, &exit); exit.code != want || (want == 0 && err != nil) || out.Len() == 0 {
+				t.Fatalf("json=%t received=%d err=%v out=%q", jsonOutput, received, err, out.String())
+			}
+			if jsonOutput && !json.Valid(out.Bytes()) {
+				t.Fatalf("invalid JSON %q", out.String())
+			}
+		}
 	}
 }
