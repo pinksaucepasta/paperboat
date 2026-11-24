@@ -89,7 +89,7 @@ func TestWindowsWorkerOwnedOutputCancellationAndConcurrentReap(t *testing.T) {
 	close(results)
 	for err := range results {
 		if err != nil {
-			t.Fatalf("concurrent cleanup: %T", err)
+			t.Fatalf("concurrent cleanup: %T %v", err, causeTexts(err))
 		}
 	}
 	if worker.command.ProcessState == nil || !worker.command.ProcessState.Exited() {
@@ -245,4 +245,25 @@ func TestWindowsWorkerExitHelper(t *testing.T) {
 	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 	_, _ = io.WriteString(os.Stderr, "pb: the session owner is unavailable\n")
 	os.Exit(1)
+}
+
+// causeTexts lists the messages under a failure whose own message is fixed (a CommandFailure hides its causes).
+func causeTexts(err error) []string {
+	var texts []string
+	var walk func(error)
+	walk = func(err error) {
+		switch inner := err.(type) {
+		case interface{ Unwrap() []error }:
+			for _, cause := range inner.Unwrap() {
+				walk(cause)
+			}
+		case interface{ Unwrap() error }:
+			texts = append(texts, err.Error())
+			walk(inner.Unwrap())
+		default:
+			texts = append(texts, err.Error())
+		}
+	}
+	walk(err)
+	return texts
 }
