@@ -4,6 +4,8 @@
 # A raw SSH logon is a network session (no console, no pipes or child processes for some tests, git cannot create
 # folders): its results are not signal.
 #   env: PACKAGES (default ./...)  RUN (go test -run)  COUNT (default 1)  RACE (-race or empty)  EVENTS (dir for go test -json logs)
+#        NATIVE=1 also runs the OpenSSH native qualification (installs the pinned OpenSSH package and PaperboatSshd machine-wide:
+#        throwaway machines only, cli module only)
 # The runner is an elevated administrator, so what a test creates is owned by Administrators, which the credential and
 # lock checks refuse. win-test-exec runs each test binary with an unelevated token and a private TEMP/APPDATA root that
 # token owns. The tests in elevated_tests.txt need Administrators/SYSTEM ownership and run second, elevated.
@@ -40,8 +42,7 @@ status=0
 go test -json $RACE -exec "$exec_dir/win-test-exec.exe" -skip "^($all_elevated)\$" -timeout 15m -count "$COUNT" \
   ${RUN:+-run "$RUN"} $PACKAGES | report main || status=1
 if [ -n "$elevated" ]; then
-  # PB_TEST_ELEVATED_LOCAL_CA opts TestElevatedAdministratorLocalCAState in: it writes a CA under ProgramData (removed after).
-  PB_TEST_ELEVATED_LOCAL_CA=1 go test -json $RACE -exec "$exec_dir/win-test-exec.exe -elevated" -run "^($(paste -sd'|' <<<"$elevated"))\$" \
+  go test -json $RACE -exec "$exec_dir/win-test-exec.exe -elevated" -run "^($(paste -sd'|' <<<"$elevated"))\$" \
     -timeout 15m -count "$COUNT" $PACKAGES | report elevated || status=1
   # A renamed or deleted elevated test would make the second pass run nothing and look green.
   if [ -z "$RUN" ] && [ "$PACKAGES" = "./..." ]; then
@@ -50,6 +51,16 @@ if [ -n "$elevated" ]; then
         { echo "elevated test $name never ran: fix or remove it in cli/tools/win-test-exec/elevated_tests.txt"; status=1; }
     done <<<"$elevated"
   fi
+fi
+
+native='TestNativeProvisionAndService|TestNativeRepairStoppedService|TestNativeUninstallOwnership|TestNativeFirewallProfiles|TestNativeSCMCrashRecovery'
+if [ -n "${NATIVE:-}" ] && [ "$(basename "$PWD")" = cli ] && [ -z "$RUN" ]; then
+  PAPERBOAT_WINDOWS_OPENSSH_NATIVE=1 go test -json $RACE -exec "$exec_dir/win-test-exec.exe -elevated" -run "^($native)\$" \
+    -timeout 45m -count 1 ./internal/windowsopenssh | report native || status=1
+  for name in ${native//|/ }; do
+    grep -E '"Action":"(pass|fail)"' "$EVENTS/native.jsonl" | grep -qF "\"Test\":\"$name\"," ||
+      { echo "native test $name never ran"; status=1; }
+  done
 fi
 
 # What ran: counts and every skipped test (a skip is a test that did not run on Windows).
