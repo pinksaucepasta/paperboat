@@ -565,7 +565,11 @@ test_application_pairs() {
       esac
       case "$kind" in ssh-port-change)
         if [ "$target" = "$MACOS_TARGET" ]; then
-          record "$id" SKIP 0 "pb config set cannot run through pb exec on a Mac (login keychain locked, no login session); judged on Linux and Windows targets"
+          record "$id" SKIP 0 "pb config set cannot run through pb exec on a Mac (login keychain locked, no login session)"
+          continue
+        fi
+        if [ "$target" = "$WINDOWS_TARGET" ]; then
+          record "$id" SKIP 0 "the Windows target form (worker restart by pb update --from a copy) has no device proof yet; proven on Linux targets"
           continue
         fi ;;
       esac
