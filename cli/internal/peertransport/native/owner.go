@@ -225,6 +225,7 @@ type Owner struct {
 	mu               sync.Mutex
 	closed           bool
 	sessions         map[*Session]struct{}
+	closingUntil     time.Time                 // latest end of a closed session's closing period; guarded by mu
 	shared           map[sharedKey]*sharedDial // guarded by mu
 	handshakes       map[string]*peerHandshake
 	restart          restartTracker       // clean closes of peers, the short handshake waits they open, measured handshakes; guarded by mu
@@ -533,7 +534,15 @@ func (o *Owner) startWorker() bool {
 	o.workers.Add(1)
 	return true
 }
-func (o *Owner) remove(session *Session) { o.mu.Lock(); delete(o.sessions, session); o.mu.Unlock() }
+func (o *Owner) remove(session *Session) {
+	until := time.Now().Add(session.quic.ClosingPeriod())
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.sessions, session)
+	if until.After(o.closingUntil) {
+		o.closingUntil = until
+	}
+}
 
 func (o *Owner) Close() error {
 	o.mu.Lock()
@@ -561,6 +570,12 @@ func (o *Owner) Close() error {
 	}
 	closing.Wait()
 	result := errors.Join(failures...)
+	// A CONNECTION_CLOSE is only queued in the userspace path: closing the network now drops it, and the peer's
+	// streams hang until its idle timeout.
+	o.mu.Lock()
+	closingUntil := o.closingUntil
+	o.mu.Unlock()
+	time.Sleep(time.Until(closingUntil))
 	result = errors.Join(result, o.authority.Close())
 	o.workers.Wait()
 	return result

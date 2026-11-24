@@ -20,6 +20,30 @@ func (shutdownKeys) Lookup(context.Context, string) (ed25519.PublicKey, bool, er
 	return nil, false, nil
 }
 
+// Closing the network inside a closed session's closing period drops its queued CONNECTION_CLOSE.
+func TestOwnerCloseKeepsTheNetworkForTheClosingPeriod(t *testing.T) {
+	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{
+		Issuer: "https://control.example.test", Keys: shutdownKeys{},
+		Self: tailnet.NetworkBinding{
+			AccountID: "account", EndpointID: "cli", Role: "cli", EndpointGeneration: 1,
+			QUICCertificateFingerprint: strings.Repeat("0", 64),
+			QUICPublicKey:              base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	until := time.Now().Add(150 * time.Millisecond)
+	owner := &Owner{authority: authority, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{}), closingUntil: until}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if time.Now().Before(until) {
+		t.Fatal("owner closed its network inside the closing period")
+	}
+}
+
 func TestOwnerShutdownInitiatesEverySessionBeforeWaitingForRelease(t *testing.T) {
 	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{
 		Issuer: "https://control.example.test", Keys: shutdownKeys{},
