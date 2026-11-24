@@ -23,7 +23,7 @@ func TestNativeProvisionAndService(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	config := DefaultConfig(nil)
+	config := nativeConfig(t)
 	inventory, inventoryErr := Inventory(ctx, config)
 	if inventoryErr != nil {
 		t.Fatalf("inventory approved OpenSSH before setup: %v", inventoryErr)
@@ -36,7 +36,7 @@ func TestNativeProvisionAndService(t *testing.T) {
 	if result.PackageID != PackageID || result.Version != ApprovedVersion || result.Port != config.Port {
 		t.Fatalf("unexpected setup result: %+v", result)
 	}
-	assertNativeServiceSID(t)
+	assertNativeServiceSID(t, config)
 	health, err := CheckLoopbackHealth(ctx, config, result.Result)
 	if err != nil {
 		t.Fatal(err)
@@ -63,12 +63,12 @@ func TestNativeRepairStoppedService(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	config := DefaultConfig(nil)
+	config := nativeConfig(t)
 	setup, err := Setup(ctx, config)
 	if err != nil {
 		t.Fatalf("establish repair precondition: %v", err)
 	}
-	if output, err := config.Runner.Run(ctx, "sc.exe", "stop", ServiceName); err != nil {
+	if output, err := config.Runner.Run(ctx, "sc.exe", "stop", config.ServiceName); err != nil {
 		t.Fatalf("stop Paperboat-owned service: %v: %s", err, boundedOutput(output))
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -106,7 +106,7 @@ func TestNativeRepairStoppedService(t *testing.T) {
 	if repaired.Inventory.Class != InstallationPaperboatApproved || len(repaired.Health.Listeners) < 2 {
 		t.Fatalf("incomplete repair result: %+v", repaired)
 	}
-	assertNativeServiceSID(t)
+	assertNativeServiceSID(t, config)
 	if err := verifyHostKeyFiles(hostKey); err != nil {
 		t.Fatalf("repair did not restore protected host-key ACLs: %v", err)
 	}
@@ -119,24 +119,24 @@ func TestNativeRepairStoppedService(t *testing.T) {
 	}
 }
 
-func assertNativeServiceSID(t *testing.T) {
+func assertNativeServiceSID(t *testing.T, owned Config) {
 	t.Helper()
 	manager, err := mgr.Connect()
 	if err != nil {
 		t.Fatalf("connect to SCM for service SID verification: %v", err)
 	}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(ServiceName)
+	service, err := manager.OpenService(owned.ServiceName)
 	if err != nil {
-		t.Fatalf("open %s for service SID verification: %v", ServiceName, err)
+		t.Fatalf("open %s for service SID verification: %v", owned.ServiceName, err)
 	}
 	defer service.Close()
 	config, err := service.Config()
 	if err != nil {
-		t.Fatalf("query %s service SID type: %v", ServiceName, err)
+		t.Fatalf("query %s service SID type: %v", owned.ServiceName, err)
 	}
 	if config.SidType != windows.SERVICE_SID_TYPE_UNRESTRICTED {
-		t.Fatalf("%s service SID type = %d, want unrestricted", ServiceName, config.SidType)
+		t.Fatalf("%s service SID type = %d, want unrestricted", owned.ServiceName, config.SidType)
 	}
 }
 
@@ -148,7 +148,7 @@ func TestNativeUninstallOwnership(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	config := DefaultConfig(nil)
+	config := nativeConfig(t)
 	setup, err := Setup(ctx, config)
 	if err != nil {
 		t.Fatalf("establish uninstall precondition: %v", err)
@@ -204,7 +204,7 @@ func TestNativeFirewallProfiles(t *testing.T) {
 	// Setup verifies six signed OpenSSH binaries and may need to query Windows
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	config := DefaultConfig(nil)
+	config := nativeConfig(t)
 	setup, err := Setup(ctx, config)
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +245,7 @@ func TestNativeSCMCrashRecovery(t *testing.T) {
 	// bounded, but allow the full verification/recovery sequence to complete.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	config := DefaultConfig(nil)
+	config := nativeConfig(t)
 	setup, err := Setup(ctx, config)
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestNativeSCMCrashRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(ServiceName)
+	service, err := manager.OpenService(config.ServiceName)
 	if err != nil {
 		t.Fatal(err)
 	}
