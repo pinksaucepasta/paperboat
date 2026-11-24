@@ -338,9 +338,12 @@ class WindowsChecksRunner(unittest.TestCase):
         device.ps = lambda step, script, **kw: calls.append((script, kw.get('action'), kw.get('addr'), kw.get('inbound'))) or (0, '')
         device.start = lambda argv, directory: calls.append(('start', argv[0])) or 1
         device.temp_dir = lambda prefix: __import__('contextlib').nullcontext('dir')
-        cut = device.cut_network(45)
+        with self.assertRaises(winhost.DeviceError):  # a full cut would kill the client under test: the peer is cut
+            device.cut_network(45)
+        self.assertEqual([], calls)
+        cut = device.cut_network(45, addresses=['203.0.113.7'])
         self.assertEqual(winhost.NET_CUT, calls[0][0])
-        self.assertEqual(('add', winhost.NON_LOOPBACK, True), calls[0][1:])
+        self.assertEqual(('add', ['203.0.113.7'], True), calls[0][1:])
         self.assertIn('Program=$x', winhost.NET_CUT)  # program scope: the controller's SSH is not pb.exe
         self.assertEqual(('start', 'powershell.exe'), calls[1])  # the timer that lifts it whatever happens here
         cut.release(), cut.release()
