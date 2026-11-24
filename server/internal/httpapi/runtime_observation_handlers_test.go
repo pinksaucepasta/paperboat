@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -593,7 +594,24 @@ func TestRuntimeObservationOfRemovedMachineIsNotFound(t *testing.T) {
 			request.Header.Set("Authorization", "Bearer machine-token")
 			addRuntimeProof(request)
 			recorder := httptest.NewRecorder()
-			runtimeObservation(&fakeRuntimeObservationRepository{}, &fakeRuntimeIdentity{}, 10, tc.sink).ServeHTTP(recorder, request)
+			store := &supportTestStore{}
+			reports, err := supportreport.New(store, supportreport.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := supportMiddleware(reports, slog.New(slog.NewTextHandler(io.Discard, nil)), runtimeObservation(&fakeRuntimeObservationRepository{}, &fakeRuntimeIdentity{}, 10, tc.sink))
+			handler.ServeHTTP(recorder, request)
+			drained, cancel := context.WithCancel(t.Context())
+			cancel()
+			if err := reports.Run(drained); err != nil { // a canceled Run stores what is queued
+				t.Fatal(err)
+			}
+			failed := slices.ContainsFunc(store.records, func(r supportreport.Record) bool {
+				return r.HTTPStatus >= 500 || r.Outcome == "failed"
+			})
+			if failed != (tc.status != http.StatusNotFound) {
+				t.Fatalf("status=%d support reports=%+v", recorder.Code, store.records)
+			}
 			if recorder.Code != tc.status || tc.status == http.StatusNotFound && !strings.Contains(recorder.Body.String(), `"machine_not_found"`) {
 				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
