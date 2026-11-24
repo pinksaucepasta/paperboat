@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 func TestWaitGuardReadyRejectsGuardThatAnswersThenDrops(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "guard.sock")
+	socket := filepath.Join(shorttemp.Dir(t), "guard.sock") // macOS sun_path is 104 bytes
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
