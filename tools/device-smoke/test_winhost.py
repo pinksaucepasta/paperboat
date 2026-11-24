@@ -2021,6 +2021,7 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(['STATE', 'PW_CHROMIUM'], windows_checks.missing(table['auth-lifecycle'][1], args))
         self.assertEqual(['--empty_team'], windows_checks.missing(table['workspace-switch'][1], args))
+        args.config_repository = ''  # the default is SMOKE_CONFIG_REPO of the machine's targets.json: a run without one names the gap
         self.assertEqual(['--config_repository'], windows_checks.missing(table['config-team-default'][1], args))
         for check in ('status-bar', 'completion', 'bugreport', 'inventory-freshness', 'session-limit', 'doctor', 'send-self',
                       'config-customize', 'cli-paging', 'network-inventory', 'approve-refusals'):
