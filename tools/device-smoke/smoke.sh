@@ -1110,6 +1110,21 @@ test_fresh_pair_access() {
   fi
 }
 
+# Runs only when SMOKE_FRESH_HOST and SMOKE_FRESH_BINARY are set (as fresh-pair-access): two FRESH token-enrolled containers, no login,
+# no ssh key or agent on the client; pb ssh, pb scp and pb rsync reach the target by alias, name and machine id, hashes verified on the target.
+test_fresh_token_ssh_tools() {
+  skipped fresh-token-ssh-tools && return
+  [ -n "${SMOKE_FRESH_HOST:-}" ] && [ -n "${SMOKE_FRESH_BINARY:-}" ] || return 0
+  local out status t0
+  t0=$(now)
+  out=$("$HERE/fresh_token_ssh_tools.sh" "$SMOKE_FRESH_HOST" "$SMOKE_FRESH_BINARY" 2>&1); status=$?
+  if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="fresh-token-ssh-tools" and r["status"]=="PASS"' "$out" 2>/dev/null; then
+    record fresh-token-ssh-tools PASS $(( $(now)-t0 )) "token-only client with no ssh key or agent: ssh, scp and rsync by alias, name and machine id, hashes verified on the target"
+  else
+    record_command_failure fresh-token-ssh-tools $(( $(now)-t0 )) "$out"
+  fi
+}
+
 # team-lifecycle / team-roles need a controlled teammate profile (a second signed-in account, teammate_profile.py)
 # on the device that runs them. The --teammate device (default: configured teammate) is the fixture team's independent teammate
 # and runs both checks in the member role; every other device of the run runs them in the owner role, a container
@@ -1309,6 +1324,7 @@ test_application_pairs inbox-manage inbox_manage.py
 test_inbox_approval
 test_private_access
 test_fresh_pair_access
+test_fresh_token_ssh_tools
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_application_pairs preview-inspect preview_inspect.py
