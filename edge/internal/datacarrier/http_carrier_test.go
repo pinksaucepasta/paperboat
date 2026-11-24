@@ -234,7 +234,7 @@ func TestHTTPServicePanicAbortPrivacyAndRecovery(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(failures) != 2 || failures[0] != ErrCarrierHTTPPanic || failures[1] != errCarrierHTTPDiagnostic {
+	if len(failures) != 2 || failures[0] != ErrCarrierHTTPPanic || failures[1] != ErrCarrierHTTPServer {
 		t.Fatalf("duplicate/unsafe HTTP failure owners: %v", failures)
 	}
 	for index, failure := range failures {

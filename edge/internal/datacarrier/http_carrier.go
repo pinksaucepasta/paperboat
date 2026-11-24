@@ -22,7 +22,6 @@ import (
 )
 
 var ErrCarrierHTTPPanic = errors.New("data carrier HTTP handler panicked")
-var errCarrierHTTPDiagnostic = errors.New("data carrier HTTP server reported an internal diagnostic")
 var errCarrierListener = errors.New("data carrier listener failed")
 
 const httpCarrierPath = connectorprotocol.CarrierHTTPPath
@@ -345,7 +344,11 @@ func (writer carrierHTTPDiagnosticWriter) Write(data []byte) (int, error) {
 		text = text[:240]
 	}
 	slog.Warn("carrier_http_diagnostic", "text", text)
-	writer.service.observeFailure(errCarrierHTTPDiagnostic)
+	failure := ErrCarrierHTTPServer
+	if ClientCausedDiagnostic(data) {
+		failure = errCarrierConnection
+	}
+	writer.service.observeFailure(failure)
 	return len(data), nil
 }
 

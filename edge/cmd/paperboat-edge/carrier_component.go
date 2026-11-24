@@ -24,6 +24,19 @@ import (
 // gives one carrier attempt (dial, TLS, ping) five seconds.
 const admissionMissWait = 3 * time.Second
 
+// reportCarrierFailure reports a server failure as one; one connection's failure is only logged.
+func reportCarrierFailure(ctx context.Context, reporter *reporting.Reporter, err error) {
+	switch {
+	case errors.Is(err, datacarrier.ErrCarrierHTTPPanic):
+		reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
+	case errors.Is(err, datacarrier.ErrCarrierHTTPServer):
+		reporter.ObserveFailure(ctx, "http_server", err)
+	default:
+		thumbprint, remote := datacarrier.FailurePeer(err)
+		edgetelemetry.Log(ctx, sharedtelemetry.SeverityWarn, "carrier_connection_failed", sharedtelemetry.OutcomeRejected, "reason", datacarrier.FailureReason(err), "key_thumbprint", thumbprint, "remote_ip", remote)
+	}
+}
+
 func newCarrierComponentWithTelemetry(
 	deployment config.Deployment,
 	serverCertificate tls.Certificate,
@@ -120,13 +133,7 @@ func newCarrierComponentWithTelemetry(
 	service, err := datacarrier.NewHTTPService(context.Background(), datacarrier.ServiceConfig{
 		Carrier: carrierConfig,
 		OnFailure: func(ctx context.Context, err error) {
-			if errors.Is(err, datacarrier.ErrCarrierHTTPPanic) {
-				reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
-			} else {
-				thumbprint, remote := datacarrier.FailurePeer(err)
-				edgetelemetry.Log(ctx, sharedtelemetry.SeverityWarn, "carrier_connection_failed", sharedtelemetry.OutcomeRejected, "reason", datacarrier.FailureReason(err), "key_thumbprint", thumbprint, "remote_ip", remote)
-				reporter.ObserveFailure(ctx, "http_server", err)
-			}
+			reportCarrierFailure(ctx, reporter, err)
 		},
 		TCP:  &datacarrier.EndpointConfig{Address: deployment.CarrierTCPListenAddress, TLS: tlsConfig, PeerBinding: peerBinding},
 		QUIC: &datacarrier.EndpointConfig{Address: deployment.CarrierQUICListenAddress, TLS: tlsConfig, PeerBinding: peerBinding},
