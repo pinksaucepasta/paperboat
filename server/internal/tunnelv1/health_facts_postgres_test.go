@@ -82,6 +82,15 @@ VALUES ($1,$2,$3,$4,$5,'exact','dns-challenge://test','stable.example.test','gen
 	if view := explainHealth(HealthView{OverallCode: "tunnel_pending"}, facts); view.OverallCode != "connector_offline" {
 		t.Fatalf("stopped host is explained as %s", view.OverallCode)
 	}
+	// A carrier reconnecting while the tunnel is served, on this edge or the other one, is not an offline host.
+	if view := explainHealth(HealthView{OverallCode: "ready"}, facts); view.OverallCode != "ready" {
+		t.Fatalf("a carrier blip turns a ready tunnel into %s", view.OverallCode)
+	}
+	served := facts
+	served.EngineServed = true
+	if view := explainHealth(HealthView{OverallCode: "tunnel_pending"}, served); view.OverallCode == "connector_offline" {
+		t.Fatal("a tunnel one edge still serves is reported offline")
+	}
 	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(time.Minute))
 	if err != nil || !facts.HostConnected {
 		t.Fatalf("a dead edge's last report marks the host offline: %+v err=%v", facts, err)
