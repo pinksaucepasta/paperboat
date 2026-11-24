@@ -45,7 +45,7 @@ RUN
 printf '@echo off\r\n"C:\\Program Files\\Git\\bin\\bash.exe" --noprofile --norc "%%~dp0.pb-run.sh"\r\n' > "$stage/.pb-run.cmd"
 
 echo "win-remote-test: syncing $sha to $host:$dir" >&2
-ssh_ "rmdir /s /q $dir 2>nul & mkdir $dir" >/dev/null
+ssh_ "rmdir /s /q $dir 2>nul & if not exist $dir mkdir $dir & del /q $dir\\exit 2>nul" >/dev/null # a run that cannot remove the directory must not leave its result file behind
 tar -C "$stage" -cf - . | ssh_ "tar -xf - -C $dir"
 
 echo "win-remote-test: $host: $module${args:+ $args} in the console session" >&2
