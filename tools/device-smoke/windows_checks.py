@@ -17,7 +17,7 @@ controller's 127.0.0.1:22, TCP forwarding (ssh -R) on the device and an elevated
 starts the config worker's service). preview-protocols and tunnel-protocols are probed from this
 controller (preview_protocol_client.go, as smoke.sh does). The origins of the survival, failure and protocol checks
 run here and are reached from the device through an ssh -R forward; the host service is PaperboatHostd-<instance>. ssh-tools runs scp and sftp only (Windows has no
-rsync). terminal-matrix skips the rows that cut the network (it would cut this controller's SSH) and the echo
+rsync). terminal-matrix-1/-2 skip the rows that cut the network (it would cut this controller's SSH) and the echo
 latency row. access-machine, private-address and private-https run with the device as the client only (the origin on a
 Unix peer through pb exec); private_access_permission drives two Unix hosts over ssh. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it); exec-long holds one pb exec for SMOKE_EXEC_LONG_SECONDS (1801).
 ENV: env-scopes, env-messages, env-delivery, env-revoke-rotation, env-ssh-hook and env-vscode-remote need the device
@@ -108,10 +108,12 @@ def checks(args):
     table['terminal-new'] = (['terminal_lifecycle.py', args.machine, '--check', 'main', '--entry', 'new'], ['--machine'])  # C045: pb new on this device, in a directory the check chose
     for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
-    # about 25 min: pass --timeout 3600. N14/N12 restart the peer's host runtime (--restart-target-cmd, a shell command
+    # two shards, each within --timeout. N14/N12 restart the peer's host runtime (--restart-target-cmd, a shell command
     # here) and this device's daemon (pb.exe service restart over ssh, built in run_check).
-    table['terminal-matrix'] = (['terminal_matrix.py', args.peer, '--restart-client-cmd', '{restart_client}'] +
-                                (['--restart-target-cmd', args.restart_target_cmd] if args.restart_target_cmd else []), ['--peer'])
+    for shard in ('1', '2'):
+        table['terminal-matrix-' + shard] = (
+            ['terminal_matrix.py', args.peer, '--shard', shard, '--restart-client-cmd', '{restart_client}'] +
+            (['--restart-target-cmd', args.restart_target_cmd] if args.restart_target_cmd else []), ['--peer'])
     for name in ('access-machine', 'private-address', 'private-https', 'path-direct', 'path-relay'):  # the device is the client; the origin runs on the peer
         table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
     table['exec-long'] = (['exec_long.py', args.peer, '--seconds', os.environ.get('SMOKE_EXEC_LONG_SECONDS', '')],
@@ -410,7 +412,7 @@ def build_parser():
     parser.add_argument('--owner-machine-id', help='policy-team: the owner machine shared into the team')
     parser.add_argument('--owner-machine-name')
     parser.add_argument('--owner-pb', default='.local/bin/pb')
-    parser.add_argument('--restart-target-cmd', default='', help="terminal-matrix N14: shell command restarting the peer's host runtime")
+    parser.add_argument('--restart-target-cmd', default='', help="terminal-matrix-2 N14: shell command restarting the peer's host runtime")
     parser.add_argument('--vault-password-file', help="owner-only file on the device: the device account's ENV vault password")
     parser.add_argument('--teammate-vault-password-file', help="the same for the device's second account profile")
     parser.add_argument('--readonly-team', help='env-messages: a team the device account is a read-only member of')

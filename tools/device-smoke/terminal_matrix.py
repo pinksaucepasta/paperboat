@@ -555,6 +555,9 @@ def control_plane_down(a, sessions):
                 for ip in addrs:
                     iptables('-D', 'OUTPUT', '-d', ip, '-j', 'DROP')
         row('N5 server unreachable 2 min: open terminal keeps working', ok, f'{(i + 1) * 30} s' + capture)
+        back = target_answers(a.target)  # the next row's first connect needs the target online again
+        row('N5 server unreachable: the target takes new connections after the server returns', back is not None,
+            'pb exec failed for 180 s' if back is None else f'{back:.1f} s')
     finally:
         c1.close()
 
@@ -613,18 +616,25 @@ def run_shell(command, timeout=120):
         raise RuntimeError(f'restart command failed ({result.returncode})')
 
 
+def target_answers(target, timeout=180):
+    """Seconds until `pb exec` works on the target, None after `timeout`: a first connect refuses an offline machine at once."""
+    started = time.monotonic()
+    while pb_run('exec', target, '--', *(['cmd', '/c', 'exit', '0'] if win() else ['true'])).returncode != 0:
+        if time.monotonic() - started > timeout:
+            return None
+        time.sleep(5)
+    return time.monotonic() - started
+
+
 def restarts(a, sessions):
     """N14 (F3-18): the host runtime, then this machine's daemon, restart while a terminal runs: the shell and its
     scrollback survive, the terminal recovers on its own, nothing typed or printed is lost or repeated."""
     if not a.restart_target_cmd or not a.restart_client_cmd:
         row('N14 runtime and daemon restarts', None, 'needs --restart-target-cmd and --restart-client-cmd')
         return
-    deadline = time.monotonic() + 180  # a target still recovering from an earlier restart is not this row's fault
-    while pb_run('exec', a.target, '--', *(['cmd', '/c', 'exit', '0'] if win() else ['true'])).returncode != 0:
-        if time.monotonic() > deadline:
-            row('N14 restarts: target answers before the row starts', False, 'pb exec failed for 180 s')
-            return
-        time.sleep(5)
+    if target_answers(a.target) is None:  # a target still recovering from an earlier restart is not this row's fault
+        row('N14 restarts: target answers before the row starts', False, 'pb exec failed for 180 s')
+        return
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
@@ -1020,12 +1030,16 @@ def shared(a, sessions):
 ROWS = {'two': two_clients, 'reconnect': reconnect_keeps_control, 'rejoin': leave_rejoin, 'sleep': sleep_wake, 'net': network_drop,
         'server': control_plane_down, 'blackhole': black_hole, 'restart': restarts, 'daemon': daemon_restart_typing, 'fast': fast_output, 'resize': resize_storm,
         'paste': large_paste, 'many': many_sessions, 'keys': keystrokes, 'latency': echo_latency, 'shared': shared}
+# windows_checks.py runs these as two checks: the whole matrix takes about 45 min there
+SHARDS = {'1': ['two', 'reconnect', 'rejoin', 'sleep', 'net', 'server', 'blackhole'],
+          '2': ['restart', 'daemon', 'fast', 'resize', 'paste', 'many', 'keys', 'latency', 'shared']}
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('target')
     p.add_argument('--only', default=','.join(ROWS))
+    p.add_argument('--shard', choices=sorted(SHARDS))
     p.add_argument('--restart-target-cmd', default='', help='shell command that restarts the TARGET machine\'s host runtime (N14)')
     p.add_argument('--restart-client-cmd', default='', help="shell command that restarts this machine's daemon (N14)")
     p.add_argument('--member-cmd', default='')
@@ -1037,7 +1051,7 @@ def main():
     TARGET = a.target
     sessions = []
     try:
-        for key in a.only.split(','):
+        for key in SHARDS[a.shard] if a.shard else a.only.split(','):
             try:
                 ROWS[key](a, sessions)
             except Exception as error:  # one row's fixture failure must not hide the others

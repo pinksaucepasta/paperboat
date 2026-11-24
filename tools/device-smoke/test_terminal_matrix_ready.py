@@ -22,6 +22,20 @@ class FakeClient(matrix.Client):
         return b''
 
 
+class Matrix(unittest.TestCase):
+    def test_the_shards_hold_every_row_once(self):
+        self.assertEqual(sorted(matrix.ROWS), sorted(sum(matrix.SHARDS.values(), [])))
+
+    def test_target_answers_waits_for_an_offline_target_and_gives_up(self):
+        answers = [mock.Mock(returncode=code) for code in (1, 1, 0)]
+        with mock.patch.object(matrix, 'win', return_value=False), mock.patch.object(matrix.time, 'sleep'), \
+                mock.patch.object(matrix, 'pb_run', side_effect=answers) as run:
+            self.assertIsNotNone(matrix.target_answers('m'))
+            self.assertEqual(3, run.call_count)
+            run.side_effect = lambda *a: mock.Mock(returncode=1)
+            self.assertIsNone(matrix.target_answers('m', timeout=-1))
+
+
 class Ready(unittest.TestCase):
     def test_a_windows_target_presses_enter_again_until_the_marker_answers(self):
         with mock.patch.object(matrix, 'win', return_value=True):
