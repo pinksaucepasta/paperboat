@@ -61,7 +61,8 @@ func TestEngineTunnelRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer engine.Shutdown(context.Background())
-	waitFor(t, ctx, func() bool { return engine.Served(tunnelID) })
+	// Served turns true when the fetch lands, which can be before the edge's carrier registers its hub.
+	waitFor(t, ctx, func() bool { hubs, _ := service.Hubs(); return engine.Served(tunnelID) && len(hubs) == 1 })
 	hubs, _ := service.Hubs()
 	if len(hubs) != 1 {
 		t.Fatalf("hubs = %d", len(hubs))
@@ -196,7 +197,10 @@ func TestEngineTunnelServesPublicTCPAndRefusesPlainStreamsOnPrivateTunnels(t *te
 		t.Fatal(err)
 	}
 	defer engine.Shutdown(context.Background())
-	waitFor(t, ctx, func() bool { return engine.Served("tunnel_tcp") && engine.Served("tunnel_private") })
+	waitFor(t, ctx, func() bool {
+		hubs, _ := service.Hubs()
+		return engine.Served("tunnel_tcp") && engine.Served("tunnel_private") && len(hubs) == 1
+	})
 	hubs, _ := service.Hubs()
 	identity := hubs[0].Identity()
 	open := func(routeID, kind string) io.ReadWriteCloser {
