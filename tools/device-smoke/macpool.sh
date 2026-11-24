@@ -5,7 +5,7 @@
 #   macpool.sh start N [HOURS]   start N machines (HOURS 1-5, default 2), wait until SSH answers, print their targets
 #   macpool.sh list              machines whose tunnel is up, and who started them
 #   macpool.sh ssh N [COMMAND]   SSH into machine N
-#   macpool.sh stop [N...]       stop machines you started (default: all of yours)
+#   macpool.sh stop N...           hand machines back (they stay up for the next lane; POOL_END=1 really ends one)
 #   macpool.sh release N...      give up your claim but leave the machine running for the next worktree
 #   macpool.sh adopt [N]         claim a running machine nobody claims (default: the first one), print its target
 #   macpool.sh record N ID       remember a machine id paired on machine N (optional: revokes also find machines by name)
@@ -96,6 +96,8 @@ start() {
 owner() { cat "$CLAIMS/$1" 2>/dev/null || true; }
 
 stop() { # only machines this caller started: another worktree's checks are running on the others
+  # Machines stay up for the next lane; POOL_END=1 really ends one.
+  if [ "${POOL_END:-}" != 1 ]; then release "$@"; return; fi
   local n rc=0 targets=("$@")
   [ $# -gt 0 ] || for n in $(up); do [ "$(owner "$n")" != "$OWNER" ] || targets+=("$n"); done
   for n in "${targets[@]}"; do
@@ -112,6 +114,7 @@ stop() { # only machines this caller started: another worktree's checks are runn
 
 release() { # the next worktree adopts it: reuse takes seconds, a new runner minutes plus GitHub's queue
   local n rc=0
+  [ $# -gt 0 ] || die "name the machine numbers to release"
   for n in "$@"; do
     slot "$n"
     [ "$(owner "$n")" = "$OWNER" ] || die "macpool-$n was not started by you ($OWNER) but by: $(owner "$n")"

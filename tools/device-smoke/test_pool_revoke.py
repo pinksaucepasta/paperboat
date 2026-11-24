@@ -58,7 +58,7 @@ class Env:
     def run(self, pool, *args, up='', **extra):
         env = dict(os.environ, HOME=str(self.home), PATH=f'{self.bin}:{os.environ["PATH"]}', WINPOOL_JUMP='jump',
                    STUB_LOG=str(self.log), STUB_SQL=str(self.sql), STUB_UP=up, STUB_IDS=f'{ID1} {ID2} {REC}',
-                   POOL_REVOKE_CMD=str(self.bin / 'cleanup'), **{pool.upper() + '_OWNER': '/work/a'}, **extra)
+                   POOL_REVOKE_CMD=str(self.bin / 'cleanup'), **{pool.upper() + '_OWNER': '/work/a', 'POOL_END': '1', **extra})
         return subprocess.run(['bash', str(HERE / f'{pool}.sh'), *args], env=env, capture_output=True, text=True, timeout=60)
 
     def claim(self, pool, n, owner='/work/a', age_min=60):
@@ -91,6 +91,17 @@ class PoolRevokeTest(unittest.TestCase):
                 self.assertTrue(calls[1].startswith(f'cleanup --pool {pool} --slot 3 --id ') and calls[1].endswith('--apply'))
                 self.assertTrue(calls[2].startswith(f'ssh -o BatchMode=yes -o ConnectTimeout=15 {pool}-3 '), calls[2])
                 self.assertFalse((claims / '3').exists())
+
+    def test_stop_keeps_the_machine_up_for_the_next_lane(self):
+        for pool, port in (('linuxpool', 22403), ('macpool', 22303), ('winpool', 22203)):
+            with self.subTest(pool=pool):
+                self.env.log.write_text('')
+                claims = self.env.claim(pool, 3)
+                done = self.env.run(pool, 'stop', '3', up=f'127.0.0.1:{port} ', POOL_END='')
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertFalse(any(f' {pool}-3 ' in c for c in self.env.calls() if not c.startswith('cleanup')))
+                self.assertFalse((claims / '3').exists())
+                self.assertNotEqual(self.env.run(pool, 'stop', up=f'127.0.0.1:{port} ', POOL_END='').returncode, 0)
 
     def test_recorded_id_is_revoked_even_if_the_server_lookup_misses_it(self):
         claims = self.env.claim('linuxpool', 5)

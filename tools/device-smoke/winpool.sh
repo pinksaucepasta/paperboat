@@ -4,7 +4,7 @@
 #   winpool.sh start N [HOURS]   start N machines (HOURS 1-5, default 2), wait until SSH answers, print their targets
 #   winpool.sh list              machines whose tunnel is up, and who started them
 #   winpool.sh ssh N [COMMAND]   SSH into machine N
-#   winpool.sh stop [N...]       stop machines you started (default: all of yours)
+#   winpool.sh stop N...           hand machines back (they stay up for the next lane; POOL_END=1 really ends one)
 #   winpool.sh record N ID       remember a machine id paired on machine N (optional: revokes also find machines by name)
 #   winpool.sh sweep             revoke the machine records of machines that are no longer up (the pool keeper runs it)
 #
@@ -81,6 +81,8 @@ start() {
 owner() { cat "$CLAIMS/$1" 2>/dev/null || true; }
 
 stop() { # only machines this caller started: another worktree's checks are running on the others
+  # Machines stay up for the next lane; POOL_END=1 really ends one.
+  if [ "${POOL_END:-}" != 1 ]; then release "$@"; return; fi
   local n rc=0 targets=("$@")
   [ $# -gt 0 ] || for n in $(up); do [ "$(owner "$n")" != "$OWNER" ] || targets+=("$n"); done
   for n in "${targets[@]}"; do
@@ -91,6 +93,18 @@ stop() { # only machines this caller started: another worktree's checks are runn
       die "winpool-$n did not answer; it ends by itself after its hours"
     rm -f "$CLAIMS/$n"
     echo "winpool-$n stopping"
+  done
+  return $rc
+}
+
+release() { # the next worktree takes it: reuse takes seconds, a new runner minutes plus GitHub's queue
+  local n rc=0
+  [ $# -gt 0 ] || die "name the machine numbers to release"
+  for n in "$@"; do
+    slot "$n"
+    [ "$(owner "$n")" = "$OWNER" ] || die "winpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+    pool_revoke "$n" || rc=1
+    rm -f "$CLAIMS/$n"; echo "winpool-$n released"
   done
   return $rc
 }
@@ -117,6 +131,7 @@ case "$command" in
   list) configure; for n in $(up); do echo "winpool-$n  $(owner "$n")"; done ;;
   ssh) configure; slot "${1:-}"; n=$1; shift; exec ssh "winpool-$n" "$@" ;;
   stop) configure; stop "$@" ;;
+  release) configure; release "$@" ;;
   record) configure; record "$@" ;;
   sweep) configure; sweep ;;
   *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;

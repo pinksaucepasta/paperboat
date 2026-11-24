@@ -62,7 +62,7 @@ export SMOKE_WINDOWS_SSH=winpool-1; unset SMOKE_WINDOWS_PASSWORD
 python3 tools/device-smoke/windows_lifecycle.py --expect-version $V --windows-install-json /tmp/winpool-1.json \
   --machine winpool-<worktree>-1 --build 'C:\Users\runneradmin\pb-new.exe' install-pair doctor status
 python3 tools/device-smoke/windows_checks.py --install-json /tmp/winpool-1.json --machine winpool-<worktree>-1 --peer linux-test --only exec-main
-tools/device-smoke/winpool.sh stop 1        # or: stop (all of yours); then remove the machine records:
+tools/device-smoke/winpool.sh stop 1        # hands it back (POOL_END=1 ends it); then remove the machine records:
 tools/device-smoke/cleanup_test_account.py --prefix winpool- --stale '5 minutes'   # dry run, then --apply
 ```
 
@@ -118,7 +118,7 @@ heavy suite does not wait for a new runner and set it up on every `tools/ci-test
 ```sh
 tools/device-smoke/linuxpool.sh start 3 2     # 3 hosts for 2 hours (1-5); prints linuxpool-1.. when SSH answers (~2 min)
 tools/remote-test.sh linuxpool-1 server -run . ./internal/edgeset/   # PostgreSQL suites work; a second job reuses the host at once
-tools/device-smoke/linuxpool.sh stop          # all of yours (release N keeps one running for the next worktree, adopt takes it)
+tools/device-smoke/linuxpool.sh stop 1        # hands it back; it stays up for the next lane (POOL_END=1 ends it)
 ```
 
 - Same design, controller key, tunnel secrets and claim records as winpool/macpool; host `linuxpool-N` is user `runner` on
