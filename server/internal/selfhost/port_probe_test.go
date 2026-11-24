@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"net"
 	"net/netip"
 	"os"
@@ -100,7 +101,14 @@ func TestProbeNodePortConnectsToANodePortWithoutANonce(t *testing.T) {
 	}
 }
 
-// stunServer answers each datagram with answer(request), or not at all when it returns nil, and counts requests.
+// relayAnswers is what the relay requires of a binding request (tailscale net/stun ParseBindingRequest).
+func relayAnswers(request []byte) bool {
+	return len(request) == 40 && string(request[:8]) == "\x00\x01\x00\x14\x21\x12\xa4\x42" &&
+		string(request[20:32]) == "\x80\x22\x00\x08tailnode" && string(request[32:36]) == "\x80\x28\x00\x04" &&
+		binary.BigEndian.Uint32(request[36:]) == crc32.ChecksumIEEE(request[:32])^0x5354554e
+}
+
+// stunServer answers each datagram a relay would with answer(request), or not at all when it returns nil, and counts requests.
 func stunServer(t *testing.T, answer func([]byte) []byte) (net.Conn, *atomic.Int32) {
 	server, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
@@ -116,6 +124,9 @@ func stunServer(t *testing.T, answer func([]byte) []byte) (net.Conn, *atomic.Int
 				return
 			}
 			requests.Add(1)
+			if !relayAnswers(buf[:n]) {
+				continue
+			}
 			if reply := answer(append([]byte(nil), buf[:n]...)); reply != nil {
 				_, _ = server.WriteTo(reply, from)
 			}

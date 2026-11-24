@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"io"
 	"net"
 	"net/netip"
@@ -140,10 +141,16 @@ const stunResponseMax = 1024
 // follows ~/ref/tailscale/net/stun/stun.go (Request, ParseResponse), which netcheck uses the same way to
 // probe a DERP's STUN port.
 func answersSTUN(ctx context.Context, connection net.Conn) PortProbe {
-	request := make([]byte, 20)
-	binary.BigEndian.PutUint16(request[0:], 0x0001) // binding request, no attributes
+	// The relay (tailscale's stun.ParseBindingRequest) drops a request without this SOFTWARE and a FINGERPRINT.
+	request := make([]byte, 20, 40)
+	binary.BigEndian.PutUint16(request[0:], 0x0001) // binding request
+	binary.BigEndian.PutUint16(request[2:], 20)     // bytes of attributes
 	binary.BigEndian.PutUint32(request[4:], 0x2112A442)
 	_, _ = rand.Read(request[8:20])
+	request = append(request, "\x80\x22\x00\x08tailnode"...)
+	fingerprint := crc32.ChecksumIEEE(request) ^ 0x5354554e
+	request = append(request, 0x80, 0x28, 0x00, 0x04)
+	request = binary.BigEndian.AppendUint32(request, fingerprint)
 	response := make([]byte, stunResponseMax+1)
 	detail := "timeout"
 	for try := 0; try < 2 && ctx.Err() == nil; try++ {
