@@ -48,7 +48,7 @@ func actionSSH(command *cobra.Command, args []string) error {
 		return domain
 	})
 	if err != nil {
-		return invocationError(err)
+		return machineOperandError(err)
 	}
 	flagUser, _ := command.Flags().GetString("user")
 	requestedUser, err := resolveSSHRequestedUser(targetUser, flagUser)

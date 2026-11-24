@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 
@@ -11,7 +10,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// errManagedToolOperand never carries the operand: it is untrusted text (terminal escapes, private paths).
 var errManagedToolOperand = errors.New("managed SSH tool operand is invalid")
+
+func managedToolOperandError(message string) error {
+	return usageError{err: errManagedToolOperand, publicMessage: message}
+}
+
+// machineOperandError shows the fixed reason a [user@]machine operand was refused.
+func machineOperandError(err error) error {
+	for _, reason := range []error{managedssh.ErrMachineReferenceInvalid, managedssh.ErrSSHUsernameInvalid, managedssh.ErrSSHAliasInvalid} {
+		if errors.Is(err, reason) {
+			return usageError{err: err, publicMessage: reason.Error()}
+		}
+	}
+	return invocationError(err)
+}
+
+// managedToolHelp reports a request for pb's help. rsync's -h means human-readable sizes, so -h counts only alone.
+func managedToolHelp(args []string) bool {
+	return len(args) > 0 && (args[0] == "--help" || len(args) == 1 && args[0] == "-h")
+}
 
 type managedToolTargetResolver func(*command.Context, string, string) (managedssh.Destination, error)
 
@@ -25,6 +44,9 @@ func newManagedSSHToolCommand(name string) *cobra.Command {
 		Args:               commandArgs(cobra.MinimumNArgs(1)),
 		DisableFlagParsing: true,
 		RunE: func(c *cobra.Command, args []string) error {
+			if managedToolHelp(args) {
+				return c.Help()
+			}
 			return actionManagedSSHTool(c, name, args)
 		},
 	}
@@ -102,12 +124,12 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 			managed++
 		}
 		if managed == 0 {
-			return nil, fmt.Errorf("%w: %s requires a remote machine:path operand", errManagedToolOperand, tool)
+			return nil, managedToolOperandError(tool + " requires a remote [user@]machine:path operand; machine must be a machine name or machine ID (machine_<id>)")
 		}
 	case "sftp":
 		index := sftpDestination(result)
 		if index < 0 {
-			return nil, fmt.Errorf("%w: sftp requires [user@]machine", errManagedToolOperand)
+			return nil, managedToolOperandError("sftp requires [user@]machine")
 		}
 		operand, suffix := result[index], ""
 		if prefix, path, ok := splitManagedRemoteOperand(operand); ok {
@@ -115,7 +137,7 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 		}
 		target, requestedUser, err := managedssh.ParseMachineReference(operand, domain)
 		if err != nil {
-			return nil, err
+			return nil, machineOperandError(err)
 		}
 		destination, err := resolve(ctx, target, requestedUser)
 		if err != nil {
