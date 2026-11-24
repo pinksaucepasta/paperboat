@@ -52,7 +52,7 @@ func serveDenyOnly(ctx context.Context, cfg Config) error {
 }
 
 func Uninstall(ctx context.Context) (result UninstallResult, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 75*time.Second)
 	defer cancel()
 	if err := requirePrivilege(); err != nil {
 		return UninstallResult{}, err
@@ -107,10 +107,8 @@ func uninstallDarwin(ctx context.Context, cfg darwinInstallConfig, guardCfg Conf
 		return result, err
 	}
 	domain := "system/" + cfg.Label
-	if exec.CommandContext(ctx, "/bin/launchctl", "print", domain).Run() == nil {
-		if _, err = darwinRun(ctx, "", "/bin/launchctl", "bootout", domain); err != nil {
-			return result, err
-		}
+	if err = stopDarwinPurgeJob(ctx, runDarwinTrustRemoval, domain); err != nil {
+		return result, err
 	}
 	lock, err := lockStoppedGuard(ctx, guardCfg.StateDir)
 	if err != nil {

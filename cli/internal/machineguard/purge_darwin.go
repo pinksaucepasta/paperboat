@@ -66,7 +66,7 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 	if ctx == nil {
 		return errors.New("machine guard purge context is missing")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 75*time.Second) // a guard stop, then every address
 	defer cancel()
 	paths := p.Paths
 	var result error
@@ -168,8 +168,33 @@ func stopDarwinPurgeJob(ctx context.Context, run darwinTrustRunner, domain strin
 		}
 		return err
 	}
-	_, err := run(ctx, "/bin/launchctl", "bootout", domain)
-	return err
+	if _, err := run(ctx, "/bin/launchctl", "bootout", domain); err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 36 { // EINPROGRESS: launchd still waits for the process
+			return err
+		}
+	}
+	// bootout can return first, and a stopping guard drops its state lock before its process ends: until launchd has
+	// reaped the job it can still write its diagnostics into the state the caller removes. launchd kills it after 20 s.
+	waitCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	for {
+		_, err := run(waitCtx, "/bin/launchctl", "print", domain)
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 113 {
+			return nil
+		}
+		if waitCtx.Err() != nil {
+			return errors.New("machine guard did not stop; retry removal")
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-waitCtx.Done():
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // purgeDarwinAccount deletes a service account only when it carries the marker

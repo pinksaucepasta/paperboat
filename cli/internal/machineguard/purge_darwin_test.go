@@ -28,6 +28,8 @@ type darwinPurgeFixture struct {
 	paths      darwinPurgePaths
 	dsclRecord map[string]string
 	calls      []string
+	stopping   bool // bootout was asked
+	dyingPolls int  // how often launchd still lists the stopping guard, which writes diagnostics meanwhile
 }
 
 func newDarwinPurgeFixture(t *testing.T) *darwinPurgeFixture {
@@ -66,6 +68,21 @@ func newDarwinPurgeFixture(t *testing.T) *darwinPurgeFixture {
 func (f *darwinPurgeFixture) run(_ context.Context, name string, args ...string) ([]byte, error) {
 	command := strings.Join(append([]string{name}, args...), " ")
 	f.calls = append(f.calls, command)
+	if name == "/bin/launchctl" && args[0] == "bootout" {
+		f.stopping = true
+	}
+	if name == "/bin/launchctl" && args[0] == "print" && f.stopping {
+		if f.dyingPolls == 0 {
+			return nil, exec.Command("/bin/sh", "-c", "exit 113").Run() // launchd has reaped the job
+		}
+		f.dyingPolls--
+		// The stopping guard's last diagnostics.
+		diagnostics := filepath.Join(f.paths.StateDir, "diagnostics")
+		if err := os.MkdirAll(diagnostics, 0o700); err != nil {
+			return nil, err
+		}
+		return nil, os.WriteFile(filepath.Join(diagnostics, "events.ndjson"), []byte("{}\n"), 0o600)
+	}
 	if name == "/usr/bin/dscl" && len(args) >= 3 && args[1] == "-read" {
 		account := strings.TrimPrefix(args[2], "/Users/")
 		realName, ok := f.dsclRecord[account]
@@ -224,6 +241,25 @@ func (f *darwinPurgeFixture) called(command string) bool {
 		}
 	}
 	return false
+}
+
+// A guard still ending after bootout returned wrote diagnostics into the state purge had just removed (a test Mac kept
+// one root-owned events file after pb uninstall).
+func TestPurgeDarwinWaitsForAGuardThatWritesWhileItStops(t *testing.T) {
+	f := newDarwinPurgeFixture(t)
+	if err := os.MkdirAll(f.paths.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.dyingPolls = 3
+	if err := f.purge(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if f.dyingPolls != 0 {
+		t.Fatalf("purge removed the state while the guard was still ending: %v", f.calls)
+	}
+	if _, err := os.Lstat(f.paths.StateDir); !os.IsNotExist(err) {
+		t.Fatalf("guard state left behind: %v", err)
+	}
 }
 
 func TestPurgeDarwinRemovesStateSocketAndOwnedAccount(t *testing.T) {
