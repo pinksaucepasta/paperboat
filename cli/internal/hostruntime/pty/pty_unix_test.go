@@ -329,6 +329,50 @@ func TestInterruptOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 }
 
 // In raw mode the interrupt key is ordinary data for the program; Interrupt must leave it alone.
+// Ctrl-C was lost with the program still running: a write queued behind the stuck one took the lock before Interrupt and stuck too.
+func TestInterruptCutsAWriteThatTakesTheLockFirst(t *testing.T) {
+	process, root := startShell(t, `touch ready; exec sleep 30`)
+	defer process.Terminate(context.Background(), time.Second)
+	go io.Copy(io.Discard, process)
+	waitForFile(t, filepath.Join(root, "ready"))
+	process.writeMu.Lock()
+	paste := bytes.Repeat([]byte("pasted\n"), 64<<10)
+	written := make(chan error, 1)
+	var handled bool
+	var err error
+	interrupted := make(chan struct{})
+	go func() {
+		defer close(interrupted)
+		handled, err = process.Interrupt(0x03, func() {
+			go func() {
+				time.Sleep(100 * time.Millisecond) // Interrupt has cut what it can see and waits for the lock
+				_, writeErr := process.writeInterruptible(paste, time.Now().Add(20*time.Second))
+				process.writeMu.Unlock()
+				written <- writeErr
+			}()
+		})
+	}()
+	<-interrupted
+	if err != nil || !handled {
+		t.Fatalf("interrupt: handled=%v err=%v", handled, err)
+	}
+	if err := <-written; !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("paste write: %v", err)
+	}
+}
+
+// A write that began between Interrupt's counter and its deadline was recorded as a failed write, which ended the connection.
+func TestDeadlineMovedByAnInterruptIsAnInterrupt(t *testing.T) {
+	process, root := startShell(t, `touch ready; exec sleep 30`)
+	defer process.Terminate(context.Background(), time.Second)
+	go io.Copy(io.Discard, process)
+	waitForFile(t, filepath.Join(root, "ready"))
+	time.AfterFunc(200*time.Millisecond, func() { _ = process.file.SetWriteDeadline(time.Now()) })
+	if _, err := process.Write(bytes.Repeat([]byte("pasted\n"), 64<<10)); !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("paste write: %v", err)
+	}
+}
+
 func TestInterruptLeavesRawModeInputAlone(t *testing.T) {
 	process, root := startShell(t, `stty raw -isig; touch ready; sleep 30`)
 	defer process.Terminate(context.Background(), time.Second)

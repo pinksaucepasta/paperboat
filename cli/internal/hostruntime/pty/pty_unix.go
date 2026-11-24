@@ -173,7 +173,9 @@ func (p *Process) writeInterruptible(data []byte, deadline time.Time) (int, erro
 		n, err := p.file.Write(data[written:min(written+inputChunk, len(data))])
 		written += n
 		if err != nil {
-			if p.interrupts.Load() != start {
+			// Only Interrupt moves this write's deadline, so one that passed early is an interrupt even when the write
+			// began after the counter moved.
+			if p.interrupts.Load() != start || errors.Is(err, os.ErrDeadlineExceeded) && time.Now().Before(deadline) {
 				return written, ErrInterrupted
 			}
 			return written, err
@@ -207,14 +209,20 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	if accepted != nil {
 		accepted()
 	}
-	p.interrupts.Add(1)
-	if err := p.file.SetWriteDeadline(time.Now()); err != nil {
-		return false, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := LockInput(ctx, &p.writeMu); err != nil {
-		return false, err
+	// Again until the lock is ours, like the Windows twin: a frame already past the session's interrupt check can take
+	// the lock first and stick in a fresh write, and one cut would not reach it.
+	for until := time.Now().Add(2 * time.Second); ; {
+		p.interrupts.Add(1)
+		if err := p.file.SetWriteDeadline(time.Now()); err != nil {
+			return false, err
+		}
+		if p.writeMu.TryLock() {
+			break
+		}
+		if time.Now().After(until) {
+			return false, context.DeadlineExceeded
+		}
+		time.Sleep(time.Millisecond)
 	}
 	defer p.writeMu.Unlock()
 	var signalErr error
