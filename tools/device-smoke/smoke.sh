@@ -563,7 +563,7 @@ test_application_pairs() {
           continue
         fi
         if [ "$target" = "$WINDOWS_TARGET" ]; then
-          record "$id" SKIP 0 "the Windows target form (worker restart by pb update --from a copy) has no device proof yet; proven on Linux targets"
+          record "$id" SKIP 0 "the saved-port bug does not reproduce with a Windows target (the check passes on the broken build too, newchecks/PORT-CHECK3-WIN.md); judged on Linux targets"
           continue
         fi ;;
       esac
