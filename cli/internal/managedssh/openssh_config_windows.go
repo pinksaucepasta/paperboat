@@ -102,20 +102,18 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (result OpenSSHConfigResult, res
 	var nextMain []byte
 	var includeChunk string
 	if recordSet {
-		if record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || ownedSet && record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(lfMain, []byte(record.IncludeChunk)) != 1 {
+		if record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || ownedSet && record.OwnedHash != hashOpenSSHBytes(existingOwned) {
 			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 		}
-		nextMain, includeChunk = lfMain, record.IncludeChunk
+		var found bool
+		if nextMain, includeChunk, found = repairOpenSSHInclude(lfMain, record.IncludeChunk, includeLine); !found {
+			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
+		}
 	} else {
 		if ownedSet || bytes.Contains(main, []byte(openSSHIncludeMarker)) || bytes.Contains(main, []byte(openSSHBeginMarker)) {
 			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 		}
-		offset := firstOpenSSHBlockOffset(main)
-		includeChunk = includeLine
-		if offset > 0 && main[offset-1] != '\n' {
-			includeChunk = "\n" + includeChunk
-		}
-		nextMain = append(append(append([]byte(nil), main[:offset]...), includeChunk...), main[offset:]...)
+		nextMain, includeChunk = insertOpenSSHInclude(main, includeLine)
 	}
 	originalMainExisted := mainSet
 	if recordSet {
@@ -152,7 +150,7 @@ func ValidateOpenSSHConfig(config OpenSSHConfig) (resultErr error) {
 	}
 	record, recordSet, err := readWindowsSSHRecord(directory, sid)
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != config.AliasDomain || !validRecordedInclude(record.IncludeChunk, line) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 || !bytes.Equal(owned, expected) || record.OwnedHash != hashOpenSSHBytes(owned) {
+	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != config.AliasDomain || !validRecordedInclude(record.IncludeChunk, line) || !openSSHIncludeInPlace(lfOpenSSHInclude(main), record.IncludeChunk, line) || !bytes.Equal(owned, expected) || record.OwnedHash != hashOpenSSHBytes(owned) {
 		return errors.Join(ErrOpenSSHConfigConflict, err)
 	}
 	return findOpenSSHOptionConflict(main, config)
@@ -178,7 +176,7 @@ func ValidateInstalledOpenSSHConfig(home string, ownerUID uint32, agentSocket, d
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
 	parsed, parsedOK := parseOwnedOpenSSH(owned, config.AliasDomain)
 	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != config.AliasDomain ||
-		!validRecordedInclude(record.IncludeChunk, line) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 ||
+		!validRecordedInclude(record.IncludeChunk, line) || !openSSHIncludeInPlace(lfOpenSSHInclude(main), record.IncludeChunk, line) ||
 		!parsedOK || record.OwnedHash != hashOpenSSHBytes(owned) || !ownedOpenSSHIdentityMatches(parsed, agentSocket, ManagedIdentityPublicKeyPath(home)) {
 		return errors.Join(ErrOpenSSHConfigConflict, err)
 	}
@@ -223,10 +221,13 @@ func UninstallOpenSSHConfig(home string, _ uint32) (result OpenSSHConfigResult, 
 	}
 	lfMain := lfOpenSSHInclude(main)
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(lfMain, []byte(record.IncludeChunk)) != 1 {
+	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || record.OwnedHash != hashOpenSSHBytes(owned) {
 		return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 	}
-	nextMain := bytes.Replace(lfMain, []byte(record.IncludeChunk), nil, 1)
+	nextMain, found := removeOpenSSHInclude(lfMain, record.IncludeChunk, line)
+	if !found {
+		return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
+	}
 	nextMainSet := record.MainExisted || len(nextMain) != 0
 	if err := writeWindowsSSHTransaction(directory, sid, main, true, owned, true, record, optionalWindowsSSHBytes(nextMain, nextMainSet), nil, nil); err != nil {
 		return OpenSSHConfigResult{}, err
@@ -294,17 +295,6 @@ func hashOpenSSHBytes(value []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func firstOpenSSHBlockOffset(value []byte) int {
-	offset := 0
-	for _, line := range bytes.SplitAfter(value, []byte{'\n'}) {
-		fields := strings.Fields(strings.TrimSpace(string(line)))
-		if len(fields) > 0 && !strings.HasPrefix(fields[0], "#") && (strings.EqualFold(fields[0], "Host") || strings.EqualFold(fields[0], "Match")) {
-			return offset
-		}
-		offset += len(line)
-	}
-	return len(value)
-}
 func findOpenSSHOptionConflict(value []byte, config OpenSSHConfig) error {
 	matching, uncertain := false, false
 	probe := "paperboat-probe." + config.AliasDomain

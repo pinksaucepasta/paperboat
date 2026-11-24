@@ -479,3 +479,43 @@ func TestOpenSSHConfigInstallReplacesAnEarlierFormatItWrote(t *testing.T) {
 		t.Fatalf("an edited fragment was replaced: %v", err)
 	}
 }
+
+// A user moved pb's Include line under a Host block: OpenSSH then applies it to that host only.
+func TestOpenSSHConfigMovedIncludeIsRepaired(t *testing.T) {
+	const line = "Include ~/.ssh/paperboat_config # paperboat-managed-ssh-include-v1\n"
+	for _, start := range []string{"# top\n", "# no newline"} {
+		for _, test := range []struct{ name, moved, repaired, removed string }{
+			{"nested", "# top\nHost x\n  User a\n  " + line + "  Port 2\n", "# top\n" + line + "Host x\n  User a\n  Port 2\n", "# top\nHost x\n  User a\n  Port 2\n"},
+			{"equals", "Host=x\n" + line, line + "Host=x\n", "Host=x\n"},
+			{"commented", "# top\n# " + line + "Host x\n", "# top\n# " + line + "Host x\n", "# top\nHost x\n"},
+		} {
+			for _, repair := range []bool{true, false} {
+				home, config := openSSHTestHome(t), OpenSSHConfig{}
+				config = openSSHTestConfig(home)
+				path := filepath.Join(home, ".ssh", "config")
+				read := func() string { value, _ := os.ReadFile(path); return string(value) }
+				write := func(value string) {
+					if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				write(start)
+				if _, err := InstallOpenSSHConfig(config); err != nil {
+					t.Fatal(err)
+				}
+				write(test.moved)
+				if err := ValidateOpenSSHConfig(config); !errors.Is(err, ErrOpenSSHConfigConflict) {
+					t.Fatalf("%s: validate=%v", test.name, err)
+				}
+				if repair {
+					if _, err := InstallOpenSSHConfig(config); err != nil || read() != test.repaired {
+						t.Fatalf("%s: repair=%v config=%q", test.name, err, read())
+					}
+				}
+				if _, err := UninstallOpenSSHConfig(home, config.OwnerUID); err != nil || read() != test.removed {
+					t.Fatalf("%s: uninstall=%v config=%q", test.name, err, read())
+				}
+			}
+		}
+	}
+}
