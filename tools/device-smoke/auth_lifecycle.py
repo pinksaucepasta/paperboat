@@ -50,6 +50,7 @@ def device_login(url_file):
 
 
 def local_login(url_file):
+    winhost.refuse_real_home(['login'])
     login = subprocess.Popen([str(PB), 'login', '--no-browser', '--json'], stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
     try:

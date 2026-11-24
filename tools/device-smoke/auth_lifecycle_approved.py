@@ -48,7 +48,7 @@ def main():
     host, container, user = sys.argv[1:4]
     uid = sys.argv[4] if len(sys.argv) > 4 else '1001'
     machine = sys.argv[5] if len(sys.argv) > 5 else container  # the machine name exec dials
-    inside = 'ssh %s docker exec -i -u %s -e HOME=/home/%s -e XDG_RUNTIME_DIR=/run/user/%s %s ' % (host, user, user, uid, container)
+    inside = 'ssh %s docker exec -i -u %s -e PB_SMOKE_ALLOW_REAL_HOME=1 -e HOME=/home/%s -e XDG_RUNTIME_DIR=/run/user/%s %s ' % (host, user, user, uid, container)
     exec_in = lambda script: inside + shlex.quote('bash -c ' + shlex.quote(script))
     tarball = subprocess.run(['tar', 'czf', '-', '-C', str(HERE)] + sorted(p.name for p in HERE.glob('*.py')), capture_output=True, check=True).stdout
     subprocess.run(exec_in('rm -rf ~/dsa && mkdir ~/dsa && tar xzf - -C ~/dsa && rm -f /tmp/auth-url'), shell=True, input=tarball, check=True)

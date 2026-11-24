@@ -24,6 +24,20 @@ import (
 // (checkWindowsStateDirectory) and has no entry. A directory that is not provably empty, not provably ours or a link
 // is not a leftover and stays the failure it was.
 func lockedBridgeLeftover(err error) (string, bool) {
+	// Several failures are leftovers only when each of them is one.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		first := ""
+		for _, each := range joined.Unwrap() {
+			leftover, ok := lockedBridgeLeftover(each)
+			if !ok {
+				return "", false
+			}
+			if first == "" {
+				first = leftover
+			}
+		}
+		return first, first != ""
+	}
 	var pathErr *fs.PathError
 	if !errors.As(err, &pathErr) || !errors.Is(pathErr.Err, windows.ERROR_SHARING_VIOLATION) {
 		return "", false

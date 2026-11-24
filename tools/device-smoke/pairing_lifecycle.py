@@ -53,6 +53,8 @@ class CommandFailed(RuntimeError):
 
 def command_result(binary, *arguments, timeout=180, input=None, env=None, terminal=False, password=None):
     command = [str(binary), *arguments]
+    if not hasattr(binary, 'run_remote'):
+        winhost.refuse_real_home(arguments, env)
     try:
         if hasattr(binary, 'run_remote'):  # pb.exe on the Windows device; it has no pty or sudo prompt to answer
             result = binary.run_remote(arguments, input=input, env=env, timeout=timeout)
@@ -325,6 +327,7 @@ def interrupt_pair_on_device(binary, arguments, root, mode, proxy):
 def interrupt_pair(binary, arguments, root, mode, proxy):
     if hasattr(binary, 'device'):
         return interrupt_pair_on_device(binary, arguments, root, mode, proxy)
+    winhost.refuse_real_home(arguments)
     environment = dict(os.environ)
     if proxy is not None:
         address = 'http://127.0.0.1:' + str(proxy.address[1])

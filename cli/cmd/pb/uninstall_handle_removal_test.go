@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/ownedpaths"
 )
 
 // Security review, 2026-11-10: the part of the Windows uninstall that runs with administrator rights in a
@@ -21,7 +23,7 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 	received := filepath.Join(inbox, "received.txt")
 	build := func(t *testing.T) *os.Root {
 		t.Helper()
-		for _, file := range []string{sentinel, received, filepath.Join(state, "credentials.json"), filepath.Join(state, "runtime", "store", "state.json")} {
+		for _, file := range []string{sentinel, received, filepath.Join(state, "config.json"), filepath.Join(state, "runtime", "updates", "state.json")} {
 			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -29,7 +31,7 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		for _, link := range []string{filepath.Join(state, "link"), filepath.Join(state, "runtime", "link")} {
+		for _, link := range []string{filepath.Join(state, "install.lock"), filepath.Join(state, "runtime", "agent")} {
 			if err := os.Symlink(filepath.Dir(sentinel), link); err != nil && !errors.Is(err, os.ErrExist) {
 				t.Skipf("symbolic links are not available: %v", err)
 			}
@@ -51,7 +53,10 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 
 	t.Run("a state directory is removed whole, links as entries", func(t *testing.T) {
 		parent := build(t)
-		if err := removeBelowDirectory(parent, "Paperboat", state, nil, accept); err != nil {
+		if err := os.RemoveAll(inbox); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := removeBelowDirectory(parent, "Paperboat", state, nil, ownedpaths.ForRoot(state), accept); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
@@ -63,7 +68,7 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 		parent := build(t)
 		var entered []string
 		check := func(_ *os.Root, path string) error { entered = append(entered, path); return nil }
-		if err := removeBelowDirectory(parent, "Paperboat", state, []string{inbox}, check); err != nil {
+		if _, err := removeBelowDirectory(parent, "Paperboat", state, []string{inbox}, ownedpaths.ForRoot(state), check); err != nil {
 			t.Fatal(err)
 		}
 		entries, err := os.ReadDir(state)
@@ -73,7 +78,7 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 		survived(t, received)
 		survived(t, sentinel)
 		// Every directory is checked before it is emptied; a link and the Inbox are never entered.
-		want := []string{state, filepath.Join(state, "runtime"), filepath.Join(state, "runtime", "store")}
+		want := []string{state, filepath.Join(state, "runtime"), filepath.Join(state, "runtime", "updates")}
 		if !slices.Equal(entered, want) {
 			t.Fatalf("checked directories = %v, want %v", entered, want)
 		}
@@ -81,8 +86,8 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 	t.Run("a nested directory the check refuses stays with its content", func(t *testing.T) {
 		parent := build(t)
 		refused := errors.New("refused")
-		store := filepath.Join(state, "runtime", "store")
-		err := removeBelowDirectory(parent, "Paperboat", state, nil, func(_ *os.Root, path string) error {
+		store := filepath.Join(state, "runtime", "updates")
+		_, err := removeBelowDirectory(parent, "Paperboat", state, nil, ownedpaths.ForRoot(state), func(_ *os.Root, path string) error {
 			if path == store {
 				return refused
 			}
@@ -92,7 +97,7 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 			t.Fatalf("a refused nested directory: %v, want the refusal", err)
 		}
 		survived(t, filepath.Join(store, "state.json"))
-		for _, gone := range []string{filepath.Join(state, "credentials.json"), filepath.Join(state, "link"), filepath.Join(state, "runtime", "link")} {
+		for _, gone := range []string{filepath.Join(state, "config.json"), filepath.Join(state, "install.lock"), filepath.Join(state, "runtime", "agent")} {
 			if _, err := os.Lstat(gone); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("%s was not removed: %v", gone, err)
 			}
@@ -105,11 +110,11 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 	t.Run("a directory the check refuses is not touched", func(t *testing.T) {
 		parent := build(t)
 		refused := errors.New("refused")
-		err := removeBelowDirectory(parent, "Paperboat", state, []string{inbox}, func(*os.Root, string) error { return refused })
+		_, err := removeBelowDirectory(parent, "Paperboat", state, []string{inbox}, ownedpaths.ForRoot(state), func(*os.Root, string) error { return refused })
 		if !errors.Is(err, refused) {
 			t.Fatalf("a refused directory: %v, want the refusal", err)
 		}
-		survived(t, filepath.Join(state, "credentials.json"))
+		survived(t, filepath.Join(state, "config.json"))
 		survived(t, received)
 	})
 	t.Run("the Inbox itself is kept", func(t *testing.T) {
@@ -119,7 +124,7 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer inboxParent.Close()
-		if err := removeBelowDirectory(inboxParent, "Inbox", inbox, []string{inbox}, accept); err != nil {
+		if _, err := removeBelowDirectory(inboxParent, "Inbox", inbox, []string{inbox}, nil, accept); err != nil {
 			t.Fatal(err)
 		}
 		survived(t, received)

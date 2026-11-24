@@ -58,7 +58,7 @@ func TestWindowsUserStateRemovalNeverFollowsAPlantedJunction(t *testing.T) {
 	t.Run("inside the state root it is removed as an entry", func(t *testing.T) {
 		state := filepath.Join(profile, "AppData", "Local", "Paperboat")
 		plantJunction(t, filepath.Join(state, "runtime"), outside)
-		if err := os.WriteFile(filepath.Join(state, "credentials.json"), []byte("{}"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(state, "config.json"), []byte("{}"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if err := retryWindowsRemoval(ctx, profile, state, nil, nil); err != nil {
@@ -79,11 +79,11 @@ func TestWindowsUserStateRemovalNeverFollowsAPlantedJunction(t *testing.T) {
 		if err := os.WriteFile(received, []byte("user file"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		plantJunction(t, filepath.Join(state, "link"), outside)
+		plantJunction(t, filepath.Join(state, "install.lock"), outside)
 		if err := retryWindowsRemoval(ctx, profile, state, []string{inbox}, nil); err != nil {
 			t.Fatalf("remove a state root that holds the Inbox and a junction: %v", err)
 		}
-		if _, err := os.Lstat(filepath.Join(state, "link")); !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Lstat(filepath.Join(state, "install.lock")); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("the junction is still there: %v", err)
 		}
 		if _, err := os.Lstat(received); err != nil {
@@ -166,7 +166,7 @@ func TestWindowsUserStateRemovalAfterAPlantedJunctionHasOnlyTheUsersRights(t *te
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(state, "credentials.json"), []byte("{}"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(state, "state.db"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	planted := false
@@ -272,7 +272,7 @@ func TestWindowsUserStateOwnedByTheUserIsRemovedWithTheUsersRights(t *testing.T)
 		t.Fatal(err)
 	}
 	state := filepath.Join(profile, "AppData", "Local", "Paperboat")
-	file := filepath.Join(state, "runtime", "state.json")
+	file := filepath.Join(state, "runtime", "state.db")
 	writeTestFile(t, file)
 	// An elevated run creates them with the Administrators owner; a user's session with the user's.
 	setTestOwner(t, user.User.Sid, state, filepath.Dir(file), file)
@@ -334,9 +334,9 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 
 	t.Run("what an elevated pb left", func(t *testing.T) {
 		profile, state := newProfile(t)
-		file := filepath.Join(state, "credentials", "token.json")
+		file := filepath.Join(state, "credentials", "secrets", "token.secret")
 		writeTestFile(t, file)
-		setTestOwner(t, administrators, state, filepath.Dir(file), file)
+		setTestOwner(t, administrators, state, filepath.Dir(filepath.Dir(file)), filepath.Dir(file), file)
 		base, elevated := countElevatedRemovals(t)
 		remove(t, base, profile, state, nil)
 		if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
@@ -350,8 +350,8 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		writeTestFile(t, filepath.Join(state, "config.json"))
 		locked := filepath.Join(state, "runtime")
 		administratorsOnly(t, locked)
-		writeTestFile(t, filepath.Join(locked, "store", "state.json"))
-		plantJunction(t, filepath.Join(locked, "link"), protected)
+		writeTestFile(t, filepath.Join(locked, "updates", "state.json"))
+		plantJunction(t, filepath.Join(locked, "agent"), protected)
 		base, elevated := countElevatedRemovals(t)
 		remove(t, base, profile, state, nil)
 		if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
@@ -370,8 +370,8 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		writeTestFile(t, received)
 		locked := filepath.Join(state, "runtime")
 		administratorsOnly(t, locked)
-		writeTestFile(t, filepath.Join(locked, "state.json"))
-		plantJunction(t, filepath.Join(locked, "link"), protected)
+		writeTestFile(t, filepath.Join(locked, "state.db"))
+		plantJunction(t, filepath.Join(locked, "agent"), protected)
 		remove(t, t.Context(), profile, state, []string{inbox})
 		entries, err := os.ReadDir(state)
 		if err != nil || len(entries) != 1 || entries[0].Name() != "Inbox" {
@@ -384,7 +384,7 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		profile, state := newProfile(t)
 		foreign := filepath.Join(state, "runtime")
 		administratorsOnly(t, foreign)
-		kept := filepath.Join(foreign, "state.json")
+		kept := filepath.Join(foreign, "state.db")
 		writeTestFile(t, kept)
 		localService, err := windows.CreateWellKnownSid(windows.WinLocalServiceSid)
 		if err != nil {

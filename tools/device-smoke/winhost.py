@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import pathlib
+import pwd
 import random
 import re
 import shlex
@@ -1019,10 +1020,43 @@ def terminal_env(binary):
     return {'SSHPASS': target.password} if target is not None and target.password else {}
 
 
+# The pb commands that install, replace or remove this machine's setup or sign-in.
+REAL_HOME_VERBS = {'install', 'pair', 'reset', 'uninstall', 'login', 'logout'}
+
+
+def refuse_real_home(arguments, env=None):
+    """Refuse a local pb command that changes the setup of the account running the check, unless the caller said this
+    host is the device under test (PB_SMOKE_ALLOW_REAL_HOME=1; smoke.sh and the container suites set it there).
+    2026-11-22: a check without a device reset the controller's own pb and wiped its ~/.config/paperboat."""
+    words = [str(a) for a in arguments]
+    position = 0
+    while position < len(words) and words[position].startswith('-'):
+        position += 2 if words[position] in ('--config', '--workspace', '--server') else 1
+    verb = words[position:position + 2]
+    if verb[:1] in (['auth'], ['service']):
+        verb = verb[1:]
+    if not verb or verb[0] not in REAL_HOME_VERBS:
+        return
+    env = os.environ if env is None else env
+    if env.get('PB_SMOKE_ALLOW_REAL_HOME') == '1':
+        return
+    real = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)
+    home = pathlib.Path(env.get('HOME') or real)
+    places = [(home, real)] + [(pathlib.Path(env.get(name) or home / default), real / default) for name, default in (
+        ('XDG_CONFIG_HOME', '.config'), ('XDG_STATE_HOME', '.local/state'),
+        ('XDG_DATA_HOME', '.local/share'), ('XDG_CACHE_HOME', '.cache'))]
+    for place, own in places:
+        if place.resolve() == own.resolve():
+            raise RuntimeError('refusing `pb %s` in the real home of %s on this host: run it on a device, in a container or '
+                               'with its own HOME (PB_SMOKE_ALLOW_REAL_HOME=1 when this host is the device under test)'
+                               % (verb[0], real))
+
+
 def run_pb(binary, arguments, timeout):
     """pb to completion with bytes output (stdout/stderr/returncode), here or on the device."""
     if hasattr(binary, 'run_remote'):
         return binary.run_remote(arguments, timeout=timeout, text=False)
+    refuse_real_home(arguments)
     return subprocess.run([str(binary), *arguments], capture_output=True, timeout=timeout)
 
 
@@ -1031,6 +1065,7 @@ def pb_text(binary, arguments, input=None, timeout=None, env=None, stdin=None):
     is an overlay on the device's own environment and stdin is always what `input` holds, then end of input)."""
     if hasattr(binary, 'run_remote'):
         return binary.run_remote(arguments, input=input, env=env, timeout=timeout or 180)
+    refuse_real_home(arguments, env)
     return subprocess.run([str(binary), *arguments], input=input, stdin=stdin, capture_output=True, text=True,
                           timeout=timeout, env=env)
 

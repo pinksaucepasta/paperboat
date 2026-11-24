@@ -98,6 +98,8 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			if err != nil {
 				return machineReplacementError{step: replaceStepRemember, cause: err}
 			}
+			preserved, _ := freshResetPreserved(command) // an unproven Inbox fails the cleanup itself
+			foreign := foreignPathsOf(command, preserved)
 			if err := installDependenciesOf(command.Context()).freshCleanup(command); err != nil {
 				return err
 			}
@@ -105,6 +107,9 @@ func freshEnrollmentResetCommand() *cobra.Command {
 				return machineReplacementError{step: replaceStepVerifyCLI, cause: err}
 			}
 			result := map[string]any{"reset": true, "resume": false, "executable": executable, "hostname": hostname, "inbox_preserved": true}
+			if len(foreign) > 0 {
+				result["left_in_place"] = foreign
+			}
 			if replaced != "" {
 				result["replaces_machine_id"] = replaced
 			}
@@ -112,6 +117,7 @@ func freshEnrollmentResetCommand() *cobra.Command {
 				return writeCLIJSON(command.OutOrStdout(), result)
 			}
 			_, err = fmt.Fprintln(command.OutOrStdout(), "Paperboat setup was removed. The Paperboat Inbox was preserved.")
+			printForeignPaths(command.OutOrStdout(), foreign)
 			return err
 		},
 	}
@@ -223,19 +229,24 @@ func (e machineReplacementError) Error() string {
 	return "This machine is paired and working, but its old machine record " + e.retiredID + " could not be replaced. Check your connection, then remove the old machine in the dashboard."
 }
 
-func runFreshEnrollmentCleanup(command *cobra.Command) error {
-	preservedInboxes, inboxErr := uninstallInboxPaths(command)
-	executable, executableErr := os.Executable()
-	home, homeErr := os.UserHomeDir()
-	if executableErr == nil {
-		preservedInboxes = append(preservedInboxes, executable)
+// freshResetPreserved is the Inbox and everything else a reset keeps.
+func freshResetPreserved(command *cobra.Command) ([]string, error) {
+	preserved, err := uninstallInboxPaths(command)
+	if executable, executableErr := os.Executable(); executableErr == nil {
+		preserved = append(preserved, executable)
 	}
-	if homeErr == nil {
+	if home, homeErr := os.UserHomeDir(); homeErr == nil {
 		// The privileged reset scope retains its canonical CLI slot. Keep its
 		// public command link while deleting credentials and user runtime state.
-		preservedInboxes = append(preservedInboxes, filepath.Join(home, ".local", "bin", "pb"))
+		preserved = append(preserved, filepath.Join(home, ".local", "bin", "pb"))
 	}
-	preservedInboxes = append(preservedInboxes, freshEnrollmentPreserved(command)...)
+	return append(preserved, freshEnrollmentPreserved(command)...), err
+}
+
+func runFreshEnrollmentCleanup(command *cobra.Command) error {
+	preservedInboxes, inboxErr := freshResetPreserved(command)
+	executable, executableErr := os.Executable()
+	home, homeErr := os.UserHomeDir()
 	return performFreshEnrollmentCleanup(inboxErr,
 		func() error {
 			if executableErr != nil {

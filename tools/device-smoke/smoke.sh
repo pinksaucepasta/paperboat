@@ -188,7 +188,10 @@ device_py() {
   # so every other command string stays exactly as it was.
   local target_pb=""
   [ -z "$PB_WINDOWS" ] || [[ " $* " != *" $WINDOWS_TARGET "* ]] || target_pb="PB_SMOKE_TARGET_WINDOWS_PB=$(printf %q "$PB_WINDOWS") "
-  ctl "$device" "${target_pb}PAPERBOAT_SMOKE_TEAM=$(printf %q "$SMOKE_TEAM") python3 /tmp/$RUN_ID/$script $*"
+  # On a Unix target the script runs on the device itself, so that home is the one under test.
+  local own_home=""
+  [ "$device" = "$WINDOWS_TARGET" ] || own_home="PB_SMOKE_ALLOW_REAL_HOME=1 "
+  ctl "$device" "${target_pb}${own_home}PAPERBOAT_SMOKE_TEAM=$(printf %q "$SMOKE_TEAM") python3 /tmp/$RUN_ID/$script $*"
 }
 
 # ---------------------------------------------------------------- results

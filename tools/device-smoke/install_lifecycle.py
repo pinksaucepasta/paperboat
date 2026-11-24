@@ -190,6 +190,7 @@ def main():
         state = Path.home() / ('.local/state/paperboat' if os.uname().sysname == 'Linux'
                                else 'Library/Application Support/Paperboat/state')
         lock = state / 'install.lock'
+        winhost.refuse_real_home(['install'])
         process = subprocess.Popen([str(pb), 'install', '--json'], stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
                                    start_new_session=True)

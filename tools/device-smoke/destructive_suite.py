@@ -37,7 +37,7 @@ def main():
     if 'True machine_' not in created.stdout:
         subprocess.run(['ssh', host, 'docker rm -f ' + name], capture_output=True)  # never leave a half-made container
         raise RuntimeError('could not create the throwaway container: ' + (created.stdout + created.stderr)[-300:])
-    inside = ['ssh', host, 'docker', 'exec', '-i', '-u', 'tester', '-e', 'HOME=/home/tester', '-e', 'XDG_RUNTIME_DIR=/run/user/1001',
+    inside = ['ssh', host, 'docker', 'exec', '-i', '-u', 'tester', '-e', 'HOME=/home/tester', '-e', 'PB_SMOKE_ALLOW_REAL_HOME=1', '-e', 'XDG_RUNTIME_DIR=/run/user/1001',
               '-w', '/home/tester/dsd', name]
     results = []
     try:

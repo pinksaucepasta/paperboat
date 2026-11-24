@@ -233,7 +233,7 @@ func TestPerformUninstallCleanupRunsEveryStepAndAggregatesFailures(t *testing.T)
 }
 
 func TestRemovePathPreservingKeepsNestedInboxAndRemovesOtherState(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "paperboat")
 	inboxPath := filepath.Join(root, "state", "Paperboat Inbox")
 	if err := os.MkdirAll(inboxPath, 0o700); err != nil {
 		t.Fatal(err)
@@ -242,7 +242,7 @@ func TestRemovePathPreservingKeepsNestedInboxAndRemovesOtherState(t *testing.T) 
 	if err := os.WriteFile(sentinel, []byte("user content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{filepath.Join(root, "state", "runtime.json"), filepath.Join(root, "cache", "artifact.bin")} {
+	for _, path := range []string{filepath.Join(root, "state", "daemon.lock"), filepath.Join(root, "update-policy", strings.Repeat("a", 64)+".json")} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -256,7 +256,7 @@ func TestRemovePathPreservingKeepsNestedInboxAndRemovesOtherState(t *testing.T) 
 	if content, err := os.ReadFile(sentinel); err != nil || string(content) != "user content" {
 		t.Fatalf("Inbox sentinel content=%q error=%v", content, err)
 	}
-	for _, path := range []string{filepath.Join(root, "state", "runtime.json"), filepath.Join(root, "cache")} {
+	for _, path := range []string{filepath.Join(root, "state", "daemon.lock"), filepath.Join(root, "update-policy")} {
 		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("non-Inbox state remains at %s: %v", path, err)
 		}

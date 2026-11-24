@@ -37,6 +37,7 @@ def announce(approval):
 
 
 def local_login(pb, arguments):
+    winhost.refuse_real_home(arguments)
     with subprocess.Popen([str(pb), *arguments],
                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE) as process:

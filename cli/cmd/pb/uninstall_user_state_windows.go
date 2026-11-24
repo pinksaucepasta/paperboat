@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/ownedpaths"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"golang.org/x/sys/windows"
@@ -116,7 +117,8 @@ func removeWindowsStateByHandle(path string, preserved []string) (result error) 
 	if err := checkWindowsStateDirectory(parent, filepath.Dir(path)); err != nil {
 		return err
 	}
-	return removeBelowDirectory(parent, filepath.Base(path), path, preserved, checkWindowsStateDirectory)
+	_, err = removeBelowDirectory(parent, filepath.Base(path), path, preserved, ownedpaths.ForRoot(path), checkWindowsStateDirectory)
+	return err
 }
 
 // checkWindowsStateDirectory refuses an open directory unless the handle itself shows that it is the one path

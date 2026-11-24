@@ -526,8 +526,8 @@ func TestCopyWindowsUninstallHelperVerifiesExactBytes(t *testing.T) {
 }
 
 func TestRemovePathPreservingIsCaseInsensitiveOnWindows(t *testing.T) {
-	root := t.TempDir()
-	inboxPath := filepath.Join(root, "Nested", "Paperboat Inbox")
+	root := filepath.Join(t.TempDir(), "Paperboat")
+	inboxPath := filepath.Join(root, "State", "Paperboat Inbox")
 	if err := os.MkdirAll(inboxPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +535,7 @@ func TestRemovePathPreservingIsCaseInsensitiveOnWindows(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "remove.txt"), []byte("remove"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "Config.json"), []byte("remove"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := removePathPreserving(strings.ToUpper(root), []string{strings.ToLower(inboxPath)}); err != nil {
@@ -544,7 +544,7 @@ func TestRemovePathPreservingIsCaseInsensitiveOnWindows(t *testing.T) {
 	if content, err := os.ReadFile(sentinel); err != nil || string(content) != "keep" {
 		t.Fatalf("case-insensitive Inbox preservation content=%q error=%v", content, err)
 	}
-	if _, err := os.Lstat(filepath.Join(root, "remove.txt")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(filepath.Join(root, "Config.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("non-Inbox state remains: %v", err)
 	}
 }

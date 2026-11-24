@@ -10,18 +10,21 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/daemoncmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	service "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/ownedpaths"
 	"github.com/pinksaucepasta/paperboat/cli/internal/userpaths"
 	"github.com/spf13/cobra"
 )
@@ -78,6 +81,7 @@ func uninstallCommand() *cobra.Command {
 				fmt.Fprintln(command.ErrOrStderr(), serverRecordNotice)
 			}
 			preservedInboxes, inboxErr := uninstallInboxPaths(command)
+			foreign := foreignPathsOf(command, preservedInboxes)
 			executable, executableErr := os.Executable()
 			home, homeErr := os.UserHomeDir()
 			productHandoffReady := !platformProductHandoffRequired()
@@ -172,6 +176,9 @@ func uninstallCommand() *cobra.Command {
 					result["server_record_removed"] = false
 					result["server_record_notice"] = serverRecordNotice
 				}
+				if len(foreign) > 0 {
+					result["left_in_place"] = foreign
+				}
 				if platformProductHandoffRequired() {
 					result["uninstalled"] = false
 					result["state"] = "pending"
@@ -180,6 +187,7 @@ func uninstallCommand() *cobra.Command {
 				return writeCLIJSON(jsonWriter, result)
 			}
 			fmt.Fprintln(command.OutOrStdout(), platformUninstallSuccessMessage())
+			printForeignPaths(command.OutOrStdout(), foreign)
 			return nil
 		},
 		SilenceUsage: true, SilenceErrors: true,
@@ -269,6 +277,12 @@ func userPaperboatRemovalPaths(command *cobra.Command) ([]string, error) {
 	if path, err := userpaths.Config("paperboat"); err == nil {
 		paths = append(paths, path)
 	}
+	// The pairing note is in the platform's own directory: %APPDATA% on Windows, and Library on macOS even with XDG_CONFIG_HOME set.
+	if path, err := bootstrap.ReplacementPath(); err == nil {
+		if _, err := os.Lstat(path); err == nil {
+			paths = append(paths, filepath.Dir(path))
+		}
+	}
 	if path, err := userpaths.State("paperboat"); err == nil {
 		paths = append(paths, path)
 	}
@@ -286,6 +300,9 @@ func userPaperboatRemovalPaths(command *cobra.Command) ([]string, error) {
 		}
 	}
 	if root, err := command.Flags().GetString("state-root"); err == nil && root != "" {
+		if info, statErr := os.Stat(root); statErr == nil && !info.IsDir() {
+			return nil, errors.Join(result, errors.New("refusing unsafe Paperboat removal path: --state-root is not a directory"))
+		}
 		paths = append(paths, filepath.Clean(root))
 	}
 	validPaths := paths[:0]
@@ -344,56 +361,164 @@ func uninstallInboxPaths(command *cobra.Command) ([]string, error) {
 	return result, nil
 }
 
+// removePathPreserving removes what Paperboat owns (ownedpaths) of one removal root, the root itself when nothing
+// else is left in it, and never a preserved Inbox or anything behind a link.
 func removePathPreserving(root string, preserved []string) error {
 	root = filepath.Clean(root)
 	if !filepath.IsAbs(root) || filesystemRoot(root) {
 		return errors.New("refusing unsafe Paperboat removal path")
 	}
-	for _, keep := range preserved {
-		keep = filepath.Clean(keep)
-		if pathWithinOrEqual(keep, root) {
-			// The cleanup root is the Inbox or is nested inside it. Preserve the
-			// complete Inbox tree, including user-created content unknown to us.
-			return nil
+	if linkedDirectory(root) {
+		for _, keep := range preserved {
+			if pathWithinOrEqual(root, filepath.Clean(keep)) {
+				return errors.New("refusing to traverse an unsafe Paperboat cleanup path containing the Inbox")
+			}
 		}
+		return nil // the user linked the directory somewhere else; foreignUserPaths reports it
 	}
+	_, err := removeOwned(root, preserved, ownedpaths.ForRoot(root))
+	return err
+}
+
+func linkedDirectory(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	linked, err := unsafeCleanupPathTraversal(path, info)
+	if err != nil || !linked {
+		return false
+	}
+	target, err := os.Stat(path)
+	return err == nil && target.IsDir()
+}
+
+// removeOwned removes the entry at path, which Paperboat owns; of a directory only the entries in owned (nil: all).
+// kept reports that something was left on purpose.
+func removeOwned(path string, preserved []string, owned ownedpaths.Tree) (kept bool, result error) {
 	containsInbox := false
 	for _, keep := range preserved {
-		if pathWithinOrEqual(root, filepath.Clean(keep)) {
-			containsInbox = true
-			break
+		keep = filepath.Clean(keep)
+		if pathWithinOrEqual(keep, path) {
+			// The Inbox or inside it. Preserve the complete Inbox tree, including user-created content unknown to us.
+			return true, nil
+		}
+		containsInbox = containsInbox || pathWithinOrEqual(path, keep)
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	linked, err := unsafeCleanupPathTraversal(path, info)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if linked || !info.IsDir() || owned == nil && !containsInbox {
+		if containsInbox {
+			return false, errors.New("refusing to traverse an unsafe Paperboat cleanup path containing the Inbox")
+		}
+		return false, os.RemoveAll(path) // a link is removed as an entry
+	}
+	entries, err := os.ReadDir(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	kept = containsInbox
+	for _, entry := range entries {
+		child, ok := owned.Child(entry.Name())
+		if !ok {
+			kept = true
+			continue
+		}
+		childKept, err := removeOwned(filepath.Join(path, entry.Name()), preserved, child)
+		kept = kept || childKept
+		result = errors.Join(result, err)
+	}
+	if kept || result != nil {
+		return kept, result
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	return false, nil
+}
+
+// foreignUserPaths lists what uninstall and reset leave in the removal roots because Paperboat did not create it.
+func foreignUserPaths(roots, preserved []string) []string {
+	found := map[string]bool{}
+	var walk func(path string, owned ownedpaths.Tree)
+	walk = func(path string, owned ownedpaths.Tree) {
+		entries, err := os.ReadDir(path)
+		if err != nil || owned == nil {
+			return // gone, not a directory, or owned whole
+		}
+		for _, entry := range entries {
+			path := filepath.Join(path, entry.Name())
+			if insidePreserved(path, preserved) {
+				continue
+			}
+			child, ok := owned.Child(entry.Name())
+			if !ok {
+				// A custom profile or state directory in here is a removal root of its own.
+				if !slices.ContainsFunc(roots, func(root string) bool { return pathWithinOrEqual(path, root) }) {
+					found[path] = true
+				}
+			} else if info, err := os.Lstat(path); err == nil && info.IsDir() {
+				if linked, err := unsafeCleanupPathTraversal(path, info); err == nil && !linked {
+					walk(path, child)
+				}
+			}
 		}
 	}
-	if !containsInbox {
-		return os.RemoveAll(root)
+	for _, root := range roots {
+		if linkedDirectory(root) {
+			found[root] = true
+		} else if !insidePreserved(root, preserved) {
+			walk(root, ownedpaths.ForRoot(root))
+		}
 	}
-	info, err := os.Lstat(root)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+	// Two roots can be one directory in two spellings (macOS, Windows).
+	result := make([]string, 0, len(found))
+	for path := range found {
+		result = append(result, path)
 	}
-	if err != nil {
-		return err
+	sort.Strings(result)
+	unique := result[:0]
+	for _, path := range result {
+		if !slices.ContainsFunc(unique, func(seen string) bool { return pathWithinOrEqual(seen, path) && pathWithinOrEqual(path, seen) }) {
+			unique = append(unique, path)
+		}
 	}
-	unsafeTraversal, traversalErr := unsafeCleanupPathTraversal(root, info)
-	if traversalErr != nil {
-		return traversalErr
+	return unique
+}
+
+func insidePreserved(path string, preserved []string) bool {
+	return slices.ContainsFunc(preserved, func(keep string) bool { return pathWithinOrEqual(filepath.Clean(keep), path) })
+}
+
+// foreignPathsOf is foreignUserPaths of this command's removal roots.
+func foreignPathsOf(command *cobra.Command, preserved []string) []string {
+	roots, _ := userPaperboatRemovalPaths(command)
+	return foreignUserPaths(roots, preserved)
+}
+
+func printForeignPaths(output io.Writer, paths []string) {
+	if len(paths) == 0 {
+		return
 	}
-	if unsafeTraversal || !info.IsDir() {
-		return errors.New("refusing to traverse an unsafe Paperboat cleanup path containing the Inbox")
+	fmt.Fprintln(output, "Left in place, because Paperboat did not create them:")
+	for _, path := range paths {
+		fmt.Fprintln(output, "  "+path)
 	}
-	entries, err := os.ReadDir(root)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var result error
-	for _, entry := range entries {
-		child := filepath.Join(root, entry.Name())
-		result = errors.Join(result, removePathPreserving(child, preserved))
-	}
-	return result
 }
 
 func pathWithinOrEqual(root, candidate string) bool {
