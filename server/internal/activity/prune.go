@@ -20,6 +20,7 @@ func (s *Service) Prune(ctx context.Context) (int64, error) {
 		}
 		// Everything past the longest retention; then personal workspaces past Pro's; then
 		// personal workspaces on Free past Free's. Each uses its own index and is bounded.
+		// The last is audit_retention_class()='free' as a set: the function ran once per paid event on every prune.
 		free, pro, team := s.cfg.AuditRetentionFree.Seconds(), s.cfg.AuditRetentionPro.Seconds(), s.cfg.AuditRetentionTeam.Seconds()
 		for _, step := range []struct {
 			query  string
@@ -30,7 +31,8 @@ func (s *Service) Prune(ctx context.Context) (int64, error) {
 			{`DELETE FROM audit_events WHERE id IN (SELECT id FROM audit_events WHERE activity_workspace_id LIKE 'personal:%'
  AND created_at < now()-make_interval(secs=>$1) ORDER BY created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED)`, pro},
 			{`DELETE FROM audit_events WHERE id IN (SELECT id FROM audit_events WHERE activity_workspace_id LIKE 'personal:%'
- AND created_at < now()-make_interval(secs=>$1) AND audit_retention_class(activity_workspace_id)='free'
+ AND created_at < now()-make_interval(secs=>$1) AND activity_workspace_id NOT IN (SELECT 'personal:'||w.user_id FROM billing_workspaces w WHERE w.team_id IS NULL AND w.user_id IS NOT NULL
+  AND billing_workspace_paid_until(w)>now())
  ORDER BY created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED)`, free},
 		} {
 			tag, err := tx.Exec(ctx, step.query, step.cutoff, PruneBatch)
