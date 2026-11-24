@@ -278,7 +278,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if !shouldInstallBootstrapRuntime(material) {
 		return errors.New("enrollment does not contain a managed runtime identity")
 	}
-	if err := prepareBootstrapListener(*stateRoot, &material, &resume, sid); err != nil {
+	if err := prepareInstalledBootstrapListener(ctx, *stateRoot, &material, &resume, instance, sid); err != nil {
 		return err
 	}
 	artifactPath, err := prepareWindowsBootstrapRuntime(ctx, material.ReuseIdentity, resume.RuntimeEnrolled, func(ctx context.Context) error {
