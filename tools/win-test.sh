@@ -54,7 +54,7 @@ if [ -n "$elevated" ]; then
 fi
 
 native='TestNativeProvisionAndService|TestNativeRepairStoppedService|TestNativeUninstallOwnership|TestNativeFirewallProfiles|TestNativeSCMCrashRecovery'
-if [ -n "${NATIVE:-}" ] && [ "$(basename "$PWD")" = cli ] && [ -z "$RUN" ]; then
+if [ -n "${NATIVE:-}" ] && [ "$(basename "$PWD")" = cli ]; then
   PAPERBOAT_WINDOWS_OPENSSH_NATIVE=1 go test -json $RACE -exec "$exec_dir/win-test-exec.exe -elevated" -run "^($native)\$" \
     -timeout 45m -count 1 ./internal/windowsopenssh | report native || status=1
   for name in ${native//|/ }; do
