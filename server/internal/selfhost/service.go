@@ -45,6 +45,7 @@ type Service struct {
 	allowPrivateIngress bool
 	ControlURL          string
 	TrustDocuments      func(context.Context) ([]byte, []byte, error)
+	Names               *NodeNames // nil: no DNS publisher, nodes keep the host they report
 	DialAddress         func(context.Context, string) (string, error)
 	// ProbeIngress replaces VerifyIngress inside ReconcileIngress when set (tests hold probes open).
 	ProbeIngress func(context.Context, string) error

@@ -26,7 +26,9 @@ type Config struct {
 	PreviewDomain string      `json:"preview_domain,omitempty"`
 	TunnelDomain  string      `json:"tunnel_domain,omitempty"`
 	RuntimeDomain string      `json:"runtime_domain,omitempty"`
-	BrowserAccess bool        `json:"browser_access,omitempty"`
+	// EndpointDetected: EndpointHost was detected, not given by the operator, so the control plane may name this node.
+	EndpointDetected bool `json:"endpoint_detected,omitempty"`
+	BrowserAccess    bool `json:"browser_access,omitempty"`
 	// BrowserLoginOrigin is how 2026.11.16.2 recorded browser access. It is kept and passed through to the edge's
 	// deployment, so that release's edge image still reads its own deployment after a failed upgrade rolls back to it.
 	BrowserLoginOrigin string `json:"browser_login_origin,omitempty"`

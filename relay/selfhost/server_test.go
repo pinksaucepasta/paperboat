@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -299,4 +301,45 @@ func TestServeCancellationReleasesListener(t *testing.T) {
 		t.Fatal("claim listener leaked")
 	}
 	rebound.Close()
+}
+
+// The control plane names a node only when its address was detected; the name is in the certificate (same identity) and
+// in what the edge registers, and a repeated claim changes nothing.
+func TestClaimNameBecomesTheEndpointOnlyWhenTheAddressWasDetected(t *testing.T) {
+	const name = "node-0123456789abcdef0123.example.test"
+	dir, secret, client, server := testInstallation(t, true)
+	claim := testClaim(true)
+	claim.EndpointHost = name
+	if status, _ := post(t, client, server.URL+"/v1/selfhost/claim", secret, claim); status != 400 {
+		t.Fatalf("a name for an operator-given endpoint: status %d, want 400", status)
+	}
+	s, err := load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Config.EndpointDetected = true
+	if err := save(dir, s); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := TLSCertificate(dir)
+	for range 2 {
+		if status, body := post(t, client, server.URL+"/v1/selfhost/claim", secret, claim); status != 200 {
+			t.Fatalf("claim: %d %s", status, body)
+		}
+	}
+	after, err := TLSCertificate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPin, _ := CertificatePin(before)
+	newPin, _ := CertificatePin(after)
+	leaf, err := x509.ParseCertificate(after.Certificate[0])
+	if err != nil || leaf.VerifyHostname(name) != nil || !bytes.Equal(oldPin, newPin) {
+		t.Fatalf("certificate: %v, want the name under the same identity", err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "tunnel", "deployment.json"))
+	config, err := ReadConfig(dir)
+	if err != nil || config.EndpointHost != name || !strings.Contains(string(raw), `"connector_advertise_host": "`+name+`"`) {
+		t.Fatalf("endpoint host %q %v, want the name in the edge's deployment", config.EndpointHost, err)
+	}
 }

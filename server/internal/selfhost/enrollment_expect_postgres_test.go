@@ -28,6 +28,8 @@ import (
 // installation key and its receipt likewise, advertising whatever components the test sets. It stands in for pbh where
 // a test needs to choose the region and the roles the machine reports.
 type fakeClaimNode struct {
+	detected     bool
+	claimedName  string
 	server       *httptest.Server
 	installation ed25519.PrivateKey
 	pin          []byte
@@ -109,7 +111,7 @@ func (n *fakeClaimNode) inspect(w http.ResponseWriter, r *http.Request) {
 		Nonce string `json:"nonce"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
-	inspection := Inspection{Version: 1, Nonce: in.Nonce, InstallationKey: n.installationKey(), Name: n.name, EndpointHost: "93.184.216.35", InfrastructureTLSCertificate: n.certPEM,
+	inspection := Inspection{Version: 1, Nonce: in.Nonce, InstallationKey: n.installationKey(), Name: n.name, EndpointHost: "93.184.216.35", EndpointDetected: n.detected, InfrastructureTLSCertificate: n.certPEM,
 		ExpiresAt: time.Now().Add(time.Hour).Unix(), Components: append([]Component(nil), n.components...)}
 	inspection.Signature = n.sign(inspection)
 	_ = json.NewEncoder(w).Encode(inspection)
@@ -125,6 +127,7 @@ func (n *fakeClaimNode) claim(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad", http.StatusBadRequest)
 		return
 	}
+	n.claimedName = in.EndpointHost
 	out := receipt{ClaimID: in.ClaimID, ScopeType: in.ScopeType, ScopeID: in.ScopeID, InstallationKey: n.installationKey()}
 	for _, c := range in.Components {
 		out.Components = append(out.Components, receiptComponent{Capability: c.Capability, InstallationID: c.InstallationID, NodeID: c.NodeID, NodeGeneration: c.NodeGeneration})

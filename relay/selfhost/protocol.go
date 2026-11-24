@@ -36,6 +36,8 @@ type Inspection struct {
 	InstallationKey              string      `json:"installation_key"`
 	Name                         string      `json:"name"`
 	EndpointHost                 string      `json:"endpoint_host"`
+	EndpointDetected             bool        `json:"endpoint_detected,omitempty"`
+	EndpointIPv6                 string      `json:"endpoint_ipv6,omitempty"`
 	InfrastructureTLSCertificate string      `json:"infrastructure_tls_certificate"`
 	ExpiresAt                    int64       `json:"expires_at"`
 	Components                   []Component `json:"components"`
@@ -46,13 +48,15 @@ type RegisteredComponent struct {
 	Registration
 }
 type ClaimRequest struct {
-	ClaimID     string                `json:"claim_id"`
-	ScopeType   string                `json:"scope_type"`
-	ScopeID     string                `json:"scope_id"`
-	ControlURL  string                `json:"control_url"`
-	Components  []RegisteredComponent `json:"components"`
-	JWKS        json.RawMessage       `json:"jwks"`
-	Revocations json.RawMessage       `json:"revocations,omitempty"`
+	ClaimID string `json:"claim_id"`
+	// EndpointHost is the name the control plane published for this node; empty keeps its own host.
+	EndpointHost string                `json:"endpoint_host,omitempty"`
+	ScopeType    string                `json:"scope_type"`
+	ScopeID      string                `json:"scope_id"`
+	ControlURL   string                `json:"control_url"`
+	Components   []RegisteredComponent `json:"components"`
+	JWKS         json.RawMessage       `json:"jwks"`
+	Revocations  json.RawMessage       `json:"revocations,omitempty"`
 }
 type ReceiptComponent struct {
 	Capability     string `json:"capability"`

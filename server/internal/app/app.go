@@ -502,6 +502,13 @@ func New(opts Options) (*App, error) {
 		selfhostService.AllowPrivateIngress()
 	}
 	selfhostService.ControlURL = publicBaseURL
+	if opts.Config.RegionalDomain != "" && opts.Config.RegionalDNSZoneID != "" {
+		publisher, err := newEdgeDNSReconciler(store, opts.Config, opts.Config.RegionalDNSZoneID)
+		if err != nil {
+			return nil, err
+		}
+		selfhostService.Names = &selfhost.NodeNames{DB: store, Publisher: publisher, Domain: opts.Config.RegionalDomain}
+	}
 	trustService := controlplane.NewEdgeService(store, opts.Config.Secrets.EdgeControlCredential)
 	trustService.SetSigner(mintKeys)
 	selfhostService.TrustDocuments = trustService.TrustDocuments

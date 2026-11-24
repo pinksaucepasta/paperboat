@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -74,7 +75,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			http.Error(w, "installation identity unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		out := Inspection{Version: 1, Nonce: req.Nonce, InstallationKey: encoding.EncodeToString(key.Public().(ed25519.PublicKey)), Name: s.Config.Name, EndpointHost: s.Config.EndpointHost, ExpiresAt: s.ExpiresAt, Components: append([]Component(nil), s.Config.Components...)}
+		out := Inspection{Version: 1, Nonce: req.Nonce, InstallationKey: encoding.EncodeToString(key.Public().(ed25519.PublicKey)), Name: s.Config.Name, EndpointHost: s.Config.EndpointHost, EndpointDetected: s.Config.EndpointDetected, EndpointIPv6: endpointIPv6(), ExpiresAt: s.ExpiresAt, Components: append([]Component(nil), s.Config.Components...)}
 		certPEM, err := os.ReadFile(filepath.Join(dir, "tls.crt"))
 		if err != nil {
 			if observe != nil {
@@ -306,6 +307,9 @@ func validateClaim(c Config, r ClaimRequest) error {
 	if r.ClaimID == "" || len(r.ClaimID) > 100 || r.ScopeID == "" || len(r.ScopeID) > 100 || (r.ScopeType != "account" && r.ScopeType != "team" && r.ScopeType != "global") {
 		return errors.New("invalid claim identity or scope")
 	}
+	if r.EndpointHost != "" && (!c.EndpointDetected || !endpointName.MatchString(r.EndpointHost)) {
+		return errors.New("the control plane may not name this installation's endpoint")
+	}
 	u, err := url.Parse(r.ControlURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 		return errors.New("control URL must be an HTTPS origin")
@@ -335,6 +339,20 @@ func validateClaim(c Config, r ClaimRequest) error {
 	}
 	return nil
 }
+
+var endpointName = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$`)
+
+// endpointIPv6 is this host's first public IPv6 address, "" without one; the control plane checks that it reaches us.
+func endpointIPv6() string {
+	addresses, _ := net.InterfaceAddrs()
+	for _, address := range addresses {
+		if network, ok := address.(*net.IPNet); ok && network.IP.To4() == nil && network.IP.IsGlobalUnicast() && !network.IP.IsPrivate() {
+			return network.IP.String()
+		}
+	}
+	return ""
+}
+
 func applyClaim(ctx context.Context, dir string, s *state) error {
 	key, err := privateKey(*s)
 	if err != nil {
@@ -347,6 +365,17 @@ func applyClaim(ctx context.Context, dir string, s *state) error {
 			return errors.New("invalid usage key")
 		}
 		usage = ed25519.PrivateKey(b)
+	}
+	// The certificate gets the name before anything that tells the control plane to use it; a crash in between reruns this.
+	if name := s.Claim.EndpointHost; name != "" && name != s.Config.EndpointHost {
+		cert, err := certificatePEM(key, name, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := writeFile(filepath.Join(dir, "tls.crt"), cert); err != nil {
+			return err
+		}
+		s.Config.EndpointHost = name
 	}
 	receipt := Receipt{ClaimID: s.Claim.ClaimID, ScopeType: s.Claim.ScopeType, ScopeID: s.Claim.ScopeID, InstallationKey: encoding.EncodeToString(key.Public().(ed25519.PublicKey))}
 	for _, registered := range s.Claim.Components {

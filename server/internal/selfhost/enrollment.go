@@ -50,6 +50,8 @@ type Inspection struct {
 	InstallationKey              string      `json:"installation_key"`
 	Name                         string      `json:"name"`
 	EndpointHost                 string      `json:"endpoint_host"`
+	EndpointDetected             bool        `json:"endpoint_detected,omitempty"`
+	EndpointIPv6                 string      `json:"endpoint_ipv6,omitempty"`
 	InfrastructureTLSCertificate string      `json:"infrastructure_tls_certificate"`
 	ExpiresAt                    int64       `json:"expires_at"`
 	Components                   []Component `json:"components"`
@@ -68,13 +70,15 @@ type RegisteredComponent struct {
 	Registered
 }
 type claimRequest struct {
-	ClaimID     string                `json:"claim_id"`
-	ScopeType   string                `json:"scope_type"`
-	ScopeID     string                `json:"scope_id"`
-	ControlURL  string                `json:"control_url"`
-	Components  []RegisteredComponent `json:"components"`
-	JWKS        json.RawMessage       `json:"jwks"`
-	Revocations json.RawMessage       `json:"revocations,omitempty"`
+	ClaimID string `json:"claim_id"`
+	// EndpointHost is the name the server published for this node; empty keeps the node's own host.
+	EndpointHost string                `json:"endpoint_host,omitempty"`
+	ScopeType    string                `json:"scope_type"`
+	ScopeID      string                `json:"scope_id"`
+	ControlURL   string                `json:"control_url"`
+	Components   []RegisteredComponent `json:"components"`
+	JWKS         json.RawMessage       `json:"jwks"`
+	Revocations  json.RawMessage       `json:"revocations,omitempty"`
 }
 type receiptComponent struct {
 	Capability     string `json:"capability"`
@@ -252,6 +256,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 		return nil, e
 	}
 	host, address, e := s.claimTarget(ctx, in.Address)
+	claimAddress := address
 	if s.DialAddress != nil {
 		address, e = s.DialAddress(ctx, in.Address)
 		host = "localhost"
@@ -304,15 +309,26 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	if e = checkEnrollExpectation(in, inspection); e != nil {
 		return nil, e
 	}
-	components, claimID, e := s.reserve(ctx, actor, scope, inspection, pin, in.ExpectRegion)
+	named, addresses := s.nodeName(ctx, scope, inspection, claimAddress, secret, pin)
+	if named != "" {
+		inspection.EndpointHost = named
+	}
+	components, claimID, e := s.reserve(ctx, actor, scope, inspection, pin, in.ExpectRegion, addresses)
 	if e != nil {
 		return nil, e
+	}
+	// The order is the safety: record at the provider, then the node puts the name in its certificate (claim), and only
+	// then can it register and be given to machines. A failure here is retried with the same name.
+	if named != "" {
+		if e = s.Names.Publisher.Publish(ctx, nodeNamePublication(named, addresses, s.now())); e != nil {
+			return nil, e
+		}
 	}
 	jwks, revocations, e := s.TrustDocuments(ctx)
 	if e != nil {
 		return nil, e
 	}
-	claim := claimRequest{ClaimID: claimID, ScopeType: scope.Kind, ScopeID: scope.ID, ControlURL: s.ControlURL, Components: components, JWKS: jwks, Revocations: revocations}
+	claim := claimRequest{ClaimID: claimID, EndpointHost: named, ScopeType: scope.Kind, ScopeID: scope.ID, ControlURL: s.ControlURL, Components: components, JWKS: jwks, Revocations: revocations}
 	var accepted receipt
 	if e = requestNode(ctx, client, target+"/v1/selfhost/claim", secret, claim, &accepted); e != nil {
 		return nil, e
@@ -340,7 +356,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	}
 	return s.ListScoped(ctx, actor, scope, operator)
 }
-func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Inspection, pin []byte, expectRegion string) (registered []RegisteredComponent, resultClaimID string, returnErr error) {
+func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Inspection, pin []byte, expectRegion string, addresses []string) (registered []RegisteredComponent, resultClaimID string, returnErr error) {
 	tx, e := s.database.SQL().BeginTx(ctx, nil)
 	if e != nil {
 		return nil, "", e
@@ -396,6 +412,16 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 			if e = tx.QueryRowContext(ctx, `SELECT 1 FROM paperboat.control_tunnel_nodes WHERE id=$1 AND tls_spki_sha256=$2 AND endpoint_host=$3 AND endpoint_tcp_port=$4 AND endpoint_quic_port=$5`, r.NodeID, pin, i.EndpointHost, c.TCPPort, c.QUICPort).Scan(&r.NodeGeneration); e != nil {
 				return nil, "", ErrUsed
 			}
+			// A moved server: its name points at the new address, and the ingress there has not been verified yet.
+			if moved, e := tx.ExecContext(ctx, `UPDATE paperboat.selfhost_installations SET endpoint_addresses=$2 WHERE id=$1 AND endpoint_addresses IS DISTINCT FROM $2 AND cardinality($2::text[])>0`, r.InstallationID, addresses); e != nil {
+				return nil, "", e
+			} else if n, e := moved.RowsAffected(); e != nil {
+				return nil, "", e
+			} else if n > 0 {
+				if _, e = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4=NULL,public_ingress_ipv6=NULL,public_ingress_verified_at=NULL WHERE id=$1`, r.NodeID); e != nil {
+					return nil, "", e
+				}
+			}
 			// The stored region is what the owner sees and what pairs name: a machine that now reports another one
 			// is added again (removed first), never silently kept in the old region.
 			var stored string
@@ -438,7 +464,7 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 		if e != nil {
 			return nil, "", e
 		}
-		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, r.InstallationID, r.NodeID, []byte(key), digest(r.RuntimeCredential), ciphertext, i.Name, c.Capability, scope.Kind, scope.ID, claimID)
+		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,endpoint_addresses) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, r.InstallationID, r.NodeID, []byte(key), digest(r.RuntimeCredential), ciphertext, i.Name, c.Capability, scope.Kind, scope.ID, claimID, addresses)
 		if e != nil {
 			return nil, "", e
 		}

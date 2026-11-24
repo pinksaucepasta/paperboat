@@ -103,7 +103,7 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode, region stri
 	if failure == "" {
 		failure = host
 	}
-	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserAccess: value("browser-access") == "true"}
+	c := selfhost.Config{Name: name, EndpointHost: host, EndpointDetected: value("endpoint-host") == "", Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserAccess: value("browser-access") == "true"}
 	if mode == "relay" || mode == "both" {
 		tcp := 443
 		if mode == "both" {

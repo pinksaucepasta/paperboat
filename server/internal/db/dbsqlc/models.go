@@ -2649,6 +2649,7 @@ type SelfhostInstallation struct {
 	ScopeID               string
 	ClaimID               string
 	ClaimComplete         bool
+	EndpointAddresses     []string
 }
 
 type SelfhostPlacement struct {

@@ -18,7 +18,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
-// Six hours: a short-lived browser certificate leaves three days between its renewal time and its end.
 const certificateCheckInterval = 6 * time.Hour
 
 func certificatePEM(key ed25519.PrivateKey, host string, now time.Time) ([]byte, error) {

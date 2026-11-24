@@ -29,10 +29,12 @@ type RegionalDNS struct {
 	Now       func() time.Time
 	// Issuer and Key, when set, also keep the regional wildcard certificate issued (EnsureCertificate); a failed
 	// issuance waits certrenewal.RetryDelay before the next attempt.
-	Issuer        DNS01Issuer
-	Renewals      *certrenewal.Schedule
-	Key           string
-	Logger        *slog.Logger
+	Issuer   DNS01Issuer
+	Renewals *certrenewal.Schedule
+	Key      string
+	Logger   *slog.Logger
+	// NodeNames, when set, keeps paired nodes' own names published (selfhost.NodeNames.Sync).
+	NodeNames     func(context.Context) error
 	issueBackoff  time.Time
 	issueFailures int
 	// reconciled is each region's last successfully published address set and when; a region is published again
@@ -142,6 +144,9 @@ FROM paperboat.control_server_nodes GROUP BY region ORDER BY region`, HealthyWit
 		default:
 			delete(r.reconciled, g.id)
 		}
+	}
+	if r.NodeNames != nil {
+		errs = append(errs, r.NodeNames(ctx))
 	}
 	return errors.Join(append(errs, certErr)...)
 }
