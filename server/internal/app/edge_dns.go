@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -49,7 +52,31 @@ func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context)
 	if err != nil {
 		return nil, err
 	}
-	return edgeDNSWorker(database, public, runtime, regional, newEdgeWildcards(database, cfg, public, runtime)), nil
+	return edgeDNSWorker(database, public, runtime, regional, newEdgeWildcards(database, cfg, public, runtime), newNodeNames(database, cfg, runtime)), nil
+}
+
+// newNodeNames names global nodes under the domain the API host lives in, which the platform DNS zone holds; nil unless
+// this server already publishes edge names there (Certificates.ManageEdgeWildcards).
+func newNodeNames(database *db.DB, cfg config.Config, publisher *tunnelcert.AddressReconciler) *selfhost.NodeNames {
+	domain := infrastructureDomain(cfg)
+	if !cfg.Certificates.ManageEdgeWildcards || cfg.Certificates.DNSZoneID == "" || domain == "" {
+		return nil
+	}
+	return &selfhost.NodeNames{DB: database, Publisher: publisher, Domain: domain}
+}
+
+// infrastructureDomain is the API host without its first label; "" when that is no domain of ours or one users' names
+// are published under.
+func infrastructureDomain(cfg config.Config) string {
+	base, err := url.Parse(cfg.HTTP.PublicBaseURL)
+	if err != nil || net.ParseIP(base.Hostname()) != nil {
+		return ""
+	}
+	_, domain, _ := strings.Cut(strings.ToLower(base.Hostname()), ".")
+	if !strings.Contains(domain, ".") || domain == cfg.Preview.BaseDomain || domain == cfg.Tunnel.BaseDomain || domain == cfg.RuntimeBaseDomain {
+		return ""
+	}
+	return domain
 }
 
 // newRegionalDNS is the regional server-node name loop (certificate + DNS), nil when not configured.
@@ -61,12 +88,11 @@ func newRegionalDNS(database *db.DB, cfg config.Config) (*servernodes.RegionalDN
 	if err != nil {
 		return nil, err
 	}
-	names := &selfhost.NodeNames{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain}
 	issuer, err := newRegionalCertificateIssuer(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("regional certificate issuer: %w", err)
 	}
-	return &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Renewals: certificateRenewals(cfg), Key: cfg.Secrets.EncryptionKey, Logger: slog.Default(), NodeNames: names.Sync}, nil
+	return &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Renewals: certificateRenewals(cfg), Key: cfg.Secrets.EncryptionKey, Logger: slog.Default()}, nil
 }
 
 // newRegionalDNSWorker runs only the regional loop every 10 s, for nodes without the edge certificate runtime.
@@ -100,12 +126,12 @@ func newRegionalDNSWorker(database *db.DB, cfg config.Config) (func(context.Cont
 // deleted by exact provider id and ends up verified with none.
 // The same leader loop also points each server-node region's name at its serving nodes and, when configured, the
 // preview and runtime wildcard names at every ready managed edge, every 10 s.
-func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler, regional *servernodes.RegionalDNS, wildcards *edgeWildcards) func(context.Context) error {
+func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler, regional *servernodes.RegionalDNS, wildcards *edgeWildcards, names *selfhost.NodeNames) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		cursor := ""
-		var regionalAt, wildcardsAt time.Time
+		var regionalAt, wildcardsAt, namesAt time.Time
 		for {
 			finishProgress := workers.BeginIteration(ctx, time.Second)
 			cycleErr := func() error {
@@ -132,6 +158,12 @@ func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconcile
 				if wildcards != nil && time.Since(wildcardsAt) >= 10*time.Second {
 					wildcardsAt = time.Now()
 					if err := wildcards.Sync(ctx); err != nil {
+						workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
+					}
+				}
+				if names != nil && time.Since(namesAt) >= 10*time.Second {
+					namesAt = time.Now()
+					if err := names.Sync(ctx); err != nil {
 						workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
 					}
 				}

@@ -67,7 +67,7 @@ controls and outside the preview, tunnel and runtime base domains. The same name
 relay and the public HTTPS listener of that host. Install with `pbh install --endpoint-host <name>`: the carrier
 certificate gets the name as SAN and the node registers it; an existing installation refuses a changed
 `--endpoint-host`, so a host that advertises its IP is uninstalled and installed again. Without `--endpoint-host` pbh uses the detected
-address and, for a global node, the server publishes `node-<id>.<regional_domain>` for it at pairing (A, and AAAA when it reaches the node
+address and, for a global node, the server publishes `node-<id>.<the API host's domain>` for it at pairing (A, and AAAA when it reaches the node
 there), keeps it current when the node is paired again at another address, and deletes it with the node. No certificate is needed: the edge
 serves its enrolled identity there and the control plane pins it. Check from a
 v6-only host: `getent ahostsv6 <name>` returns a `64:ff9b::` address, `pb ping` shows a path.
