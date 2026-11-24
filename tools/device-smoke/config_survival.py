@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+import time
 
 from install_lifecycle import registration
 from pairing_lifecycle import CommandFailed, command_diagnostic, command_result
@@ -19,6 +20,18 @@ def phase(name, state):
     if result.returncode:
         raise RuntimeError('config_lifecycle %s failed: %s' % (name, (result.stdout + result.stderr)[-300:]))
     return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def wait_for_ssh(machine_id):
+    """The running service follows the restored SSH port by itself: later SSH checks depend on it."""
+    deadline = time.monotonic() + 60
+    while True:
+        result = command_result(PB, 'ssh', 'doctor', machine_id, '--json', timeout=60)
+        if result.returncode == 0:
+            return
+        if time.monotonic() > deadline:
+            raise RuntimeError('SSH did not come back after the port was restored: ' + (result.stdout + result.stderr)[-300:])
+        time.sleep(3)
 
 
 def main():
@@ -45,6 +58,7 @@ def main():
             verified = phase('verify', state)
     if registration()['machine_id'] != before['machine_id']:
         raise RuntimeError('the update changed the enrolled machine')
+    wait_for_ssh(before['machine_id'])
     print(json.dumps({'check': 'config-survival', 'status': 'PASS', **{k: v for k, v in verified.items() if k.endswith('_survives_update') or k == 'reset_restores'},
                       'enrollment_preserved': True}))
 

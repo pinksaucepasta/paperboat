@@ -86,7 +86,7 @@ func (h *Host) ReconcileTarget(ctx context.Context, generation uint64, port uint
 
 // ReconcileSourceTarget associates a worker epoch with the immutable runtime
 // source whose installed SSH wrapper it can keep using across worker restarts.
-// Equal-epoch replay must preserve both the port and the source SHA-256.
+// Equal-epoch replay must preserve the source SHA-256; its port follows `pb config set ssh-target-port`.
 func (h *Host) ReconcileSourceTarget(ctx context.Context, generation uint64, port uint16, sourceSHA256 string) (HostTarget, error) {
 	if h == nil || ctx == nil || generation == 0 || port == 0 || sourceSHA256 != "" && !validSourceSHA256(sourceSHA256) {
 		return HostTarget{}, ErrSSHHostInvalid
@@ -98,10 +98,10 @@ func (h *Host) ReconcileSourceTarget(ctx context.Context, generation uint64, por
 	if retired {
 		return HostTarget{}, ErrSSHHostStale
 	}
-	if current.Generation > generation || current.Generation == generation && (current.Port != port || current.SourceSHA256 != sourceSHA256) {
+	if current.Generation > generation || current.Generation == generation && current.SourceSHA256 != sourceSHA256 {
 		return HostTarget{}, ErrSSHHostStale
 	}
-	if current.Generation == generation {
+	if current.Generation == generation && current.Port == port {
 		return current, nil
 	}
 	readiness, err := ProbeLoopbackSSH(ctx, port, h.config.ProbeTimeout)
@@ -114,10 +114,10 @@ func (h *Host) ReconcileSourceTarget(ctx context.Context, generation uint64, por
 	if h.retired || h.disabled {
 		return HostTarget{}, ErrSSHHostStale
 	}
-	if h.target.Generation > generation || h.target.Generation == generation && (h.target.Port != port || h.target.SourceSHA256 != sourceSHA256) {
+	if h.target.Generation > generation || h.target.Generation == generation && h.target.SourceSHA256 != sourceSHA256 {
 		return HostTarget{}, ErrSSHHostStale
 	}
-	if h.target.Generation == generation {
+	if h.target.Generation == generation && h.target.Port == port {
 		return h.target, nil
 	}
 	h.target = next

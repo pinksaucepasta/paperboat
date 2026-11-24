@@ -20,6 +20,7 @@ import (
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	service "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	"github.com/spf13/cobra"
 )
 
@@ -84,10 +85,20 @@ func configSetSSHTargetPort(c *command.Context, port uint16) error {
 	if err := store.SaveRegistration(registration); err != nil {
 		return err
 	}
+	// The running service follows a saved port within seconds, once an SSH server answers there (managedSSHService).
+	_, probeErr := managedssh.ProbeLoopbackSSH(c.Context, port, 3*time.Second)
 	if c.Bool("json") {
-		return writeCLIJSON(c.Writer, map[string]any{"key": "ssh-target-port", "port": port, "updated": true})
+		return writeCLIJSON(c.Writer, map[string]any{"key": "ssh-target-port", "port": port, "updated": true, "port_answering": probeErr == nil})
 	}
 	fmt.Fprintf(c.Writer, "SSH target port set to %d\n", port)
+	switch {
+	case probeErr != nil:
+		fmt.Fprintf(c.Writer, "Not in use yet: no SSH server answers on port %d of this machine. Start it there; Paperboat then switches by itself.\n", port)
+	case runtime.GOOS == "windows":
+		fmt.Fprintln(c.Writer, "Run `pb service restart` to use it.")
+	default:
+		fmt.Fprintln(c.Writer, "The Paperboat service switches to it within a few seconds.")
+	}
 	return nil
 }
 

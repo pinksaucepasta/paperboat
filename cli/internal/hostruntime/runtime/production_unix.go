@@ -363,7 +363,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	managedSSHHost, managedSSHService, err := newProductionManagedSSH(controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation), nativeWorkerEpoch, capabilityController, machineEvents.Subscribe(machineevents.TopicMachineAccess), SSHSessionAudit(offlineAudit))
+	managedSSHHost, managedSSHService, err := newProductionManagedSSH(controlURL.String(), transport, machineRegistration, identityStore.Registration, managedSSHIdentity, uint64(bootState.Generation), nativeWorkerEpoch, capabilityController, machineEvents.Subscribe(machineevents.TopicMachineAccess), SSHSessionAudit(offlineAudit))
 	if err != nil {
 		return nil, err
 	}
