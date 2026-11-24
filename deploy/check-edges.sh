@@ -6,6 +6,7 @@
 #             once a second (the request rides the probe machine's held carrier on that edge)
 #   control   edge control failures (edge_control_request_failed, edge_route_reconcile_failed)
 #   carrier   refused host carriers (carrier_connection_failed: data-carrier TLS handshake failures)
+#             except of a machine with no live key on the server any more (removed during the window)
 #   attach    host route attach refusals (runtime_route_attach_refused)
 #   edge5xx   5xx pages the edge answered itself, dispatch failures included (edge_http_5xx)
 #   server5xx support_report_groups seen since the start with HTTP status >= 500 (every server component)
@@ -116,7 +117,20 @@ for edge in "$@"; do
 	target=${edge%%=*} log=$work/edge-${edge%%=*}.log
 	probes=$(grep -c " $target " "$work/probe-failed" || true)
 	control=$(count 'edge_control_request_failed|edge_route_reconcile_failed' "$log")
-	carrier=$(count 'carrier_connection_failed' "$log")
+	# A removed machine (no live key on the server) is refused a few times until it hears of its removal; that is
+	# correct behaviour, not a deploy failure. A refusal without a key, or of a key that is still live, counts.
+	grep 'carrier_connection_failed' "$log" >"$work/refused-$target" || true
+	sed -n 's/.*"reason":"unknown_machine".*"key_thumbprint":"\(sha256:[A-Za-z0-9_-]*\)".*/\1/p' "$work/refused-$target" | sort -u >"$work/keys-$target"
+	if [ -s "$work/keys-$target" ]; then
+		keys=$(sed "s/.*/'&'/" "$work/keys-$target" | paste -sd, -)
+		sql "select 'key ' || key_thumbprint from paperboat.control_helpers where revoked_at is null and key_thumbprint in ($keys) union all select 'done';" >"$work/live-$target"
+		if grep -qx done "$work/live-$target"; then # a failed query excuses nothing
+			sed -n 's/^key //p' "$work/live-$target" >"$work/livekeys-$target"
+			grep -vxFf "$work/livekeys-$target" "$work/keys-$target" | sed 's/.*/"reason":"unknown_machine".*"key_thumbprint":"&"/' >"$work/gone-$target" || true
+			[ -s "$work/gone-$target" ] && { grep -v -f "$work/gone-$target" "$work/refused-$target" >"$work/counted-$target" || true; mv "$work/counted-$target" "$work/refused-$target"; }
+		fi
+	fi
+	carrier=$(grep -c . "$work/refused-$target" || true)
 	attach=$(count 'runtime_route_attach_refused' "$log")
 	# Error pages for a visitor's own app (refused or timed out behind its tunnel) are not deploy failures; their
 	# support references resolve to code edge_error_page.

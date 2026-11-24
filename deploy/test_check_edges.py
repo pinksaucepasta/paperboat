@@ -29,6 +29,7 @@ case "$s" in
 *"not online"*"deleted_at is null"*) cat "$T/offline" 2>/dev/null ;;
 *support_report_groups*"code <> 'edge_error_page'"*) cat "$T/server5xx" ;;
 *"select o.support_reference"*"code = 'edge_error_page'"*) echo support_aaaa ;;  # only support_aaaa is a visitor app error page
+*control_helpers*) [ -e "$T/keys-down" ] || { case "$s" in *"'sha256:live_key'"*) echo 'key sha256:live_key' ;; esac; echo done; } ;;
 *support_report_groups*) echo 99 ;;  # a count that includes visitors' edge error pages fails every case
 esac
 ''',
@@ -46,7 +47,7 @@ esac
 
 
 class CheckEdgesTest(unittest.TestCase):
-    def run_gate(self, edge_log='', server5xx='0', offline='', deploy='true', origin_down=False, extra_env=None):
+    def run_gate(self, edge_log='', server5xx='0', offline='', deploy='true', origin_down=False, keys_down=False, extra_env=None):
         with tempfile.TemporaryDirectory() as directory:
             t = pathlib.Path(directory)
             bin_dir = t / 'bin'
@@ -59,6 +60,8 @@ class CheckEdgesTest(unittest.TestCase):
             (t / 'server5xx').write_text(server5xx + '\n')
             (t / 'offline').write_text(offline)
             (t / 'code').write_text('200')
+            if keys_down:
+                (t / 'keys-down').write_text('')
             if origin_down:
                 (t / 'origin-down').write_text('')
             env = dict(os.environ, T=str(t), PATH=f'{bin_dir}:{os.environ["PATH"]}', PROBE=str(bin_dir / 'probe'),
@@ -72,6 +75,29 @@ class CheckEdgesTest(unittest.TestCase):
         code, out = self.run_gate()
         self.assertEqual(code, 0, out)
         self.assertIn('edge gate: PASS', out)
+
+    @staticmethod
+    def refusal(key, reason='unknown_machine'):
+        return ('{"level":"WARN","msg":"carrier_connection_failed","reason":"%s","key_thumbprint":"%s","remote_ip":"192.0.2.9"}\n'
+                % (reason, key))
+
+    def test_removed_machine_refused_until_it_hears_passes(self):
+        code, out = self.run_gate(edge_log=self.refusal('sha256:gone_key') * 6)
+        self.assertEqual(code, 0, out)
+        self.assertIn('carrier=0', out)
+
+    def test_refused_live_machine_still_fails(self):
+        for log in (self.refusal('sha256:gone_key') + self.refusal('sha256:live_key'), self.refusal(''),
+                    self.refusal('sha256:gone_key', 'tls_failed')):
+            with self.subTest(log=log):
+                code, out = self.run_gate(edge_log=log)
+                self.assertEqual(code, 1, out)
+                self.assertIn('carrier=1', out)
+
+    def test_unreadable_keys_excuse_nothing(self):
+        code, out = self.run_gate(edge_log=self.refusal('sha256:gone_key'), keys_down=True)
+        self.assertEqual(code, 1, out)
+        self.assertIn('carrier=1', out)
 
     def test_refused_host_carrier_fails(self):
         code, out = self.run_gate(edge_log='{"level":"WARN","msg":"carrier_connection_failed","schema":"paperboat.edge_event.v1",'
