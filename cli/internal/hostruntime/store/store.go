@@ -185,6 +185,19 @@ func (s *Store) configure(ctx context.Context) (resultErr error) {
 	}
 	return nil
 }
+
+// Unsynced runs work that may be repeated after a crash: its commits reach the disk with the next synced commit.
+func (s *Store) Unsynced(ctx context.Context, work func() error) error {
+	if _, err := s.db.ExecContext(ctx, "PRAGMA synchronous=NORMAL"); err != nil {
+		return storeFailure("runtime state sync mode failed", err)
+	}
+	workErr := work()
+	if _, err := s.db.ExecContext(context.WithoutCancel(ctx), "PRAGMA synchronous=FULL"); err != nil {
+		return storeFailure("runtime state sync mode failed", workErr, err)
+	}
+	return workErr
+}
+
 func (s *Store) migrate(ctx context.Context) (resultErr error) {
 	defer protectStoreError(&resultErr)
 	return migrateDatabase(ctx, s.db, s.hook)

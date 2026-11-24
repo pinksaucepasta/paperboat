@@ -10,7 +10,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 )
 
+// A crash during recovery repeats it, so its commits need no sync each: 3 per session on one connection.
 func (m *Manager) recover(ctx context.Context) error {
+	return m.config.Store.Unsynced(ctx, func() error { return m.recoverSessions(ctx) })
+}
+
+func (m *Manager) recoverSessions(ctx context.Context) error {
 	records, err := m.config.Store.Sessions(ctx)
 	if err != nil {
 		return err
