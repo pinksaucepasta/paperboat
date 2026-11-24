@@ -121,7 +121,7 @@ installation TLS key, single-use-code verifier, scope assignment, component runt
 credentials, and tunnel usage-signing key. Never start two machines from one backup.
 The helper preserves identity and ownership on reinstall with the same settings.
 Claim/carrier infrastructure certificates carry one-year validity. The helper
-checks at startup and every day, renews within thirty days of expiry using the same
+checks at startup and every six hours, renews within thirty days of expiry using the same
 protected key, and restarts its runtime components to reload the replacement.
 Failed renewal preparation leaves the previous certificate untouched and schedules
 a retry. Runtime JWKS is loaded at

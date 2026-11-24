@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
@@ -214,5 +215,37 @@ func TestDoctorReportsEveryFilteringLayer(t *testing.T) {
 	}
 	if out := run(map[string]string{}); !strings.Contains(out, "ok   host firewall (none active) lets") {
 		t.Errorf("no-firewall line missing:\n%s", out)
+	}
+}
+
+func TestDoctorFailsWhenTheBrowserCertificateHasNoWorkingRenewal(t *testing.T) {
+	now := time.Now()
+	working := selfhost.PublicHTTPSStatus{Automatic: true, CheckedAt: now.Add(-time.Hour), RenewAt: now.Add(time.Hour), NotAfter: now.Add(48 * time.Hour)}
+	with := func(change func(*selfhost.PublicHTTPSStatus)) selfhost.PublicHTTPSStatus {
+		status := working
+		change(&status)
+		return status
+	}
+	for name, test := range map[string]struct {
+		status selfhost.PublicHTTPSStatus
+		err    error
+		want   string // the FIX line, "" when doctor must pass
+	}{
+		"no certificate":   {},
+		"working":          {status: working},
+		"failing":          {status: with(func(s *selfhost.PublicHTTPSStatus) { s.LastError = "CA refused" }), want: "FAILING since"},
+		"never issued":     {status: selfhost.PublicHTTPSStatus{Automatic: true}, want: "not issued yet"},
+		"check stopped":    {status: with(func(s *selfhost.PublicHTTPSStatus) { s.CheckedAt = now.Add(-13 * time.Hour) }), want: "not been checked since"},
+		"overdue":          {status: with(func(s *selfhost.PublicHTTPSStatus) { s.RenewAt = now.Add(-13 * time.Hour) }), want: "overdue since"},
+		"by hand, fresh":   {status: selfhost.PublicHTTPSStatus{RenewAt: now.Add(time.Hour), NotAfter: now.Add(2 * time.Hour)}},
+		"by hand, ending":  {status: selfhost.PublicHTTPSStatus{RenewAt: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}, want: "nothing renews them"},
+		"state unreadable": {err: errors.New("denied"), want: "could not read the browser HTTPS state"},
+	} {
+		deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
+		deps.publicHTTPS = func() (selfhost.PublicHTTPSStatus, error) { return test.status, test.err }
+		err := runDoctor(t.Context(), tunnelConfig(), deps, out)
+		if (err != nil) != (test.want != "") || test.want != "" && !strings.Contains(out.String(), test.want) {
+			t.Errorf("%s: err %v, want %q in:\n%s", name, err, test.want, out)
+		}
 	}
 }

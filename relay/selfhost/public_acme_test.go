@@ -205,6 +205,16 @@ func TestRenewPublicHTTPSObtainsThenRenewsAtTwoThirdsOfLifetime(t *testing.T) {
 			if renewed, err := RenewPublicHTTPS(t.Context(), dir, ca.URL+"/directory", now.Add(5*24*time.Hour)); !renewed || err != nil || ca.issued != 2 {
 				t.Fatalf("renewal past two thirds = %v, %v, issued %d; want a second certificate", renewed, err, ca.issued)
 			}
+			// A key that does not belong to the certificate (a half-written renewal) is replaced before it is due.
+			other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			otherDER, _ := x509.MarshalPKCS8PrivateKey(other)
+			if err := writeFile(publicACMEFile(dir, "key.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: otherDER})); err != nil {
+				t.Fatal(err)
+			}
+			if renewed, err := RenewPublicHTTPS(t.Context(), dir, ca.URL+"/directory", now); !renewed || err != nil || ca.issued != 3 {
+				t.Fatalf("mismatched pair = %v, %v, issued %d; want a third certificate", renewed, err, ca.issued)
+			}
+			wantRenewReport(t, dir, true)
 		})
 	}
 }
@@ -223,6 +233,10 @@ func TestRenewPublicHTTPSFailureIsRecordedAndKeepsTheCurrentCertificate(t *testi
 	if err != nil || status.LastError == "" || !status.FailingSince.Equal(now.UTC().Truncate(time.Second)) && status.FailingSince.Sub(now) > time.Second {
 		t.Fatalf("status = %+v (%v), want the error with FailingSince at the first failure", status, err)
 	}
+	if !status.Automatic || status.CheckedAt.IsZero() || status.Problem(now) == "" {
+		t.Fatalf("status = %+v, want a problem with its check time", status)
+	}
+	wantRenewReport(t, dir, false)
 	if got := status.Describe(); !strings.Contains(got, "FAILING since") {
 		t.Fatalf("Describe = %q", got)
 	}
@@ -282,5 +296,19 @@ func TestSyncPublicHTTPSDeploymentStartsWithAnExpiredAutomaticCertificate(t *tes
 	}
 	if deployment["public_https_cert_file"] != "" || deployment["public_acme_challenge_dir"] != PublicACMEChallengeDir(dir) {
 		t.Fatalf("deployment = %v, want no certificate and the challenge directory", deployment)
+	}
+}
+
+// wantRenewReport checks the file the edge's heartbeat carries.
+func wantRenewReport(t *testing.T, dir string, ok bool) {
+	t.Helper()
+	raw, err := os.ReadFile(publicACMEFile(dir, "renew-status.json"))
+	var got struct {
+		OK        *bool     `json:"ok"`
+		Error     string    `json:"error"`
+		CheckedAt time.Time `json:"checked_at"`
+	}
+	if err != nil || json.Unmarshal(raw, &got) != nil || got.OK == nil || *got.OK != ok || (got.Error == "") != ok || got.CheckedAt.IsZero() {
+		t.Fatalf("renew-status.json = %s (%v), want ok %v", raw, err, ok)
 	}
 }

@@ -50,6 +50,7 @@ type PublicHTTPSStatus struct {
 	Automatic bool      `json:"automatic"`
 	NotAfter  time.Time `json:"not_after,omitzero"`
 	RenewAt   time.Time `json:"renew_at,omitzero"`
+	CheckedAt time.Time `json:"checked_at,omitzero"`
 	// FailingSince and LastError are set while the last attempt failed; LastError is the CA's or the client's reason.
 	FailingSince time.Time `json:"failing_since,omitzero"`
 	LastError    string    `json:"last_error,omitempty"`
@@ -74,11 +75,19 @@ func publicHTTPSRenewal(certPath string, now time.Time) (due bool, notAfter, ren
 	return !now.Before(renewAt) || !now.Before(leaf.NotAfter), leaf.NotAfter, renewAt
 }
 
-// ReadPublicHTTPSStatus is the recorded state of automatic browser HTTPS; Automatic is false when it is not enabled.
+// ReadPublicHTTPSStatus is the recorded state of automatic browser HTTPS; Automatic is false when it is not enabled
+// (NotAfter and RenewAt then describe the certificate files given by hand, if any).
 func ReadPublicHTTPSStatus(dir string) (PublicHTTPSStatus, error) {
 	s, err := load(dir)
-	if err != nil || !s.Config.PublicHTTPSAutomatic {
+	if err != nil {
 		return PublicHTTPSStatus{}, err
+	}
+	if !s.Config.PublicHTTPSAutomatic {
+		var status PublicHTTPSStatus
+		if s.Config.PublicHTTPSCertFile != "" {
+			_, status.NotAfter, status.RenewAt = publicHTTPSRenewal(s.Config.PublicHTTPSCertFile, time.Now())
+		}
+		return status, nil
 	}
 	status := PublicHTTPSStatus{Automatic: true}
 	if raw, err := os.ReadFile(publicACMEFile(dir, "status.json")); err == nil {
@@ -106,7 +115,8 @@ func RenewPublicHTTPS(ctx context.Context, dir, directoryURL string, now time.Ti
 	}
 	certPath, keyPath := publicACMEFile(dir, "cert.pem"), publicACMEFile(dir, "key.pem")
 	due, notAfter, renewAt := publicHTTPSRenewal(certPath, now)
-	if !due {
+	// A pair the node cannot serve (a half-written renewal, another host name) is replaced at once.
+	if !due && validatePublicHTTPS(s.Config.EndpointHost, certPath, keyPath, now) == nil {
 		return false, recordPublicHTTPSStatus(dir, PublicHTTPSStatus{NotAfter: notAfter, RenewAt: renewAt}, now)
 	}
 	ctx, cancel := context.WithTimeout(ctx, publicACMEAttemptLimit)
@@ -125,6 +135,7 @@ func RenewPublicHTTPS(ctx context.Context, dir, directoryURL string, now time.Ti
 // recordPublicHTTPSStatus writes the outcome; FailingSince keeps the first failure of a run of them.
 func recordPublicHTTPSStatus(dir string, status PublicHTTPSStatus, now time.Time) error {
 	path := publicACMEFile(dir, "status.json")
+	status.Automatic, status.CheckedAt = true, now
 	if status.LastError != "" {
 		status.LastError = status.LastError[:min(len(status.LastError), 300)]
 		status.FailingSince = now
@@ -136,7 +147,8 @@ func recordPublicHTTPSStatus(dir string, status PublicHTTPSStatus, now time.Time
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	return writeJSON(path, status)
+	// The edge reads this one and carries it in its heartbeat (certificate_renewal_status_file).
+	return errors.Join(writeJSON(path, status), writeJSON(publicACMEFile(dir, "renew-status.json"), map[string]any{"ok": status.LastError == "", "error": status.LastError, "checked_at": now.UTC()}))
 }
 
 // installPublicHTTPS points the installation at the certificate it just obtained (the first time) and validates it
@@ -289,6 +301,26 @@ func loadOrCreateACMEAccountKey(path string) (*ecdsa.PrivateKey, error) {
 		return nil, err
 	}
 	return key, writeFile(path, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
+}
+
+// Problem says why the certificate will not be renewed in time, "" while renewal works.
+func (s PublicHTTPSStatus) Problem(now time.Time) string {
+	const missed = 2 * certificateCheckInterval
+	switch {
+	case !s.Automatic && (s.NotAfter.IsZero() || now.Before(s.RenewAt)):
+		return ""
+	case !s.Automatic:
+		return fmt.Sprintf("browser HTTPS certificate files given by hand end %s and nothing renews them; run pbh configure-tls --acme, or configure-tls with renewed files", s.NotAfter.UTC().Format(time.RFC3339))
+	case s.LastError != "":
+		return s.Describe()
+	case s.NotAfter.IsZero():
+		return s.Describe()
+	case now.Sub(s.CheckedAt) > missed:
+		return fmt.Sprintf("browser HTTPS renewal has not been checked since %s; run pbh status and pbh restart (the service checks every six hours)", s.CheckedAt.UTC().Format(time.RFC3339))
+	case now.Sub(s.RenewAt) > missed:
+		return fmt.Sprintf("browser HTTPS renewal is overdue since %s; the certificate ends %s", s.RenewAt.UTC().Format(time.RFC3339), s.NotAfter.UTC().Format(time.RFC3339))
+	}
+	return ""
 }
 
 // Describe is the one line `pbh status` and `pbh doctor` print for automatic browser HTTPS.

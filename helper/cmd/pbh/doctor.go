@@ -28,7 +28,7 @@ type doctorDeps struct {
 	listen func(nonce string) (port int, stop func(), err error)
 	// ingress is the control plane's verdict on the endpoint host, with a reason when it is not verified.
 	ingress func(ctx context.Context, host string) (containers.IngressState, error)
-	// publicHTTPS is the state of automatic browser HTTPS (nil: not checked).
+	// publicHTTPS is the state of automatic browser HTTPS and of its renewal (nil: not checked).
 	publicHTTPS func() (selfhost.PublicHTTPSStatus, error)
 }
 
@@ -122,9 +122,12 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 		report(state.Verified, "the control plane verified "+c.EndpointHost+" reaches this node", ingressAdvice(c.EndpointHost, state.Reason))
 	}
 	if d.publicHTTPS != nil {
-		if status, err := d.publicHTTPS(); err == nil && status.Automatic {
-			line := status.Describe()
-			report(status.LastError == "", line, line+"; the certificate in use is kept until it expires. Check that TCP port 80 of "+c.EndpointHost+" reaches this node and rerun pbh doctor; the service retries every six hours")
+		if status, err := d.publicHTTPS(); err != nil {
+			report(false, "", "could not read the browser HTTPS state ("+err.Error()+"); rerun pbh doctor as root")
+		} else if problem := status.Problem(time.Now()); problem != "" && !status.Automatic {
+			report(false, "", problem)
+		} else if status.Automatic {
+			report(problem == "", status.Describe(), problem+"; the certificate in use is kept until it expires. Check that TCP port 80 of "+c.EndpointHost+" reaches this node and rerun pbh doctor; the service retries every six hours")
 		}
 	}
 	if problems > 0 {

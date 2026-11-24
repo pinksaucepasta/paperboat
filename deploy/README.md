@@ -81,27 +81,16 @@ public IP needs a publicly trusted IP certificate in addition to its enrolled
 carrier certificate. These identities serve different connections; keep the
 carrier key and runtime credentials unchanged.
 
-Install `edge-ip-certificate.py` as
-`/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py` (mode 0755), and install
-`paperboat-edge-certificate.service` and `.timer` in `/etc/systemd/system/`.
-Create mode-0600 `/etc/paperboat-edge-certificate.env` with
-`PAPERBOAT_CERTIFICATE_EMAIL` set to the operator's certificate contact address. Each check is written to
-`public-acme/renew-status.json`; the edge carries it in every heartbeat over its own enrolled node credential, so a
-failing renewal, or no check for a day, is an alert in the admin bell for that node (no reporting credential).
-Run `systemctl daemon-reload`, start `paperboat-edge-certificate.service`, then
-`systemctl enable --now paperboat-edge-certificate.timer`.
+Run `pbh configure-tls --acme` once on the node: `pbh serve` then obtains the certificate over HTTP-01 (TCP port 80,
+answered by the running edge) 30 seconds after start and renews it after two thirds of its lifetime. It checks every
+six hours and at every service start; there is no timer to install. A renewal restarts the relay and edge containers to
+load the new certificate. Each check is written to `public-acme/status.json` (`pbh status`, `pbh doctor`) and
+`public-acme/renew-status.json`; the edge carries the latter in every heartbeat over its own enrolled node credential,
+so a failing renewal, or no check for a day, is an alert in the admin bell for that node. `pbh doctor` fails when a
+renewal fails, is overdue or is not being checked.
 
-The script reads the enrolled IP from protected deployment configuration. It uses
-a pinned native Certbot image and the short-lived IP certificate profile, persists
-ACME state under the installation's `public-acme/`, and applies certificate paths
-through `pbh configure-tls`. It checks every six hours and renews only within two days of
-expiry; a renewal that collides with a service restart (a `pbh install` at the same second
-cancelled the stop on 2026-10-26) fails cleanly and the next check retries, as Certbot's
-own twice-daily timer does. HTTP validation briefly stops the helper and its exact owned edge container;
-the service is restored on failure. A current certificate leaves the service running.
-The protected `public-acme/renew.log` contains the latest attempt. Verify both current
-node readiness and the server's authenticated public ingress proof after configuring
-or renewing a certificate.
+Do not install `edge-ip-certificate.py` and the `paperboat-edge-certificate` units on such a node: they would be a
+second owner of the certificate, and stop the service to bind port 80.
 
 ## Managed server upgrades
 

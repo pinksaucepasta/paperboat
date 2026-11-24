@@ -17,7 +17,9 @@ import (
 )
 
 const certificateRenewalWindow = 30 * 24 * time.Hour
-const certificateCheckInterval = 24 * time.Hour
+
+// Six hours: a short-lived browser certificate leaves two days between its renewal time and its end.
+const certificateCheckInterval = 6 * time.Hour
 
 func certificatePEM(key ed25519.PrivateKey, host string, now time.Time) ([]byte, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
