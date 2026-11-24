@@ -123,6 +123,9 @@ func cleanupWindowsOwnedTrust(ctx context.Context, roots []ownedRoot) error {
 		if err := removeWindowsRoot(root); err != nil {
 			return err
 		}
+		if err := withdrawWindowsCRL(root.certificate); err != nil {
+			return err
+		}
 	}
 	return removeOwnedRootState(roots)
 }

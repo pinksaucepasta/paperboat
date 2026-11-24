@@ -63,6 +63,7 @@ type guardServer struct {
 	closing         bool
 	failures        chan error
 	ca              *splitdns.CA
+	publishCRL      func([]byte) error // nil where the platform has no system revocation store
 	trustReady      bool
 	certificateGate chan struct{}
 	certificates    map[controlConn]map[string]cachedCertificate
@@ -110,7 +111,7 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
-	g := &guardServer{cfg: cfg, reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{}, failures: make(chan error, 1)}
+	g := &guardServer{cfg: cfg, publishCRL: platformPublishCRL, reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{}, failures: make(chan error, 1)}
 	if data, err := os.ReadFile(filepath.Join(cfg.StateDir, "reservations.json")); err == nil {
 		if len(data) > maxJournal || json.Unmarshal(data, &g.reserved) != nil || g.reserved.Names == nil {
 			return errors.New("invalid machine guard reservation journal")

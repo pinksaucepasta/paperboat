@@ -84,6 +84,11 @@ func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, 
 	if err != nil {
 		return nil, err
 	}
+	if g.publishCRL != nil {
+		if err := g.publishCRL(crl); err != nil {
+			slog.Warn("local revocation list was not published; Windows TLS clients need port 80 to fetch it", "error", err)
+		}
+	}
 	bundle := &CertificateBundle{CertificatePEM: certificate, PrivateKeyPEM: key, RootCAPEM: ca.CertPEM(), RevocationListDER: crl}
 	renewAt, err := certificateRenewAt(bundle, time.Now())
 	if err != nil {
