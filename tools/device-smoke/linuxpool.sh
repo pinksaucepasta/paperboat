@@ -52,6 +52,13 @@ answers() { ssh -o BatchMode=yes -o ConnectTimeout=15 "linuxpool-$1" true 2>/dev
 
 slot() { [[ ${1:-} =~ ^([1-9]|1[0-2])$ ]] || die "machine number must be 1-$MAX"; }
 
+# Runners start in the second account's runner repository when this controller has one (owner/name and token files): its job
+# limit is its own, so the Linux hosts leave the main account's slots to Windows, macOS and CI.
+pool_gh() {
+  local conf=$HOME/.config/paperboat-dev/linuxpool-gh
+  if [ -s "$conf.repo" ] && [ -s "$conf.token" ]; then GH_REPO=$(cat "$conf.repo") GH_TOKEN=$(cat "$conf.token") gh "$@"; else gh "$@"; fi
+}
+
 start() {
   local count=${1:-} hours=${2:-2} busy free=() n deadline
   [[ $count =~ ^([1-9]|1[0-2])$ ]] || die "usage: linuxpool.sh start N [HOURS] (N 1-$MAX)"
@@ -65,7 +72,7 @@ start() {
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of $MAX machines are free (linuxpool.sh list)"
   free=("${free[@]:0:count}")
   for n in "${free[@]}"; do ssh-keygen -q -R "[127.0.0.1]:$((22400 + n))" -f "$KNOWN" >/dev/null 2>&1 || true; done
-  gh workflow run linuxpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
+  pool_gh workflow run linuxpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
   for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; done
   flock -u 9
   pool_revoke "${free[@]}" || echo "linuxpool: could not revoke the previous machine records of ${free[*]}; sweep retries" >&2 # leftovers of the runner that held these slots
