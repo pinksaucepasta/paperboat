@@ -238,7 +238,7 @@ func TestPolicySaveReviewAndRights(t *testing.T) {
 		t.Fatalf("unknown token: %v", err)
 	}
 	// A recipe's machines are narrowed by its reach even where its creator is allowed.
-	f.exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,team_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,$3,'ci','','toml','{"expires":"90d","reach":[{"dst":["machine:runner"],"allow":["exec"]}]}',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, "recipe_"+f.member, f.member, f.team)
+	f.exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,team_id,name,source,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,$3,'ci','','{"expires":"90d","reach":[{"dst":["machine:runner"],"allow":["exec"]}]}',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, "recipe_"+f.member, f.member, f.team)
 	ex, err = f.service.ExplainPolicy(f.ctx, f.member, f.team, PolicyExplainRequest{Dst: "machine:db1", Action: "exec", Recipe: "ci"})
 	if err != nil || ex.Decision == nil || ex.Decision.Allowed || ex.Decision.Reason != "outside_recipe_reach" {
 		t.Fatalf("recipe reach: %+v %v", ex.Decision, err)

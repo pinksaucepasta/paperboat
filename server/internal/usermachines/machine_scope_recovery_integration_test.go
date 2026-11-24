@@ -41,7 +41,7 @@ func authenticatedMachineScopeRefresh(t *testing.T, parent string) {
 	recipeID, tokenID := "recipe_"+uuid.NewString(), "apitok_"+uuid.NewString()
 	switch parent {
 	case "recipe":
-		exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,'scope','','toml','{"expires":"90d"}',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, recipeID, user)
+		exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,'scope','','{"expires":"90d"}',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, recipeID, user)
 		exec(`UPDATE paperboat.cli_client_sessions SET recipe_id=$2 WHERE id=$1`, client, recipeID)
 	case "api_token":
 		exec(`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,expires_at) VALUES($1,$2,'scope',sha256(convert_to($1::text,'UTF8')),now()+interval '1 day')`, tokenID, user)

@@ -126,8 +126,8 @@ func TestConfigRepositoryUsageSourceAndGitTeamDefault(t *testing.T) {
 		t.Fatalf("machine-chosen source=%q", got)
 	}
 	auth := sha256.Sum256([]byte(recipeID))
-	exec(`INSERT INTO paperboat.recipes (id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at)
-VALUES ($1,$1,$2,'cfgsrc','','json','{"config":{"repository":"config"}}',$3,now()+interval '1 day')`, recipeID, member, auth[:])
+	exec(`INSERT INTO paperboat.recipes (id,token_id,account_id,name,source,canonical,auth_hash,expires_at)
+VALUES ($1,$1,$2,'cfgsrc','','{"config":{"repository":"config"}}',$3,now()+interval '1 day')`, recipeID, member, auth[:])
 	exec(`INSERT INTO paperboat.recipe_machines (machine_id,recipe_id) VALUES ($1,$2)`, machineID, recipeID)
 	if got := source(); got != "recipe" {
 		t.Fatalf("recipe-chosen source=%q", got)

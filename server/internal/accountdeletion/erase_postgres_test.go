@@ -93,7 +93,7 @@ func (f *fixture) seedPersonal(u auth.User) (machine string) {
 	f.exec(`INSERT INTO cli_refresh_tokens(token_hash,cli_client_session_id,state,expires_at,created_at) VALUES($1,$2,'active',now()+interval '1 day',now())`, "rt_"+u.ID, cli)
 	f.exec(`INSERT INTO cli_access_tokens(token_hash,cli_client_session_id,expires_at,created_at) VALUES($1,$2,now()+interval '1 hour',now())`, "at_"+u.ID, cli)
 	f.exec(`INSERT INTO api_tokens(id,account_id,name,secret_hash,expires_at) VALUES($1,$2,'ci',$3,now()+interval '1 day')`, "tok_"+u.ID, u.ID, digest("tok_"+u.ID))
-	f.exec(`INSERT INTO recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,'ci','','toml','{"expires":"90d"}',$3,now()+interval '1 day')`, "recipe_"+u.ID, u.ID, digest("recipe_"+u.ID))
+	f.exec(`INSERT INTO recipes(id,token_id,account_id,name,source,canonical,auth_hash,expires_at) VALUES($1,substr(md5($1),1,10),$2,'ci','','{"expires":"90d"}',$3,now()+interval '1 day')`, "recipe_"+u.ID, u.ID, digest("recipe_"+u.ID))
 	machine = "machine_" + u.ID
 	f.exec(`INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$1,'m-'||md5($1),'linux','amd64','/workspace','online','occupied',true,1)`, machine, u.ID)
 	f.exec(`INSERT INTO user_favorites(user_id,kind,resource_id) VALUES($1,'machine',$2)`, u.ID, machine)

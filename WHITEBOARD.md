@@ -20,9 +20,6 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 ### Drop control_tunnel_nodes.capacity_limit
 drop control_tunnel_nodes.capacity_limit one deploy after nothing reads it
 
-### Next server deploy after this release: drop recipes.source_format
-Migration 447 made `recipes.source_format` optional (the server no longer writes it: one HuJSON file format). The server of the deploy that ships 447 no longer reads the column either; the migration that drops the column ships one deploy later (AGENTS.md: a column the previous server reads is dropped one deploy after the code stops reading it): `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.recipes DROP COLUMN source_format;` (forward-only Down).
-
 ### Global edges: verify without an own hostname (2026-11-24)
 Customer edges are verified by their pinned node identity, so they need no hostname or public certificate. Only a global (operator) edge must serve a
 publicly trusted certificate for its own name (`server/internal/selfhost/ingress.go`), so each new global edge needs one hand-made DNS record and

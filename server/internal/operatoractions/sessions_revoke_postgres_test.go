@@ -25,7 +25,7 @@ func TestAccountBanEndsApiTokensAndRecipes(t *testing.T) {
 	exec(`INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','admin')`, actor)
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status,role) VALUES($1,$1,$1||'@test.invalid','active','user')`, target)
 	exec(`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,expires_at) VALUES($1,$2,'ci',sha256(convert_to($3,'UTF8')),now()+interval '1 day')`, "tok_"+x, target, "secret_"+x)
-	exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,$1,$2,'r','x','toml','{}'::jsonb,sha256(convert_to($3,'UTF8')),now()+interval '1 day')`, "rcp_"+x, target, "recipe_"+x)
+	exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,canonical,auth_hash,expires_at) VALUES($1,$1,$2,'r','x','{}'::jsonb,sha256(convert_to($3,'UTF8')),now()+interval '1 day')`, "rcp_"+x, target, "recipe_"+x)
 	if _, err := NewService(store).Execute(ctx, actor, "ban-"+x, "account_ban", target, "case:test", Input{Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestAccountSessionsRevokeEndsEveryCredentialAndKeepsTheAccountActive(t *tes
 	exec(`INSERT INTO paperboat.cli_refresh_tokens(token_hash,cli_client_session_id,state,expires_at,created_at) VALUES($1,$2,'active',now()+interval '1 hour',now())`, "refresh_"+x, "cli_"+x)
 	exec(`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,expires_at) VALUES($1,$2,'ci',sha256(convert_to($3,'UTF8')),now()+interval '1 day')`, "tok_"+x, target, "secret_"+x)
 
-	exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,$1,$2,'r','x','toml','{}'::jsonb,sha256(convert_to($3,'UTF8')),now()+interval '1 day')`, "rcp_"+x, target, "recipe_"+x)
+	exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,canonical,auth_hash,expires_at) VALUES($1,$1,$2,'r','x','{}'::jsonb,sha256(convert_to($3,'UTF8')),now()+interval '1 day')`, "rcp_"+x, target, "recipe_"+x)
 	run := func(key string, revision int64) (Result, error) {
 		return s.Execute(ctx, actor, key, "account_sessions_revoke", target, "case:test", Input{Revision: revision})
 	}

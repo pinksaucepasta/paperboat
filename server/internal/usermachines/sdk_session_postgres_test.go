@@ -44,7 +44,7 @@ func sdkSession(t *testing.T, f workspaceMachineFixture, capability string) (con
 		q    string
 		args []any
 	}{
-		{`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,expires_at) VALUES($1,$5,$2,'sdk-'||substr(md5($1),1,8),'','toml',$4,$3,now()+interval '1 hour')`, []any{token, f.account, hash[:], canonical, tokenID}},
+		{`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,canonical,auth_hash,expires_at) VALUES($1,$5,$2,'sdk-'||substr(md5($1),1,8),'',$4,$3,now()+interval '1 hour')`, []any{token, f.account, hash[:], canonical, tokenID}},
 		{`INSERT INTO paperboat.recipe_reach_rules(recipe_id,entry,target_kind,target_id,action,ports) VALUES($1,0,'machine',$2,$3,'[5432,5433)')`, []any{token, f.machine, capability}},
 		{`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,recipe_id) VALUES($1,$2,'sdk','sdk','container','linux','{machines:connect}','active',now(),now(),$3)`, []any{session, f.account, token}},
 	} {

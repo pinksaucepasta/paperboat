@@ -2439,7 +2439,6 @@ type Recipe struct {
 	Name               string
 	Revision           int32
 	Source             string
-	SourceFormat       sql.NullString
 	Canonical          []byte
 	AuthHash           []byte
 	PreviousAuthHash   []byte

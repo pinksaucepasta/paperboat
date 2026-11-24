@@ -227,8 +227,8 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		{bob, "retained", team, false},
 	} {
 		id := "recipe_" + item.account + "_" + item.name
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.recipes(id,token_id,account_id,team_id,name,source,source_format,canonical,auth_hash,expires_at)
-		 VALUES($1,substr(md5($1),1,10),$2,nullif($3,''),$4,'','toml','{"expires":"90d"}',sha256(convert_to($1,'UTF8')),now()+interval '1 day')`, id, item.account, item.team, item.name); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.recipes(id,token_id,account_id,team_id,name,source,canonical,auth_hash,expires_at)
+		 VALUES($1,substr(md5($1),1,10),$2,nullif($3,''),$4,'','{"expires":"90d"}',sha256(convert_to($1,'UTF8')),now()+interval '1 day')`, id, item.account, item.team, item.name); err != nil {
 			t.Fatal(err)
 		}
 		credentials = append(credentials, credential{id, item.revoked})
