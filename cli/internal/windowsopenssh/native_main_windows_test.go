@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 // The native tests install the Paperboat service exactly as production does (hostinstall.windowsOpenSSHConfig):
@@ -54,6 +57,26 @@ func nativeConfig(t *testing.T) Config {
 	if err := os.WriteFile(nativeFixturePath(instance), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The service runs this test binary: stop and delete it when the test ends, or go test cannot remove the binary
+	// (unlinkat: Access is denied) and exits 1 after every test passed.
+	t.Cleanup(func() {
+		manager, err := mgr.Connect()
+		if err != nil {
+			return
+		}
+		defer manager.Disconnect()
+		service, err := manager.OpenService(config.ServiceName)
+		if err != nil {
+			return
+		}
+		defer service.Close()
+		status, err := service.Control(svc.Stop)
+		for deadline := time.Now().Add(30 * time.Second); err == nil && status.State != svc.Stopped && time.Now().Before(deadline); {
+			time.Sleep(200 * time.Millisecond)
+			status, err = service.Query()
+		}
+		_ = service.Delete()
+	})
 	return config
 }
 
