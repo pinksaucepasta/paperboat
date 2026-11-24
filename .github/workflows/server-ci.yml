@@ -106,8 +106,10 @@ jobs:
           PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/lane_test?sslmode=disable&statement_timeout=600000
         run: |
           set -o pipefail
-          go test -race -count=1 -v -timeout 10m -run '^TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres$' ./internal/usermachines | tee tiny.log
-          grep -q -- '--- PASS: TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres' tiny.log || { echo "the tiny-pool test skipped or did not run" >&2; exit 1; }
+          go test -race -count=1 -v -timeout 10m -run '^(TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres|TestFinalDeleteOfAMachineWithManySessionsCompletesWhenThePredicateLockPoolIsSmallOnPostgres)$' ./internal/usermachines | tee tiny.log
+          for t in TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres TestFinalDeleteOfAMachineWithManySessionsCompletesWhenThePredicateLockPoolIsSmallOnPostgres; do
+            grep -q -- "--- PASS: $t " tiny.log || { echo "the tiny-pool test $t skipped or did not run" >&2; exit 1; }
+          done
 
   modules:
     name: Vet and test ${{ matrix.module }}
