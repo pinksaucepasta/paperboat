@@ -143,7 +143,7 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	if inserted {
 		// Published after the commit, not by a trigger inside the transaction: every session of one
 		// machine bumps the same topic row (see usermachines.publishAccessSession).
-		if _, e = r.database.ExecContext(ctx, `SELECT paperboat.publish_machine_topic($1::text[],'machine_access')`, "{"+out.MachineID+"}"); e != nil {
+		if _, e = r.database.ExecContext(ctx, `SELECT paperboat.publish_access_session_topic($1::text[])`, "{"+out.MachineID+"}"); e != nil {
 			return Target{}, e
 		}
 	}

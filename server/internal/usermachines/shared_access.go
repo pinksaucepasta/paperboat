@@ -294,7 +294,7 @@ func onlyStandingRuleCapabilities(capabilities []string) bool {
 // keeping its authority locks out of the machine topic's write queue. A crash
 // between commit and publish leaves the host to its periodic refresh.
 func (s *Service) publishAccessSession(ctx context.Context, machineIDs []string, peers bool) error {
-	if err := machineevents.Publish(ctx, s.db.Pool(), machineIDs, machineevents.TopicMachineAccess); err != nil || !peers {
+	if _, err := s.db.Pool().Exec(ctx, `SELECT paperboat.publish_access_session_topic($1::text[])`, machineIDs); err != nil || !peers {
 		return err
 	}
 	return machineevents.Publish(ctx, s.db.Pool(), machineIDs, machineevents.TopicPeerNetwork)

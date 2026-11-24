@@ -93,13 +93,15 @@ func TestPolicyCacheServesUntilANotificationNamesAParty(t *testing.T) {
 		t.Fatal("stored without a listener")
 	}
 	c.reset(true)
-	for _, key := range []string{"e1", "account:acct_e1", "p1", "machine_p1", "account:acct_p1"} {
+	for _, key := range []string{"e1", "self:e1", "account:acct_e1", "p1", "machine_p1", "account:acct_p1"} {
 		start, _ = c.begin()
 		c.put("e1", cacheDoc("e1", "p1"), start)
 		if c.get("e1", "", now) == nil {
 			t.Fatalf("%s: not served from memory", key)
 		}
 		c.notify("account:unrelated")
+		c.notify("self:p1") // a peer's own session
+		c.notify("self:machine_p1")
 		if c.get("e1", "", now) == nil {
 			t.Fatalf("%s: an unrelated notification dropped the document", key)
 		}

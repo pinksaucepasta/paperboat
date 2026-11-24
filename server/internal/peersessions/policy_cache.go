@@ -138,7 +138,7 @@ func (c *policyCache) dropLocked(endpoint string) {
 	}
 }
 
-// notify drops every document that depends on key (a machine id or "account:<id>").
+// notify drops every document that depends on key (an endpoint or machine id, "self:<id>" or "account:<id>").
 func (c *policyCache) notify(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -164,11 +164,12 @@ func (c *policyCache) reset(listening bool) {
 
 // policyKeys are the notification keys a document depends on: its own endpoint and account and every peer's
 // endpoint, machine and account. A team change notifies the accounts of the members it affects (the audience
-// functions of migration 150), which include the endpoint's own account.
+// functions of migration 150), which include the endpoint's own account. "self:" keys are its own endpoint's only:
+// an access session is read by the documents of its two endpoints and no peer's (migration 513).
 func policyKeys(self networkBinding, peers []networkPeer) []string {
-	keys := []string{self.EndpointID, "account:" + self.AccountID}
+	keys := []string{self.EndpointID, "self:" + self.EndpointID, "account:" + self.AccountID}
 	if self.MachineID != "" {
-		keys = append(keys, self.MachineID)
+		keys = append(keys, self.MachineID, "self:"+self.MachineID)
 	}
 	for _, p := range peers {
 		keys = append(keys, p.Identity.EndpointID, "account:"+p.Identity.AccountID)
