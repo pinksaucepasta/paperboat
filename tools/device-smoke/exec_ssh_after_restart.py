@@ -6,6 +6,7 @@ peer, `pb exec` and `pb ssh` (one after the other, each within DEADLINE seconds,
 argument, never its text), for up to DEADLINE seconds. Every combination runs and all failures are reported together:
 the Windows exec-to-self wedge and the Mac readiness flap after a restart both hid behind a passing first command."""
 import argparse
+import json
 import random
 import subprocess
 import time
@@ -65,6 +66,44 @@ def restart_local(binary):
         raise RuntimeError('pb service restart failed: ' + result.stderr.decode(errors='replace')[-200:])
 
 
+# Windows client: ssh + sshpass + powershell cost about 3.6 s a call (measured), most of the 5 s. So the restart and every leg
+# run back to back in ONE script on the device, and each leg is timed there (Stopwatch), as the product sees it.
+DEVICE_LEGS = r'''
+$pb=$req.pb;$limit=[double]$req.deadline
+function Call($argv,$ms){$p=New-Object Diagnostics.Process;$p.StartInfo.FileName=$pb
+$p.StartInfo.Arguments=(($argv|ForEach-Object{if($_ -match '\s'){'"'+$_+'"'}else{$_}}) -join ' ')
+$p.StartInfo.RedirectStandardOutput=$true;$p.StartInfo.UseShellExecute=$false;$p.StartInfo.CreateNoWindow=$true
+[void]$p.Start();$o=$p.StandardOutput.ReadToEndAsync()
+if(-not $p.WaitForExit([int][math]::Max(1,$ms))){$p.Kill();return @{rc=-1;out=''}};@{rc=$p.ExitCode;out=$o.Result}}
+$r=Call @('service','restart') 120000
+if($r.rc){throw ('pb service restart failed: '+$r.rc)}
+$res=foreach($l in $req.legs){$w=[Diagnostics.Stopwatch]::StartNew();$ok=$false;$why='no attempt'
+while(-not $ok -and $w.Elapsed.TotalSeconds -lt $limit){$r=Call (@($l.command,$l.target,'--')+@($l.argv)) (($limit-$w.Elapsed.TotalSeconds)*1000)
+$ok=($r.rc -eq 0) -and (($r.out -split "\r?\n") -contains [string]$l.expected);if(-not $ok){$why='exit '+$r.rc;Start-Sleep -Milliseconds 250}}
+[pscustomobject]@{leg=$l.label;ok=$ok;seconds=[math]::Round($w.Elapsed.TotalSeconds,1);why=$why}}
+[Console]::Out.Write((ConvertTo-Json -InputObject @($res) -Compress))
+'''
+
+
+def legs_verdict(results):
+    """One line per leg with its time inside Windows; a RuntimeError naming every leg that missed the deadline or failed."""
+    for r in results:
+        print('%s %s %.1fs inside Windows' % ('PASS' if r['ok'] else 'FAIL', r['leg'], r['seconds']))
+    failed = ['%s: %s after %.1fs, over the %.0fs deadline' % (r['leg'], r['why'], r['seconds'], DEADLINE) for r in results if not r['ok']]
+    if failed:
+        raise RuntimeError('still failing %.0fs after the restart: %s' % (DEADLINE, '; '.join(failed)))
+
+
+def windows_legs(binary, own, peer):
+    legs = []
+    for label, target in (('self', own), ('peer', peer)):
+        for command in ('exec', 'ssh'):
+            argv, expected = probe(binary, target, command)
+            legs.append({'label': '%s %s' % (command, label), 'command': command, 'target': target, 'argv': argv, 'expected': expected})
+    out = binary.device.ps('exec-ssh-after-restart', DEVICE_LEGS, timeout=300, pb=binary.exe, deadline=DEADLINE, legs=legs)[1]
+    legs_verdict(json.loads(out))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('peer')
@@ -73,6 +112,10 @@ def main():
     binary = winhost.pb_path()
     own = args.own or next(m['alias'] for m in invoke(binary, 'machine', 'list', '--all', '--json')['machines']
                            if m['id'] == registration()['machine_id'])
+    if hasattr(binary, 'device'):  # a Windows client: the restart and the legs run inside the device
+        windows_legs(binary, own, args.peer)
+        print('{"check": "exec-ssh-after-restart", "status": "PASS", "deadline_s": %d}' % DEADLINE)
+        return
     restart_local(binary)
     steps = []
     for label, target in (('self', own), ('peer', args.peer)):

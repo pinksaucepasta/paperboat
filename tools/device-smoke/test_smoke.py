@@ -810,6 +810,33 @@ TLIST=($DEVICES)
                 p.main()
         self.assertEqual(calls[-1], 22)  # restored although the check failed
 
+    def test_exec_ssh_after_restart_on_windows_times_each_leg_inside_the_device(self):
+        import exec_ssh_after_restart as e
+        sent = {}
+
+        class FakeDevice:
+            def ps(self, step, script, timeout, **payload):
+                sent.update(payload, script=script)
+                return 0, json.dumps(FakeDevice.results)
+
+        class FakePb:  # what winhost.WindowsPb offers: the device and the pb path on it
+            device, exe = FakeDevice(), 'C:\\pb.exe'
+        leg = {'leg': 'exec self', 'ok': True, 'seconds': 2.4, 'why': ''}
+        FakeDevice.results = [leg, dict(leg, leg='ssh self', seconds=3.6), dict(leg, leg='exec peer'), dict(leg, leg='ssh peer')]
+        is_windows = patch.object(e.windows_target, 'is_windows', lambda binary, target: target == 'me')
+        with is_windows:
+            e.windows_legs(FakePb, 'me', 'peer')
+        self.assertEqual([l['label'] for l in sent['legs']], ['exec self', 'ssh self', 'exec peer', 'ssh peer'])
+        self.assertEqual((sent['pb'], sent['deadline']), ('C:\\pb.exe', e.DEADLINE))  # the 5 s limit is kept, timed in the device script
+        self.assertIn('service', sent['script'])  # restart and legs in one device script: no ssh start-up before the first leg
+        FakeDevice.results[1] = dict(leg, leg='ssh self', ok=False, seconds=5.0, why='exit -1')
+        with is_windows, self.assertRaisesRegex(RuntimeError, 'ssh self: exit -1 after 5.0s'):
+            e.windows_legs(FakePb, 'me', 'peer')
+        with is_windows, patch.object(e, 'windows_legs') as windows, patch.object(e, 'restart_local'), patch.object(e, 'run_all'), \
+                patch.object(e.winhost, 'pb_path', lambda: 'pb'), patch.object(sys, 'argv', ['x', 'peer', '--self', 'me']):
+            e.main()  # a Unix or Mac client keeps the old flow
+        windows.assert_not_called()
+
     def test_not_run_rows_are_their_own_status_and_never_fail_the_run(self):
         text = (HERE / 'smoke.sh').read_text()
         body = text[text.index('record() {'):text.index('# Preserve the actual failure')]
