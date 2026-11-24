@@ -318,15 +318,30 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 			delete(h.activeBySource, target.SourceSHA256)
 		}
 	}()
+	answer := &answerStream{ReadWriteCloser: stream, reason: func() string {
+		switch {
+		case flow.revoked.Load():
+			return RefusedNoAccess
+		case bridgeCtx.Err() != nil:
+			return RefusedInterrupted
+		}
+		return RefusedServerClosed
+	}}
 	sessionID, peer, audited, err := h.begin(ctx, generation)
 	if err != nil {
+		answer.refuse(RefusedUnavailable)
 		return BridgeResult{}, err
 	}
 	loopback := target.Readiness.Target
 	if peer.AccountID != "" {
 		loopback.Source = wire.LoopbackSource(peer.AccountID)
 	}
-	result, bridgeErr := BridgeSSH(bridgeCtx, stream, loopback, h.config.DialTimeout)
+	result, bridgeErr := BridgeSSH(bridgeCtx, answer, loopback, h.config.DialTimeout)
+	if errors.Is(bridgeErr, ErrSSHTargetUnavailable) {
+		answer.refuse(RefusedServerUnreachable)
+	} else if bridgeErr != nil {
+		answer.refuse(answer.reason()) // nothing to do when the bridge already answered or closed the stream
+	}
 	if audited {
 		h.end(peer, generation, sessionID, sessionOutcome(flow, bridgeCtx, bridgeErr), result)
 	}

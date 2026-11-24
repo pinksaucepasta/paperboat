@@ -709,17 +709,16 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 	case "ssh":
 		if s.config.dispatch != nil {
 			target, err := s.config.dispatch.SSHTarget(ctx)
+			if err == nil && s.config.ssh != nil {
+				_, err = s.config.ssh.ReconcileSourceTarget(ctx, target.Generation, target.Port, target.SourceSHA256)
+			}
 			if err != nil {
-				return err
-			}
-			if s.config.ssh == nil {
-				return ErrProductionInvalid
-			}
-			if _, err = s.config.ssh.ReconcileSourceTarget(ctx, target.Generation, target.Port, target.SourceSHA256); err != nil {
+				managedssh.RefuseUnserved(stream, managedssh.RefusedUnavailable, err)
 				return err
 			}
 		}
 		if s.config.ssh == nil {
+			managedssh.RefuseUnserved(stream, managedssh.RefusedUnavailable, ErrProductionInvalid)
 			return ErrProductionInvalid
 		}
 		if peer, ok := native.PeerFromContext(ctx); ok {
