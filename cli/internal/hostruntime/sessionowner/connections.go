@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -20,6 +21,8 @@ type Connections struct {
 	active      Descriptor
 	clients     map[string]*workloadbridge.Client
 	descriptors map[string]Descriptor
+	published   map[string]os.FileInfo   // descriptor file each connection was authenticated against
+	resolving   map[string]chan struct{} // one connect or start at a time per generation
 	start       func(context.Context, string) error
 	router      *Router
 	execs       map[string]string // operation ID -> generation
@@ -42,7 +45,7 @@ func NewConnections(ctx context.Context, catalog Catalog, active Descriptor, sta
 		}
 		owners[d.Generation] = Owner{Descriptor: d}
 	}
-	connections := &Connections{catalog: catalog, active: active, start: start, clients: make(map[string]*workloadbridge.Client), descriptors: make(map[string]Descriptor)}
+	connections := &Connections{catalog: catalog, active: active, start: start, clients: make(map[string]*workloadbridge.Client), descriptors: make(map[string]Descriptor), published: make(map[string]os.FileInfo), resolving: make(map[string]chan struct{})}
 	router, err := NewRouter(active.Generation, owners, maxSessions, connections.ensure)
 	if err != nil {
 		return nil, err
@@ -147,6 +150,7 @@ func (c *Connections) Close() {
 		client.Close()
 		delete(c.clients, key)
 		delete(c.descriptors, key)
+		delete(c.published, key)
 	}
 }
 
@@ -154,17 +158,47 @@ func (c *Connections) ensure(ctx context.Context, generation string) (Owner, err
 	return c.resolve(ctx, generation, false)
 }
 func (c *Connections) resolve(ctx context.Context, generation string, refresh bool) (Owner, error) {
+	path := filepath.Join(c.catalog.Root, generation+".json")
+	before, err := os.Lstat(path)
+	if err != nil {
+		return Owner{}, errors.Join(ErrInvalid, err)
+	}
+	// Publication replaces the file: an unchanged one needs no second read, and no other generation's slow
+	// owner is waited for.
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	d, err := Read(filepath.Join(c.catalog.Root, generation+".json"))
+	d, client, published := c.descriptors[generation], c.clients[generation], c.published[generation]
+	turn := c.resolving[generation]
+	if turn == nil {
+		turn = make(chan struct{}, 1)
+		c.resolving[generation] = turn
+	}
+	c.mu.Unlock()
+	if !refresh && client != nil && published != nil && published.Mode() == before.Mode() && published.Size() == before.Size() && published.ModTime().Equal(before.ModTime()) {
+		return c.routed(generation, d, client), nil
+	}
+	select {
+	case turn <- struct{}{}:
+	case <-ctx.Done():
+		return Owner{}, ctx.Err()
+	}
+	defer func() { <-turn }()
+	// Taken before the read, so a replacement during it is read again by the next call.
+	before, err = os.Lstat(path)
+	if err != nil {
+		return Owner{}, errors.Join(ErrInvalid, err)
+	}
+	d, err = Read(path)
 	if err != nil {
 		return Owner{}, err
 	}
 	if d.Generation != generation || !sameAccount(d, c.active) {
 		return Owner{}, ErrInvalid
 	}
-	client := c.clients[generation]
-	if refresh || c.descriptors[generation] != d || client == nil {
+	c.mu.Lock()
+	client = c.clients[generation]
+	connected := client != nil && c.descriptors[generation] == d
+	c.mu.Unlock()
+	if refresh || !connected {
 		client, err = Connect(ctx, d)
 	}
 	if err != nil {
@@ -174,7 +208,11 @@ func (c *Connections) resolve(ctx context.Context, generation string, refresh bo
 		if err := c.start(ctx, generation); err != nil {
 			return Owner{}, err
 		}
-		d, err = Read(filepath.Join(c.catalog.Root, generation+".json"))
+		before, err = os.Lstat(path)
+		if err != nil {
+			return Owner{}, errors.Join(ErrInvalid, err)
+		}
+		d, err = Read(path)
 		if err != nil {
 			return Owner{}, err
 		}
@@ -186,11 +224,19 @@ func (c *Connections) resolve(ctx context.Context, generation string, refresh bo
 			return Owner{}, err
 		}
 	}
+	c.mu.Lock()
 	if old := c.clients[generation]; old != nil && old != client {
 		old.Close()
 	}
 	c.clients[generation] = client
 	c.descriptors[generation] = d
+	c.published[generation] = before
+	c.mu.Unlock()
+	return c.routed(generation, d, client), nil
+}
+
+// routed calls one authenticated owner, reconnecting once when it was replaced.
+func (c *Connections) routed(generation string, d Descriptor, client *workloadbridge.Client) Owner {
 	owner := connectedOwner(d, client)
 	call := owner.Call
 	owner.Call = func(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
@@ -203,6 +249,7 @@ func (c *Connections) resolve(ctx context.Context, generation string, refresh bo
 				if c.clients[generation] == client {
 					delete(c.clients, generation)
 					delete(c.descriptors, generation)
+					delete(c.published, generation)
 					client.Close()
 				}
 				c.mu.Unlock()
@@ -223,5 +270,5 @@ func (c *Connections) resolve(ctx context.Context, generation string, refresh bo
 		_ = fresh
 		return replacement.Call(ctx, "session", op, body)
 	}
-	return owner, nil
+	return owner
 }

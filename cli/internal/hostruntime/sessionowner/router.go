@@ -188,9 +188,7 @@ func (r *Router) Call(ctx context.Context, op string, body json.RawMessage) (jso
 		defer r.admission.Unlock()
 		return r.mutateExisting(ctx, op, body)
 	case "Attach", "AttachParticipant", "AttachParticipantAtGeneration", "AttachLive", "AttachLiveParticipant", "AttachLiveParticipantAtGeneration":
-		r.admission.Lock()
-		defer r.admission.Unlock()
-		return r.attach(ctx, op, body)
+		return r.forwardBySession(ctx, op, body)
 	case "Snapshot", "SnapshotAtGeneration":
 		return r.snapshot(ctx, op, body)
 	case "ActiveWriters", "DetachAttachment", "WaitNextAttachment", "IssueResume", "ResumeAttachment", "BrowserScreenAttachment", "Detach", "DetachParticipantAtGeneration", "AttachmentOwnedBy", "Next", "WaitNext", "Acknowledge", "AcknowledgeAtGeneration", "AttachmentStatus", "Write", "Interrupt", "InputSequence", "WriteStream", "QueryInput", "Resize", "ResizeParticipantAtGeneration", "ActivateParticipantAtGeneration", "Signal", "Clear", "ClearAtGeneration", "Close", "CloseAtGeneration", "StartRecording", "StopRecording":
@@ -480,14 +478,6 @@ func (r *Router) mutateExisting(ctx context.Context, op string, body json.RawMes
 		return nil, err
 	}
 	return response, nil
-}
-
-func (r *Router) attach(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
-	image, err := r.sessionImageFor(ctx, body)
-	if err != nil {
-		return nil, err
-	}
-	return r.forwardFromImage(ctx, op, body, image)
 }
 
 func (r *Router) forwardBySession(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {

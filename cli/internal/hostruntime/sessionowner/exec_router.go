@@ -153,6 +153,7 @@ func (c *Connections) execClient(ctx context.Context, generation string) (*workl
 		return existing, nil
 	}
 	c.clients[generation], c.descriptors[generation] = client, d
+	delete(c.published, generation)
 	return client, nil
 }
 
@@ -163,6 +164,7 @@ func (c *Connections) dropExecClient(generation string, client *workloadbridge.C
 	if c.clients[generation] == client {
 		delete(c.clients, generation)
 		delete(c.descriptors, generation)
+		delete(c.published, generation)
 		client.Close()
 	}
 }
