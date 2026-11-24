@@ -39,15 +39,17 @@ func TestTeamCreateNeedsAcceptedTerms(t *testing.T) {
 	writeTestProfile(t, dir, configPath, server.URL)
 	args := []string{"team", "create", "acme", "--no-wait", "--json", "--config", configPath, "--server", server.URL}
 
+	// The checkout URL is opened unless stubbed; unstubbed, a Windows run left Edge running past the test binary.
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) { d.openBrowser = func(string) error { return nil } })
 	var out bytes.Buffer
-	if code := run(t.Context(), args, &out, &out); code == 0 || len(created) != 0 {
+	if code := run(ctx, args, &out, &out); code == 0 || len(created) != 0 {
 		t.Fatalf("created a team without the terms: exit=%d requests=%v", code, created)
 	}
 	if !strings.Contains(out.String(), "No refunds, canary wording.") || !strings.Contains(out.String(), "--accept-terms") {
 		t.Fatalf("the refusal does not show the wording and the flag: %s", &out)
 	}
 	out.Reset()
-	if code := run(t.Context(), append(args, "--accept-terms"), &out, &out); code != 0 {
+	if code := run(ctx, append(args, "--accept-terms"), &out, &out); code != 0 {
 		t.Fatalf("exit=%d output=%s", code, &out)
 	}
 	if len(created) != 1 || created[0]["terms_version"] != "2099-01-01" {
