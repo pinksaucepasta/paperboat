@@ -68,7 +68,8 @@ def main(argv=None):
     parser.add_argument('action', choices=('status', 'ensure'))
     parser.add_argument('--team', default=dev_targets.smoke_environment(dev_targets.load()).get('PAPERBOAT_SMOKE_TEAM', 'paperboat-smoke-paid'))
     parser.add_argument('--cred', default=str(CRED))
-    parser.add_argument('--api', default=os.environ.get('SMOKE_OPERATOR_API', 'https://api.pprbt.dev'))
+    parser.add_argument('--api', default=dev_targets.smoke_environment(dev_targets.load()).get('SMOKE_OPERATOR_API'), required='SMOKE_OPERATOR_API' not in dev_targets.smoke_environment(dev_targets.load()),
+                        help='the API origin (SMOKE_OPERATOR_API in targets.json)')
     parser.add_argument('--renew-days', type=int, default=30)
     parser.add_argument('--days', type=int, default=366)
     args = parser.parse_args(argv)

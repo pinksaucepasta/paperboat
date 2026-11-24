@@ -20,7 +20,8 @@
     "SMOKE_FREE_STATE": "/home/tester/.config/paperboat-dev/free-account/state.json",
     "SMOKE_CONFIG_REPO": "owner/smoke-team-config",
     "SMOKE_FIXTURE_HOST": "tester@docker-host.example.test",
-    "SMOKE_FIXTURE_PB": "/home/tester/builds/pb-linux-amd64"
+    "SMOKE_FIXTURE_PB": "/home/tester/builds/pb-linux-amd64",
+    "SMOKE_OPERATOR_API": "https://api.example.test"
   },
   "remote_hosts": {
     "build": "tester@build.example.test",
