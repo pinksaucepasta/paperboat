@@ -466,7 +466,11 @@ func TestOpenSSHConfigInstallReplacesAnEarlierFormatItWrote(t *testing.T) {
 		t.Fatal("the earlier fragment was not replaced")
 	}
 	rewrite(append(readOpenSSHTestFile(t, ownedPath), "# edited\n"...), false)
-	if _, err := InstallOpenSSHConfig(config); !errors.Is(err, ErrOpenSSHConfigConflict) {
-		t.Fatalf("an edited fragment was replaced: %v", err)
+	edited := readOpenSSHTestFile(t, ownedPath)
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatalf("repair an edited fragment: %v", err)
+	}
+	if kept := readOpenSSHTestFile(t, filepath.Join(directory, replacedOpenSSHFragment)); !bytes.Equal(kept, edited) {
+		t.Fatal("the edited fragment was not kept")
 	}
 }

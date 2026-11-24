@@ -20,7 +20,11 @@ func targetRsyncPath(ctx context.Context, environment []string, destination mana
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "ssh", user+"@"+destination.Host, `cygpath -u "`+path+`"`)
+	ssh, err := managedssh.ResolveOpenSSH()
+	if err != nil {
+		return path, nil
+	}
+	command := exec.CommandContext(ctx, ssh, user+"@"+destination.Host, `cygpath -u "`+path+`"`)
 	command.Env = environment
 	processlaunch.ConfigureBackground(command)
 	out, err := command.Output()

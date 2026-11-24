@@ -241,6 +241,10 @@ func windowsLoopbackOpenSSHArguments(destination managedssh.Destination, port ui
 		"-o", "Hostname=127.0.0.1",
 		"-o", "HostKeyAlias="+destination.Host,
 		"-o", "KnownHostsCommand="+knownHostsCommand,
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "UserKnownHostsFile=none",
+		"-o", "GlobalKnownHostsFile=none",
+		"-o", "VerifyHostKeyDNS=no",
 		"-p", strconv.Itoa(int(port)),
 		destination.User+"@"+destination.Host,
 	)

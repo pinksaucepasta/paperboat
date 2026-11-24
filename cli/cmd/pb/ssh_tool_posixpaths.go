@@ -40,18 +40,32 @@ const rsyncShortValueOptions = "eBfTM@"
 // rsyncRemoteShellChosen reports whether the user picked rsync's remote shell (-e, --rsh, a non-empty RSYNC_RSH);
 // pb then leaves it alone.
 func rsyncRemoteShellChosen(args, environment []string) bool {
+	_, chosen := rsyncRemoteShell(args, environment)
+	return chosen
+}
+
+// rsyncRemoteShell is the remote shell command rsync is told to use: the last -e or --rsh, else RSYNC_RSH.
+func rsyncRemoteShell(args, environment []string) (shell string, chosen bool) {
 	for _, entry := range environment {
 		if key, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "RSYNC_RSH") && value != "" {
-			return true
+			shell, chosen = value, true
 		}
+	}
+	next := func(index int) string {
+		if index+1 < len(args) {
+			return args[index+1]
+		}
+		return ""
 	}
 	for index := 0; index < len(args); index++ {
 		value := args[index]
 		if value == "--" {
-			return false
+			return shell, chosen
 		}
-		if value == "--rsh" || strings.HasPrefix(value, "--rsh=") {
-			return true
+		if value == "--rsh" {
+			shell, chosen = next(index), true
+		} else if inline, ok := strings.CutPrefix(value, "--rsh="); ok {
+			shell, chosen = inline, true
 		}
 		if !strings.HasPrefix(value, "-") || value == "-" {
 			continue
@@ -59,14 +73,17 @@ func rsyncRemoteShellChosen(args, environment []string) bool {
 		if !strings.HasPrefix(value, "--") {
 			// "-ave ssh" picks the shell; in "-Te" or "-Me" the e is the value of -T or -M.
 			if at := strings.IndexAny(value[1:], rsyncShortValueOptions); at >= 0 && value[1+at] == 'e' {
-				return true
+				shell, chosen = strings.TrimPrefix(value[at+2:], "="), true
+				if shell == "" {
+					shell = next(index)
+				}
 			}
 		}
 		if takesNext, _ := rawToolOption("rsync", value); takesNext {
 			index++ // the next argument is this option's value, even when it starts with -e
 		}
 	}
-	return false
+	return shell, chosen
 }
 
 // rsyncRemoteShellArgument names native OpenSSH directly. An MSYS2 shell/cat

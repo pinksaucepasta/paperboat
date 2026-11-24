@@ -92,8 +92,8 @@ def send(feat,path,every,timeout):
 ticker="i=0; while [ $i -lt 100000 ]; do date +%s.%N; i=$((i+1)); sleep 0.1; done"
 T=[threading.Thread(target=loop,args=('exec_short',[pb,'exec',tgt,'--','true'],0.2)),
    threading.Thread(target=stream,args=('exec_long',[pb,'exec',tgt,'--','sh','-c',ticker])),
-   threading.Thread(target=stream,args=('ssh_stream',[pb,'ssh',tgt,'--','-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new',ticker])),
-   threading.Thread(target=loop,args=('ssh_connect',[pb,'ssh',tgt,'--','-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','true'],1.0)),
+   threading.Thread(target=stream,args=('ssh_stream',[pb,'ssh',tgt,'--','-o','BatchMode=yes',ticker])),
+   threading.Thread(target=loop,args=('ssh_connect',[pb,'ssh',tgt,'--','-o','BatchMode=yes','true'],1.0)),
    threading.Thread(target=stdin_echo,args=('exec_stdin',64,1.0)),
    threading.Thread(target=stdin_echo,args=('exec_stdin_large',1<<20,10.0)),
    threading.Thread(target=send,args=('send',os.path.join(os.path.dirname(out),'small.bin'),1.0,60)),

@@ -59,6 +59,10 @@ func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []strin
 	if err != nil {
 		return err
 	}
+	environment, err := managedSSHEnvironment(ctx, os.Environ())
+	if err != nil {
+		return err
+	}
 	resolve := func(ctx *command.Context, target, requestedUser string) (managedssh.Destination, error) {
 		_, machine, sshTarget, err := resolveSSHCommandTargetWarm(ctx, target)
 		if err != nil {
@@ -69,15 +73,15 @@ func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []strin
 		if err := sshTargetHealth(ctx.Context, machine.ID, machine.Alias); err != nil {
 			return managedssh.Destination{}, err
 		}
-		return managedssh.ResolveDestination(managedssh.DestinationInput{
+		destination, err := managedssh.ResolveDestination(managedssh.DestinationInput{
 			Alias: machine.Alias, AliasDomain: domain,
 			RegisteredPort: sshTarget.Port, RequestedUser: requestedUser, RegisteredUser: sshTarget.OSUser,
 			HasRegisteredUser: true, Platform: machine.Platform,
 		})
-	}
-	environment, err := managedSSHEnvironment(ctx, os.Environ())
-	if err != nil {
-		return err
+		if err != nil {
+			return managedssh.Destination{}, err
+		}
+		return destination, verifyManagedToolLaunch(ctx.Context, tool, args, destination, destination.User, environment)
 	}
 	rewritten, err := rewriteManagedToolArguments(ctx, tool, args, domain, resolve, func(destination managedssh.Destination, user, path string) (string, error) {
 		return targetRsyncPath(ctx.Context, environment, destination, user, path)
@@ -114,6 +118,10 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 			user := requestedUser
 			if user == "" {
 				user = destination.User
+			}
+			// host::module is rsync's own daemon protocol over plain TCP, never SSH.
+			if tool == "rsync" && strings.HasPrefix(path, ":") {
+				return nil, managedToolOperandError("rsync reaches Paperboat machines over SSH: use machine:path, not machine::module")
 			}
 			if tool == "rsync" && drivePath != nil && strings.EqualFold(destination.Platform, "windows") && isDriveOperand(path) {
 				if path, err = drivePath(destination, user, path); err != nil {

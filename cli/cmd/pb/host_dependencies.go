@@ -8,6 +8,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	"golang.org/x/term"
 )
 
@@ -17,21 +18,26 @@ type hostDependencies struct {
 	daemonPaths  func() (localapi.Paths, error)
 	readSnapshot func(context.Context) (localapi.Snapshot, error) // the daemon's snapshot, read-only
 	warmSnapshot func(context.Context) (localapi.Snapshot, error) // the same with a short deadline, for selection
-	openBrowser  func(string) error
-	isTerminal   func() bool // standard input is a terminal
-	euid         func() int
-	goos         string
+	// verifySSHLaunch and refreshInventory guard every OpenSSH start (verifyManagedSSHLaunch).
+	verifySSHLaunch  func(context.Context, managedssh.OpenSSHLaunch) error
+	refreshInventory func(context.Context) error
+	openBrowser      func(string) error
+	isTerminal       func() bool // standard input is a terminal
+	euid             func() int
+	goos             string
 }
 
 func defaultHostDependencies() hostDependencies {
 	return hostDependencies{
-		daemonPaths:  localdaemon.CurrentUserPaths,
-		readSnapshot: readSnapshotWithLookupTimeout,
-		warmSnapshot: readWarmSnapshot,
-		openBrowser:  platformOpenBrowser,
-		isTerminal:   func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
-		euid:         os.Geteuid,
-		goos:         runtime.GOOS,
+		daemonPaths:      localdaemon.CurrentUserPaths,
+		readSnapshot:     readSnapshotWithLookupTimeout,
+		warmSnapshot:     readWarmSnapshot,
+		verifySSHLaunch:  managedssh.VerifyOpenSSHLaunch,
+		refreshInventory: refreshLocalInventory,
+		openBrowser:      platformOpenBrowser,
+		isTerminal:       func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
+		euid:             os.Geteuid,
+		goos:             runtime.GOOS,
 	}
 }
 

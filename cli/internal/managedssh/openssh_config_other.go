@@ -28,3 +28,7 @@ func UninstallOpenSSHConfig(string, uint32) (OpenSSHConfigResult, error) {
 	err := errors.New("OpenSSH configuration is unsupported on this platform")
 	return OpenSSHConfigResult{}, managedSSHFailure("command", err, err)
 }
+
+func readInstalledOpenSSHConfig(string, uint32, string, string) (ownedOpenSSH, error) {
+	return ownedOpenSSH{}, ErrOpenSSHConfigConflict
+}
