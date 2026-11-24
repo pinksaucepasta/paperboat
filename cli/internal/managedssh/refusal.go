@@ -26,6 +26,14 @@ func (e *RefusedError) Error() string {
 		return "you do not have SSH access to this machine; ask a team admin to grant it"
 	case RefusedNotSetUp:
 		return "SSH is not set up on this machine yet; run `pb ssh doctor <machine>` for the next step"
+	case RefusedUnavailable:
+		return "the machine's Paperboat service could not serve SSH right now; retry, and if it repeats run `pb doctor` on that machine"
+	case RefusedServerUnreachable:
+		return "Paperboat on the machine could not connect to its SSH server; check that Remote Login or sshd is running there, then retry"
+	case RefusedServerClosed:
+		return "the machine's SSH server closed the connection before answering; check its SSH server log, then retry"
+	case RefusedInterrupted:
+		return "the machine's Paperboat service stopped this connection before its SSH server answered (it is restarting or its network changed); retry"
 	default:
 		if user, ok := strings.CutPrefix(e.Reason, RefusedLoginNotAllowed+":"); ok {
 			return user + " isn't allowed to log in over SSH on this machine: on the Mac open System Settings → General → Sharing → Remote Login and allow this user, then retry"

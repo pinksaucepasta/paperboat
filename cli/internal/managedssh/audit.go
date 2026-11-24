@@ -45,6 +45,12 @@ const (
 	// RefusedLoginNotAllowed is followed by ":" and the OS user the machine's Remote Login does not allow.
 	RefusedLoginNotAllowed = "login_not_allowed"
 
+	// Why a stream ended before sshd answered it. They are told to the client and logged, not audited as refusals.
+	RefusedUnavailable       = "unavailable"
+	RefusedServerUnreachable = "server_unreachable"
+	RefusedServerClosed      = "server_closed"
+	RefusedInterrupted       = "interrupted"
+
 	// How a session ended.
 	EndedClosed  = "closed"
 	EndedRevoked = "revoked"

@@ -3,6 +3,7 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -10,8 +11,11 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +24,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
@@ -408,5 +414,50 @@ func TestProductionNativePeerSupervisorRebuildsOnlyAStillWedgedListener(t *testi
 	}
 	if starts.Load() != 2 {
 		t.Fatal("a still-wedged listener was not rebuilt")
+	}
+}
+
+// An SSH stream the carrier cannot serve (no target from the worker, or SSH stopped on the carrier) is told so; it
+// used to end with zero bytes.
+func TestSSHStreamTheCarrierCannotServeIsToldWhy(t *testing.T) {
+	serve := func(status int, body string, host *managedssh.Host) error {
+		worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+		}))
+		defer worker.Close()
+		dispatch, err := server.NewNativeDispatchClient(server.NativeDispatchClientConfig{Address: worker.Listener.Addr().String(), Token: strings.Repeat("t", 32), DialTimeout: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		service := &productionNativePeerService{config: productionNativePeerConfig{dispatch: dispatch, ssh: host}}
+		client, stream := net.Pipe()
+		defer client.Close()
+		go func() {
+			defer stream.Close()
+			_ = service.serveStream(t.Context(), streamauth.Header{Consumer: "ssh"}, stream)
+		}()
+		return managedssh.ReadServerStart(bufio.NewReader(client))
+	}
+	disabled, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := disabled.Disable(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	target, err := json.Marshal(map[string]any{"ssh": managedssh.HostTarget{Generation: 1, Port: 22, Readiness: managedssh.SSHReadiness{Target: managedssh.LoopbackTarget{Host: "127.0.0.1", Port: 22}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]error{
+		"worker has no target": serve(http.StatusServiceUnavailable, "", disabled),
+		"carrier SSH disabled": serve(http.StatusOK, string(target), disabled),
+		"no SSH host":          serve(http.StatusOK, string(target), nil),
+	} {
+		var refused *managedssh.RefusedError
+		if !errors.As(got, &refused) || refused.Reason != managedssh.RefusedUnavailable {
+			t.Errorf("%s: client saw %v", name, got)
+		}
 	}
 }
