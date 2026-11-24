@@ -29,7 +29,10 @@ func removeLocalTrust(ctx context.Context, _ Config, certificatePEM []byte) erro
 	if err != nil {
 		return err
 	}
-	return removeWindowsRootFromStore(certificate, windows.CERT_SYSTEM_STORE_LOCAL_MACHINE, "ROOT")
+	if err := removeWindowsRootFromStore(certificate, windows.CERT_SYSTEM_STORE_LOCAL_MACHINE, "ROOT"); err != nil {
+		return err
+	}
+	return withdrawWindowsCRL(certificate)
 }
 
 func cleanupHistoricalTrustExcept(ctx context.Context, cfg Config, activePEM []byte) error {

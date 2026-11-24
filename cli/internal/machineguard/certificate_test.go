@@ -3,6 +3,7 @@
 package machineguard
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -31,9 +32,14 @@ func certificateGuard(t *testing.T) (*guardServer, *certificateConnection) {
 }
 func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 	g, owner := certificateGuard(t)
+	var published []byte
+	g.publishCRL = func(der []byte) error { published = der; return nil }
 	bundle, err := g.certificate(t.Context(), owner, "owner", "3000.laptop.local.example.test")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !bytes.Equal(published, bundle.RevocationListDER) {
+		t.Fatal("the leaf was handed out before its revocation list was published")
 	}
 	base, err := g.certificate(t.Context(), owner, "owner", "laptop.local.example.test")
 	if err != nil || base != bundle {
