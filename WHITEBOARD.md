@@ -419,3 +419,11 @@ caps (slow speed after the allowance, relay speed, terminal cap), count limits (
 public TCP, viewers) and the team per-seat allowance are server configuration and need a restart. Make all of them editable per plan
 in the panel, audited, and picked up by servers, edges and relays without a restart. Check first whether the panel's team allowance
 field changes a paid team's pool at all (the pool is TeamPerSeatBytes times seats).
+
+## Regions per plan (user 2026-11-24)
+
+Let operators choose, per plan, which managed regions a workspace may be placed in (for example Free only in one region), in the
+admin panel. Today a region can only be created, changed, enabled, disabled or replaced for everyone. Needs: the rule applied when a
+workspace's primary and fallback regions are chosen, a defined move when a plan changes (upgrade, downgrade, grant ending) or the rule
+changes, what the fallback is when only one region is allowed, and relays decided too (they carry traffic when machines cannot
+connect directly). Self-hosted regions are never limited.
