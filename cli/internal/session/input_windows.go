@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -24,14 +25,25 @@ func readLocalInput(ctx context.Context, file *os.File, p []byte) (int, error) {
 		return 0, err
 	}
 	handle := windows.Handle(file.Fd())
+	readDone := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		// Windows ReadFile on console and pipe handles does not observe Go
 		// context cancellation. Cancel the outstanding operation without
 		// closing the process-owned stdin handle so repeated sessions remain
-		// usable.
-		_ = windows.CancelIoEx(handle, nil)
+		// usable. CancelIoEx only cancels I/O outstanding when it runs: a cancel that lands
+		// between the check above and the read being issued would be lost, so repeat it
+		// until the read returns.
+		for {
+			_ = windows.CancelIoEx(handle, nil)
+			select {
+			case <-readDone:
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
 	})
 	n, err := readHandle(handle, file, p)
+	close(readDone)
 	stop()
 	if cause := context.Cause(ctx); cause != nil && (err == nil || errors.Is(err, windows.ERROR_OPERATION_ABORTED)) {
 		return n, cause
