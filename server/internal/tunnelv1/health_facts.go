@@ -46,6 +46,8 @@ func edgeRefusedSince(now time.Time) time.Time { return now.UTC().Truncate(time.
 const healthFactsFreshness = 15 * time.Second
 
 // HealthFacts reads the live observations for one tunnel.
+// A host is connected while an edge sees its carrier (ready); the attachment alone only says it could dial until
+// expires_at, minutes after the host died. An edge process that is gone can no longer tell, so its rows count until then.
 func (r *SQLRepository) HealthFacts(ctx context.Context, accountID, tunnelID string, now time.Time) (HealthFacts, error) {
 	var facts HealthFacts
 	fresh := now.Add(-healthFactsFreshness)
@@ -57,7 +59,9 @@ func (r *SQLRepository) HealthFacts(ctx context.Context, accountID, tunnelID str
  EXISTS(SELECT 1 FROM endpoints e JOIN endpoint_edge_assignments x ON x.endpoint_id=e.id
    WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND e.desired_state='active' AND x.desired='active' AND x.observed_ready),
  EXISTS(SELECT 1 FROM endpoints e JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id
-   WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND ra.expires_at>$2),
+   WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND ra.expires_at>$2
+   AND (ra.ready OR NOT EXISTS(SELECT 1 FROM control_tunnel_nodes n WHERE n.id=ra.edge_node_id AND n.process_epoch=ra.edge_process_epoch
+     AND n.last_heartbeat_at>$3 AND n.registry_expires_at>$2))),
  coalesce((SELECT sum(rf.refused) FROM edge_refusals rf WHERE rf.hour>=$5 AND EXISTS(SELECT 1 FROM endpoint_routes er
    JOIN endpoints e ON e.id=er.endpoint_id JOIN endpoint_edge_assignments x ON x.route_id=er.id
    WHERE e.tunnel_id=$1 AND er.hostname=rf.hostname AND x.edge_node_id=rf.edge_node_id)),0)`,

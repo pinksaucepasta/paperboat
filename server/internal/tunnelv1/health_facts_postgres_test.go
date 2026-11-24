@@ -74,6 +74,19 @@ VALUES ($1,$2,$3,$4,$5,'exact','dns-challenge://test','stable.example.test','gen
 		t.Fatalf("a tunnel whose agent holds no carrier is reported connected: %+v err=%v", facts, err)
 	}
 	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,m.installation_generation,1,'process_health',1,$2,$3,m.public_identity_key,1,$4,$4,'{}',$5::timestamptz+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$6`, carrierRoute, node, epoch, session, now, host)
+	// An unexpired attachment whose carrier the edge does not see is a stopped host, not a connected one.
+	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(5*time.Second))
+	if err != nil || facts.HostConnected {
+		t.Fatalf("an agent without a carrier counts as online until its attachment expires: %+v err=%v", facts, err)
+	}
+	if view := explainHealth(HealthView{OverallCode: "tunnel_pending"}, facts); view.OverallCode != "connector_offline" {
+		t.Fatalf("stopped host is explained as %s", view.OverallCode)
+	}
+	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(time.Minute))
+	if err != nil || !facts.HostConnected {
+		t.Fatalf("a dead edge's last report marks the host offline: %+v err=%v", facts, err)
+	}
+	exec(`UPDATE paperboat.runtime_carrier_attachments SET ready=true WHERE route_id=$1`, carrierRoute)
 	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(5*time.Second))
 	if err != nil || !facts.HostConnected || facts.EngineServed {
 		t.Fatalf("a connected agent is not reported online: %+v err=%v", facts, err)
