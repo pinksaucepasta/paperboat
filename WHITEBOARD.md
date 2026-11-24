@@ -102,9 +102,8 @@ environment variable, state on a volume, no extra privileges. Covers Docker host
 
 ## Dual-stack edges (IPv6) — after launch (coordinator decision 2026-11-12)
 
-Edges are IPv4-only at launch (no public IPv6, no AAAA for the preview/tunnel domain). IPv6-only visitors still
-reach them through their carrier's NAT64/DNS64. Later: public IPv6 on every edge, wildcard AAAA records, owner IP
-rules and `--host-header` checked with real IPv6 client addresses (the IPv6 part of cross-platform row X-20).
+The launch edges are Hetzner hosts with native IPv6 (falkenstein-1 already listens on it); no AAAA record points at them yet. Later: AAAA for the edge,
+API and preview wildcard names, then owner IP rules and `--host-header` checked with real IPv6 client addresses (the IPv6 part of row X-20).
 
 ## Batched integration queue — after launch (user decision 2026-11-12)
 
@@ -188,7 +187,6 @@ the useful set for tunnels and custom domains.
   Prior art: Tailscale `scripts/installer.sh` (GPG-signed apt/yum repos) and NetBird `release_files/install.sh`.
 - **KMS/HSM for CA and signing keys** (decided 2026-11-18): when revenue allows, hold the CA and signing keys in a KMS/HSM so a
   breach cannot copy them.
-- **Status page:** move to a hosted provider (incident.io / Atlassian Statuspage) when revenue allows; swap the adapter.
 - **Status page: move to a hosted provider when revenue allows; swap the adapter.** Ours (`status/`) stays until then. The seams: probes post through
   one client (`tools/probe/status_report.py`), and the admin panel reaches incidents and maintenance through one server-side interface
   (`admin/lib/server/status-provider.ts`); a hosted provider (incident.io, Atlassian Statuspage) means one new adapter there plus publishing
@@ -251,8 +249,9 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 - Each region's server already reads from its own replica once it has caught up with the client's commit position (`PAPERBOAT_DATABASE_REPLICA_DSN`); writes go to the primary.
 - Server test speed: split the PostgreSQL `-race` suite across hosts and cache unchanged packages (about 25–30 min today).
 
-## Scale: the peer-network config is rebuilt for the whole account on every change (O(N²) fan-out)
-Measured on prod 2026-11-19 (server log "peer network configuration slow"): 2,187 slow builds in 2 hours, each 300–400 ms for an account with 88–169 peers (`build_ms` 281–382, `sign_ms` 5–12), every peer re-fetching the full document when any peer changes (a new machine, a `home_relay` change). That fan-out is why a busy account amplifies Postgres predicate-lock pressure: on 2026-11-19 08:48–08:56Z the pool (`max_pred_locks_per_transaction` 64 × 100 connections) filled and a revoke hit its 10 s deadline. Direction: send per-peer deltas (the mesh log already has `mesh_seq`) instead of the whole document, cap build cost per account, and build under a read-only snapshot (`InReadOnlySnapshot`) so a build takes no SIREAD locks. Prior art: Tailscale/headscale send map deltas (`PeersChanged`/`PeersRemoved`), not full maps.
+## Scale: peer-network config fan-out
+Machines get deltas since the signed configuration delta landed (`ConfigurationDelta`). Left: check in production that "peer network configuration
+slow" builds and predicate-lock pressure on a 100+ machine account are really gone; if not, cap the build cost per account.
 
 ## Drop control_tunnel_nodes.capacity_limit
 drop control_tunnel_nodes.capacity_limit one deploy after nothing reads it
