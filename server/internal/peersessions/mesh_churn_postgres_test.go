@@ -34,13 +34,13 @@ func TestOneChangeInATwoHundredMachineAccountCostsItsChangedPeersOnPostgres(t *t
 		t.Fatal(err)
 	}
 	usePolicyCache(t, service, store)
-	seq, err := service.refreshMesh(ctx, account)
+	state, err := service.refreshMesh(ctx, account)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// An hour of endpoint publishes as the log keeps them (config.Retention.SupersededMeshEntries): 50 per endpoint.
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.peer_mesh_log(account_id,mesh_seq,endpoint_id,op,entry)
-SELECT account_id,$2+row_number() OVER (ORDER BY r,mesh_seq),endpoint_id,'update',entry FROM paperboat.peer_mesh_log, generate_series(1,50) r WHERE account_id=$1`, account, seq); err != nil {
+SELECT account_id,$2+row_number() OVER (ORDER BY r,mesh_seq),endpoint_id,'update',entry FROM paperboat.peer_mesh_log, generate_series(1,50) r WHERE account_id=$1`, account, state.seq); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.peer_mesh_accounts SET mesh_seq=mesh_seq+50*$2 WHERE account_id=$1`, account, machines); err != nil {
@@ -105,7 +105,7 @@ SELECT account_id,$2+row_number() OVER (ORDER BY r,mesh_seq),endpoint_id,'update
 		t.Fatalf("a renewal after one change took %v to build, want well under 50 ms", perBuild)
 	}
 	// What the renewals read is exactly the log's view of the account, and it carries the change.
-	seq, err = service.refreshMesh(ctx, account)
+	state, err = service.refreshMesh(ctx, account)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,11 +114,11 @@ SELECT account_id,$2+row_number() OVER (ORDER BY r,mesh_seq),endpoint_id,'update
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	held, err := service.mesh.at(ctx, tx, account, seq)
+	held, err := service.mesh.at(ctx, tx, account, state.seq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	logged, err := latestMeshEntries(ctx, tx, account, seq)
+	logged, err := latestMeshEntries(ctx, tx, account, state.seq)
 	if err != nil {
 		t.Fatal(err)
 	}

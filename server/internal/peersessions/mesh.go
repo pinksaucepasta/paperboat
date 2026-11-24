@@ -103,9 +103,11 @@ func buildMesh(ctx context.Context, tx *sql.Tx, account string, now time.Time) (
 // the relay revocation generations of its identities, which only the peer-network triggers advance (a reinstall,
 // certificate issuance, a CLI session or environment ending publish no topic). Read-only: no hot row is written
 // in the triggers' transactions, and the identities' part is an index-only scan (migration 152).
-func meshSignal(ctx context.Context, tx *sql.Tx, account string) (int64, error) {
+func meshSignal(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, account string) (int64, error) {
 	var signal int64
-	err := tx.QueryRowContext(ctx, `SELECT
+	err := q.QueryRowContext(ctx, `SELECT
  coalesce((SELECT sum(generation) FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic IN ('peer_network','inventory')),0)::bigint
  + coalesce((SELECT sum(relay_revocation_generation) FROM paperboat.peer_network_identities WHERE user_id=$1),0)::bigint`, account).Scan(&signal)
 	return signal, err
@@ -128,42 +130,49 @@ func latestMeshEntries(ctx context.Context, tx *sql.Tx, account string, seq int6
 	return out, rows.Err()
 }
 
-// refreshMesh brings the account's shared mesh up to date and returns its mesh_seq. One builder per account at a
+// meshState is an account's shared mesh as refreshMesh left it.
+type meshState struct {
+	seq, signal int64
+	builtAt     time.Time
+	validUntil  time.Time // its earliest certificate expiry (zero: no entries)
+}
+
+// refreshMesh brings the account's shared mesh up to date and returns its state. One builder per account at a
 // time (a transaction advisory lock); the others then find it fresh. A rebuild reads the account's endpoints once,
 // set-based, and appends only the entries that changed: a join or leave writes one row however large the account.
-func (s *NetworkService) refreshMesh(ctx context.Context, account string) (int64, error) {
+func (s *NetworkService) refreshMesh(ctx context.Context, account string) (meshState, error) {
 	now := s.now().UTC()
 	tx, err := s.store.SQL().BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return meshState{}, err
 	}
 	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('peer_mesh:'||$1,0))`, account); err != nil {
-		return 0, err
+		return meshState{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.peer_mesh_accounts(account_id) VALUES($1) ON CONFLICT DO NOTHING`, account); err != nil {
-		return 0, err
+		return meshState{}, err
 	}
 	var seq, builtSignal int64
 	var builtAt, validUntil sql.NullTime
 	if err = tx.QueryRowContext(ctx, `SELECT mesh_seq,built_signal,built_at,valid_until FROM paperboat.peer_mesh_accounts WHERE account_id=$1`, account).
 		Scan(&seq, &builtSignal, &builtAt, &validUntil); err != nil {
-		return 0, err
+		return meshState{}, err
 	}
 	signal, err := meshSignal(ctx, tx, account)
 	if err != nil {
-		return 0, err
+		return meshState{}, err
 	}
 	if builtAt.Valid && signal == builtSignal && now.Sub(builtAt.Time) < meshMaxAge && (!validUntil.Valid || now.Before(validUntil.Time)) {
-		return seq, tx.Commit()
+		return meshState{seq, signal, builtAt.Time, validUntil.Time}, tx.Commit()
 	}
 	current, earliest, err := buildMesh(ctx, tx, account, now)
 	if err != nil {
-		return 0, err
+		return meshState{}, err
 	}
 	previous, err := s.mesh.at(ctx, tx, account, seq)
 	if err != nil {
-		return 0, err
+		return meshState{}, err
 	}
 	// One statement for every change (a first build of a 1,000-machine account is 1,000 adds).
 	changes := diffMesh(previous, current)
@@ -173,7 +182,7 @@ func (s *NetworkService) refreshMesh(ctx context.Context, account string) (int64
 		if change.Entry != nil {
 			raw, err := json.Marshal(change.Entry)
 			if err != nil {
-				return 0, err
+				return meshState{}, err
 			}
 			entries[i] = string(raw)
 		}
@@ -182,7 +191,7 @@ func (s *NetworkService) refreshMesh(ctx context.Context, account string) (int64
 		if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.peer_mesh_log(account_id,mesh_seq,endpoint_id,op,entry)
 SELECT $1,$2+c.n,c.endpoint_id,c.op,nullif(c.entry,'')::jsonb FROM unnest($3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS c(endpoint_id,op,entry,n)`,
 			account, seq, ids, ops, entries); err != nil {
-			return 0, err
+			return meshState{}, err
 		}
 		seq += int64(len(changes))
 	}
@@ -192,9 +201,9 @@ SELECT $1,$2+c.n,c.endpoint_id,c.op,nullif(c.entry,'')::jsonb FROM unnest($3::te
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.peer_mesh_accounts SET mesh_seq=$2,built_signal=$3,built_at=$4,valid_until=$5 WHERE account_id=$1`,
 		account, seq, signal, now, until); err != nil {
-		return 0, err
+		return meshState{}, err
 	}
-	return seq, tx.Commit()
+	return meshState{seq, signal, now, earliest}, tx.Commit()
 }
 
 // diffMesh lists the changes from previous to current, ordered by endpoint for a deterministic log.

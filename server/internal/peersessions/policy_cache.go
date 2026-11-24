@@ -49,6 +49,9 @@ type policyDoc struct {
 	expiry     time.Time // the configuration's refresh hint (exp), as built
 	validUntil time.Time
 	keys       []string // sorted (policyKeys): put binary-searches it
+	// An account-wide entry (account_basis.go) has validUntil, keys and one of these.
+	basis *accountBasis
+	hosts []offlinePeer
 }
 
 type policyNotice struct {
@@ -91,6 +94,16 @@ func (c *policyCache) get(endpoint, liveKey string, now time.Time) *policyDoc {
 	}
 	c.hits++
 	return d
+}
+
+// shared is the stored account-wide entry of key, if it still holds.
+func (c *policyCache) shared(key string, now time.Time) *policyDoc {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d := c.docs[key]; d != nil && c.listening && now.Before(d.validUntil) {
+		return d
+	}
+	return nil
 }
 
 // put stores a document built from a snapshot taken after start, unless a notification for one of its keys

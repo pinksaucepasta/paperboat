@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
-	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // A member's CLI document names every team host it may use (teamHostPeers). The binding check of a (member, host)
@@ -57,9 +56,8 @@ func TestTeamHostPeersChecksEachHostBindingOnceOnPostgres(t *testing.T) {
 	if _, err = tx.ExecContext(ctx, `SET LOCAL track_functions='all'`); err != nil {
 		t.Skipf("track_functions needs a superuser test database: %v", err)
 	}
-	self := networkBinding{Binding: peernetwork.Binding{AccountID: member, EndpointID: "thp_cli_" + s, Role: peernetwork.RoleCLI}}
 	started := time.Now()
-	peers, err := teamHostPeers(ctx, tx, self, time.Now().UTC())
+	peers, err := teamHostPeers(ctx, tx, member, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -86,6 +86,7 @@ type NetworkConfigResult struct {
 
 type NetworkService struct {
 	endpointBuilds keyedlock.Locks
+	basisBuilds    keyedlock.Locks
 	store          *db.DB
 	signer         interface {
 		SignNetworkConfiguration(peernetwork.Configuration) (string, error)
@@ -398,9 +399,9 @@ func policyDocKey(in NetworkConfigRequest, live map[string][]string) string {
 // with its scopes, the refresh hint, and until when the result holds without a notification (policy_cache.go).
 func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigRequest, live map[string][]string, now time.Time) (*policyDoc, error) {
 	untilRevoked := in.Authority == AuthorityUntilRevoked
-	// The shared mesh is brought up to date (once per change for the whole account) before the snapshot opens, so
-	// the snapshot sees it; this writes, like the generation above.
-	meshSeq, err := s.refreshMesh(ctx, in.UserID)
+	// Read before the snapshot opens, so the snapshot sees the shared mesh it brought up to date and no connection is
+	// held while waiting for another endpoint's build.
+	basis, err := s.accountBasis(ctx, in.UserID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -628,11 +629,11 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 	}
 	// Durable personal-machine connectivity is distinct from application access.
 	// Exact access-session scopes above still authorize every application stream.
-	meshEntries, err := s.mesh.at(ctx, tx, self.AccountID, meshSeq)
+	meshEntries, err := s.mesh.at(ctx, tx, self.AccountID, basis.mesh.seq)
 	if err != nil {
 		return nil, err
 	}
-	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"], meshEntries)
+	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"], meshEntries, basis)
 	if err != nil {
 		return nil, err
 	}
@@ -655,35 +656,8 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, meshExpiry))
 		scopes++
 	}
-	if untilRevoked && self.Role == peernetwork.RoleCLI {
-		hosts, err := teamHostPeers(ctx, tx, self, now)
-		if err != nil {
-			return nil, err
-		}
-	teamHosts:
-		for _, h := range hosts {
-			p := byPeer[h.binding.EndpointID]
-			if p == nil {
-				if len(byPeer) >= maximumAccountEndpoints {
-					break
-				}
-				p = &networkPeer{Identity: h.binding}
-				byPeer[h.binding.EndpointID] = p
-				if h.certExpiry.After(now) && h.certExpiry.Before(expiry) {
-					expiry = h.certExpiry
-				}
-			}
-			for _, capability := range h.capabilities {
-				if scopes >= peernetwork.MaxScopes {
-					break teamHosts
-				}
-				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: h.binding.EndpointID, ResourceGeneration: uint64(h.generation), Capability: capability, Direction: "dial", Port: peernetwork.NetworkPort, ExpiresAt: 0})
-				scopes++
-			}
-		}
-	}
 	if untilRevoked && self.Role == peernetwork.RoleMachine {
-		offline, err := offlineAccessPeers(ctx, tx, self, now, meshEntries)
+		offline, err := offlineAccessPeers(ctx, tx, self, now, meshEntries, basis.mesh.validUntil)
 		if err != nil {
 			return nil, err
 		}
@@ -709,6 +683,36 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 			}
 		}
 	}
+	if err = tx.Commit(); err != nil { // no connection is held while another endpoint's build of the hosts is awaited
+		return nil, err
+	}
+	if untilRevoked && self.Role == peernetwork.RoleCLI {
+		hosts, err := s.teamHosts(ctx, self.AccountID, basis.entitlement, now)
+		if err != nil {
+			return nil, err
+		}
+	teamHosts:
+		for _, h := range hosts {
+			p := byPeer[h.binding.EndpointID]
+			if p == nil {
+				if len(byPeer) >= maximumAccountEndpoints {
+					break
+				}
+				p = &networkPeer{Identity: h.binding}
+				byPeer[h.binding.EndpointID] = p
+				if h.certExpiry.After(now) && h.certExpiry.Before(expiry) {
+					expiry = h.certExpiry
+				}
+			}
+			for _, capability := range h.capabilities {
+				if scopes >= peernetwork.MaxScopes {
+					break teamHosts
+				}
+				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: h.binding.EndpointID, ResourceGeneration: uint64(h.generation), Capability: capability, Direction: "dial", Port: peernetwork.NetworkPort, ExpiresAt: 0})
+				scopes++
+			}
+		}
+	}
 	peerIDs := make([]string, 0, len(byPeer))
 	for id := range byPeer {
 		peerIDs = append(peerIDs, id)
@@ -726,7 +730,8 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 		peers = append(peers, *p)
 	}
 	// The document holds until its earliest time-based input: the refresh hint (certificates) and every grant expiry.
-	validUntil := now.Add(maxPolicyAge)
+	// The account-wide entries it was built from are up to meshMaxAge old: its rows are never older than maxPolicyAge.
+	validUntil := now.Add(maxPolicyAge - meshMaxAge)
 	if expiry.Before(validUntil) {
 		validUntil = expiry
 	}
@@ -735,24 +740,8 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 			validUntil = g.expiry
 		}
 	}
-	// A team's paid entitlement (paperboat.team_paid_entitled) starts and ends by time, with no write: the document
-	// holds only until the next such instant of a team the endpoint's account belongs to or its machine is shared with.
-	var entitlementChange sql.NullTime
-	if err = tx.QueryRowContext(ctx, `WITH teams AS (
- SELECT team_id FROM paperboat.team_members WHERE account_id=$1 AND active
- UNION SELECT team_id FROM paperboat.team_resource_bindings WHERE resource_kind='machine' AND resource_id=$2 AND active
- UNION SELECT owner_team_id FROM paperboat.user_machines WHERE id=$2 AND owner_team_id IS NOT NULL)
-SELECT min(t) FROM (
- SELECT w.period_start AS t FROM paperboat.billing_workspaces w JOIN teams USING (team_id) WHERE w.user_id IS NULL
- UNION ALL SELECT paperboat.billing_workspace_paid_until(w) FROM paperboat.billing_workspaces w JOIN teams USING (team_id) WHERE w.user_id IS NULL) x
-WHERE t>$3`, self.AccountID, self.MachineID, now).Scan(&entitlementChange); err != nil {
-		return nil, err
-	}
-	if entitlementChange.Valid && entitlementChange.Time.Before(validUntil) {
-		validUntil = entitlementChange.Time
-	}
-	if err = tx.Commit(); err != nil {
-		return nil, err
+	if end := basis.entitlement; !end.IsZero() && end.Before(validUntil) {
+		validUntil = end
 	}
 	return &policyDoc{self: self, peers: peers, expiry: expiry, validUntil: validUntil, keys: policyKeys(self, peers)}, nil
 }
@@ -810,7 +799,7 @@ func personalNetworkScope(self, peer networkBinding, expiresAt int64) networkSco
 	return networkScope{ResourceKind: "machine_network", ResourceID: personalNetworkScopeID(self, peer), ResourceGeneration: 1, Capability: "connect", Direction: direction, Port: peernetwork.NetworkPort, ExpiresAt: expiresAt}
 }
 
-func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, mesh map[string]networkBinding) ([]networkBinding, error) {
+func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, mesh map[string]networkBinding, basis *accountBasis) ([]networkBinding, error) {
 	if self.Role == peernetwork.RoleMachine {
 		var personal bool
 		if err := tx.QueryRowContext(ctx, `SELECT owner_team_id IS NULL FROM paperboat.user_machines WHERE id=$1 AND user_id=$2`, self.EndpointID, self.AccountID).Scan(&personal); err != nil {
@@ -820,27 +809,11 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 			return nil, nil
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT n.endpoint_id FROM paperboat.peer_network_identities n
- WHERE n.user_id=$1 AND n.endpoint_id<>$2 AND n.revoked_at IS NULL AND
- ((n.role='machine' AND EXISTS(SELECT 1 FROM paperboat.user_machines m WHERE m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL))
- OR ($3='machine' AND n.role='cli' AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=n.endpoint_id AND c.user_id=n.user_id AND c.state='active' AND c.revoked_at IS NULL)))
- ORDER BY n.endpoint_id LIMIT $4`, self.AccountID, self.EndpointID, self.Role, maximumAccountEndpoints+1)
-	if err != nil {
-		return nil, err
-	}
 	var ids []string
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, err
+	for _, m := range basis.members {
+		if m.endpoint != self.EndpointID && (m.role == peernetwork.RoleMachine || self.Role == peernetwork.RoleMachine) {
+			ids = append(ids, m.endpoint)
 		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
 	}
 	// Every endpoint of the account is a peer; the bound is the stated product
 	// maximum, and the signed configuration size is checked where it is built.
@@ -850,12 +823,8 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	// The shared mesh (mesh.go) holds every peer with a current certificate, built once per change: a peer is read
 	// from it, not loaded again per endpoint (3 queries per peer). A peer this endpoint reports as admitted may keep
 	// a superseded or expired certificate, so it alone is loaded as before.
-	var validUntil sql.NullTime
-	if err = tx.QueryRowContext(ctx, `SELECT valid_until FROM paperboat.peer_mesh_accounts WHERE account_id=$1`, self.AccountID).Scan(&validUntil); err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-	if validUntil.Valid && validUntil.Time.After(now) && validUntil.Time.Before(*expiry) {
-		*expiry = validUntil.Time // the earliest certificate of the mesh: never later than this endpoint's peers' own
+	if end := basis.mesh.validUntil; end.After(now) && end.Before(*expiry) {
+		*expiry = end // the earliest certificate of the mesh: never later than this endpoint's peers' own
 	}
 	peers := make([]networkBinding, 0, len(ids))
 	for _, id := range ids {

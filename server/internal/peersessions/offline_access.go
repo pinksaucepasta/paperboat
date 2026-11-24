@@ -42,7 +42,7 @@ type offlinePeer struct {
 // per team); nothing for a host whose environment is not active. A capability that needs the control plane (none
 // today; per-operation approval or step-up would) is left out. The generation is the greatest of the deciding inputs'
 // versions (binding, workspace policy, membership), so the daemon sees any policy change as a new scope.
-func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, mesh map[string]networkBinding) ([]offlinePeer, error) {
+func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, mesh map[string]networkBinding, meshExpiry time.Time) ([]offlinePeer, error) {
 	rows, err := tx.QueryContext(ctx, `WITH host AS (
  SELECT m.id,m.user_id,m.owner_team_id FROM paperboat.user_machines m
  JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
@@ -92,7 +92,7 @@ GROUP BY e.id,e.user_id,e.generation ORDER BY e.id`, self.EndpointID, self.Accou
 	if err != nil {
 		return nil, err
 	}
-	return bindOfflinePeers(ctx, tx, rows, now, self.AccountID, mesh)
+	return bindOfflinePeers(ctx, tx, rows, now, self.AccountID, mesh, meshExpiry)
 }
 
 func policyNames() []string {
@@ -118,7 +118,7 @@ func networkNames() []string {
 // The generation is the greatest of the deciding inputs' versions, as for the host's side.
 // A team-owned machine enrolled by this very account (the usual owner who transferred it) belongs to no personal mesh
 // (personalNetworkPeers takes owner_team_id IS NULL), so it is named here too.
-func teamHostPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time) ([]offlinePeer, error) {
+func teamHostPeers(ctx context.Context, tx *sql.Tx, account string, now time.Time) ([]offlinePeer, error) {
 	// The generation is taken over every team that shares the host with the member, allowed or not, as the host's own
 	// document does (offlineAccessPeers accounts): the relay pairs the two scopes only at one generation.
 	rows, err := tx.QueryContext(ctx, `SELECT n.endpoint_id,m.user_id,array_to_json(array_agg(DISTINCT cap.network ORDER BY cap.network) FILTER (WHERE allowed)),
@@ -137,11 +137,11 @@ CROSS JOIN LATERAL (SELECT paperboat.team_machine_bound_for(member.account_id,me
 CROSS JOIN unnest($2::text[],$3::text[]) AS cap(policy,network)
 CROSS JOIN LATERAL (SELECT gate.bound AND NOT isempty(paperboat.workspace_policy_rule_ports(member.account_id,member.team_id,m.id,cap.policy)) AS allowed) decision
 WHERE member.account_id=$1 AND member.active AND NOT cap.network=ANY($4::text[])
-GROUP BY n.endpoint_id,m.user_id HAVING bool_or(allowed) ORDER BY n.endpoint_id LIMIT $5`, self.AccountID, policyNames(), networkNames(), offlineOwnerOnly, maximumOfflinePeers)
+GROUP BY n.endpoint_id,m.user_id HAVING bool_or(allowed) ORDER BY n.endpoint_id LIMIT $5`, account, policyNames(), networkNames(), offlineOwnerOnly, maximumOfflinePeers)
 	if err != nil {
 		return nil, err
 	}
-	return bindOfflinePeers(ctx, tx, rows, now, "", nil)
+	return bindOfflinePeers(ctx, tx, rows, now, "", nil, time.Time{})
 }
 
 // bindOfflinePeers reads (endpoint, account, capabilities, generation) rows and loads each endpoint's network binding.
@@ -149,7 +149,7 @@ GROUP BY n.endpoint_id,m.user_id HAVING bool_or(allowed) ORDER BY n.endpoint_id 
 // endpoint: a host of an account with 84 CLI endpoints took ~300 ms per document in prod); mesh is nil for hosts
 // (teamHostPeers), which can be team-owned and are not in a personal mesh. The mesh holds exactly the bindings
 // loadNetworkBinding (admitted = false) would return, so an endpoint it lacks has no current certificate and is left out.
-func bindOfflinePeers(ctx context.Context, tx *sql.Tx, rows *sql.Rows, now time.Time, meshAccount string, mesh map[string]networkBinding) ([]offlinePeer, error) {
+func bindOfflinePeers(ctx context.Context, tx *sql.Tx, rows *sql.Rows, now time.Time, meshAccount string, mesh map[string]networkBinding, meshExpiry time.Time) ([]offlinePeer, error) {
 	type candidate struct {
 		endpoint, account string
 		capabilities      []string
@@ -176,19 +176,11 @@ func bindOfflinePeers(ctx context.Context, tx *sql.Tx, rows *sql.Rows, now time.
 		return nil, err
 	}
 	out := make([]offlinePeer, 0, len(candidates))
-	var meshExpiry time.Time // the earliest certificate of the mesh, read once, for every peer taken from it
 	for _, c := range candidates {
 		if mesh != nil && c.account == meshAccount {
 			binding, ok := mesh[c.endpoint]
 			if !ok {
 				continue
-			}
-			if meshExpiry.IsZero() {
-				var validUntil sql.NullTime
-				if err = tx.QueryRowContext(ctx, `SELECT valid_until FROM paperboat.peer_mesh_accounts WHERE account_id=$1`, meshAccount).Scan(&validUntil); err != nil && err != sql.ErrNoRows {
-					return nil, err
-				}
-				meshExpiry = validUntil.Time
 			}
 			out = append(out, offlinePeer{binding: binding, certExpiry: meshExpiry, capabilities: c.capabilities, generation: c.generation})
 			continue

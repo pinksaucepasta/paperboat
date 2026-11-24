@@ -83,15 +83,15 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 		return rows, last
 	}
 	started := time.Now()
-	seq, err := service.refreshMesh(ctx, account)
+	state, err := service.refreshMesh(ctx, account)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if took := time.Since(started); took > 2*time.Second {
 		t.Fatalf("the first build of a 1,000-machine account took %v", took)
 	}
-	if n, _ := logRows(); n != 1000 || seq != 1000 {
-		t.Fatalf("first build: %d log rows, seq %d; want 1000 adds", n, seq)
+	if n, _ := logRows(); n != 1000 || state.seq != 1000 {
+		t.Fatalf("first build: %d log rows, seq %d; want 1000 adds", n, state.seq)
 	}
 
 	// Every shared entry is what the per-endpoint loader gives that endpoint's peers.
@@ -99,7 +99,7 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mesh, err := latestMeshEntries(ctx, tx, account, seq)
+	mesh, err := latestMeshEntries(ctx, tx, account, state.seq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +114,8 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	}
 	_ = tx.Rollback()
 
-	if again, err := service.refreshMesh(ctx, account); err != nil || again != seq {
-		t.Fatalf("refresh without a change: seq %d -> %d, %v", seq, again, err)
+	if again, err := service.refreshMesh(ctx, account); err != nil || again.seq != state.seq {
+		t.Fatalf("refresh without a change: seq %d -> %d, %v", state.seq, again.seq, err)
 	}
 	if n, _ := logRows(); n != 1000 {
 		t.Fatalf("a refresh without a change wrote %d rows", n-1000)
@@ -183,8 +183,8 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 
 	join(1000, 1000)
 	started = time.Now()
-	if seq, err = service.refreshMesh(ctx, account); err != nil || seq != 1001 {
-		t.Fatalf("after a join: seq %d, %v; want one more entry", seq, err)
+	if state, err = service.refreshMesh(ctx, account); err != nil || state.seq != 1001 {
+		t.Fatalf("after a join: seq %d, %v; want one more entry", state.seq, err)
 	}
 	if took := time.Since(started); took > time.Second {
 		t.Fatalf("a join on a 1,000-machine account took %v", took)
@@ -195,8 +195,8 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	deltaStep(1) // the joined machine only
 
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now(),state='revoked',seat_state='released' WHERE id=$1`, account+"_m_7")
-	if seq, err = service.refreshMesh(ctx, account); err != nil || seq != 1002 {
-		t.Fatalf("after a revoke: seq %d, %v", seq, err)
+	if state, err = service.refreshMesh(ctx, account); err != nil || state.seq != 1002 {
+		t.Fatalf("after a revoke: seq %d, %v", state.seq, err)
 	}
 	if n, last := logRows(); n != 1002 || last != "remove "+account+"_m_7" {
 		t.Fatalf("a revoke wrote %d rows (last %q), want exactly one remove", n-1001, last)
