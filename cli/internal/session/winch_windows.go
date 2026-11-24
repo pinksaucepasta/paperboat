@@ -14,10 +14,14 @@ import (
 // Docker CLI does (cli/command/container/tty.go MonitorTtySize).
 func notifyWinch(ch chan<- os.Signal) (stop func()) {
 	ticker := time.NewTicker(winchPollInterval)
-	done := make(chan struct{})
-	go pollWinch(ch, func() (int, int, error) { return term.GetSize(int(os.Stdout.Fd())) }, ticker.C, done)
+	done, finished := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(finished)
+		pollWinch(ch, func() (int, int, error) { return term.GetSize(int(os.Stdout.Fd())) }, ticker.C, done)
+	}()
 	return func() {
 		ticker.Stop()
 		close(done)
+		<-finished // no poll (it reads os.Stdout) outlives the caller
 	}
 }
