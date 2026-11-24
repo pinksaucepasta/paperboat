@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -88,5 +90,69 @@ func TestHTTPServiceHandshakeFailureNamesTheRefusal(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("refused handshake was not reported")
+	}
+}
+
+// failingListener fails its first Accepts with a temporary error.
+type failingListener struct {
+	net.Listener
+	failures atomic.Int32
+}
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	if l.failures.Add(-1) >= 0 {
+		return nil, &net.OpError{Op: "accept", Err: syscall.EMFILE}
+	}
+	return l.Listener.Accept()
+}
+
+// One "too many open files" ended the accept loop: the edge took no carrier until it restarted.
+func TestHandshakeListenerSurvivesTemporaryAcceptError(t *testing.T) {
+	clientTLS, serverTLS, _ := testEndpointCertificates(t)
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &failingListener{Listener: inner}
+	failing.failures.Store(3)
+	var reported atomic.Int32
+	listener := newHandshakeListener(failing, serverTLS, 10*time.Second, func(err error) {
+		if errors.Is(err, ErrCarrierHTTPServer) && errors.Is(err, syscall.EMFILE) {
+			reported.Add(1)
+		}
+	})
+	defer listener.Close()
+	go func() {
+		if connection, err := (&tls.Dialer{Config: clientTLS}).DialContext(t.Context(), "tcp", inner.Addr().String()); err == nil {
+			_ = connection.Close()
+		}
+	}()
+	connection, err := listener.Accept()
+	if err != nil {
+		t.Fatalf("a temporary accept error ended the listener: %v", err)
+	}
+	_ = connection.Close()
+	if got := reported.Load(); got != 3 {
+		t.Fatalf("server failure reports = %d, want 3", got)
+	}
+}
+
+func TestHandshakeListenerCloseEndsAcceptBackoff(t *testing.T) {
+	_, serverTLS, _ := testEndpointCertificates(t)
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &failingListener{Listener: inner}
+	failing.failures.Store(1 << 30)
+	listener := newHandshakeListener(failing, serverTLS, time.Second, func(error) {})
+	_ = listener.Close()
+	select {
+	case err := <-listener.failed:
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("accept loop ended with %v, want closed", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("accept loop outlived Close")
 	}
 }

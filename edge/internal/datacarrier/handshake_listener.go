@@ -43,12 +43,26 @@ func newHandshakeListener(inner net.Listener, config *tls.Config, timeout time.D
 }
 
 func (l *handshakeListener) acceptLoop() {
+	var delay time.Duration
 	for {
 		raw, err := l.Listener.Accept()
+		// net/http's Server.Serve backoff: a temporary error (too many open files) must not end the listener.
+		var temporary interface{ Temporary() bool }
+		if errors.As(err, &temporary) && temporary.Temporary() {
+			delay = min(max(2*delay, 5*time.Millisecond), time.Second)
+			l.observe(fmt.Errorf("%w: accept: %w", ErrCarrierHTTPServer, err))
+			select {
+			case <-time.After(delay):
+				continue
+			case <-l.done:
+				err = net.ErrClosed
+			}
+		}
 		if err != nil {
 			l.failed <- err
 			return
 		}
+		delay = 0
 		release, ok := l.pending.Admit(remoteIP(raw), false)
 		if !ok {
 			_ = raw.Close()
