@@ -79,6 +79,9 @@ func QuietFailure(err error) (quiet bool) {
 }
 
 // TryInfo enqueues one record without waiting for the logging backend.
+// TryDebug is for traces kept out of the default log level.
+func TryDebug(message string, args ...any) { tryLog(slog.LevelDebug, message, args...) }
+
 func TryInfo(message string, args ...any) {
 	tryLog(slog.LevelInfo, message, args...)
 }

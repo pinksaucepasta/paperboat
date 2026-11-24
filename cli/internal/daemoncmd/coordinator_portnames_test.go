@@ -40,6 +40,7 @@ func TestCoordinatorRoutesServerPortNamesFrontDeskAndTopLevelNames(t *testing.T)
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	c.portNames = map[string]api.MachineServicesMachine{"home": {
 		PortNames:     []api.PortName{{Name: "app", Port: 3000}, {Name: "unlisted", Port: 9999}},

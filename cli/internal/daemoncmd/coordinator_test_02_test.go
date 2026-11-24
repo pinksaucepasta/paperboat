@@ -67,6 +67,7 @@ func TestCoordinatorReconnectsNameClientOnNextSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
@@ -115,6 +116,7 @@ func TestCoordinatorGenerationCleanupHonorsReconcileDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
@@ -165,6 +167,7 @@ func TestCoordinatorProtectedHTTPFrontDoorUsesAuthenticatedMachineDial(t *testin
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{3000}}
 	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
@@ -286,6 +289,7 @@ func testRawRouteCoordinator(t *testing.T, dial func(context.Context, string, in
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	return coordinator, names
 }
 
@@ -381,6 +385,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{3000}}
 	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
@@ -520,6 +525,7 @@ func TestCoordinatorWebOnlyPeerPublishesName(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	defer coordinator.Stop()
 	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{80, 443}}
 	if err = coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
@@ -542,6 +548,7 @@ func TestCoordinatorFailedProjectionWithdrawsIPCAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	defer coordinator.Stop()
 	peers := []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}}
 	coordinator.applySnapshot(peers, 1)
@@ -612,6 +619,7 @@ func TestCoordinatorReportsFailedReconciliationAndWithdraws(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx, c.cancel = context.WithCancel(t.Context())
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{35173}}}, 1)
 	if !errors.Is(reported, guardErr) || strings.Contains(reported.Error(), guardErr.Error()) {
@@ -642,6 +650,7 @@ func TestCoordinatorStreamingReadinessReportsFailedAndRecoveredReconciliation(t 
 		t.Fatal(err)
 	}
 	c.ctx = ctx
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peers := []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true}}
 	c.applySnapshot(peers, 1)
@@ -686,6 +695,7 @@ func TestCoordinatorStopRetainsCleanupFailureAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	if err := c.Stop(); !errors.Is(err, syscall.EIO) {
 		t.Fatalf("owned cleanup cause lost: %v", err)
 	}
@@ -697,6 +707,7 @@ func TestCoordinatorStopRetainsCleanupFailureAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh.ctx = t.Context()
+	fresh.queueCtx = fresh.ctx
 	if err := fresh.Stop(); err != nil {
 		t.Fatal(err)
 	}
@@ -725,6 +736,7 @@ func TestCoordinatorKeepsOtherMachinesWhenOneSnapshotEntryIsBad(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	defer coordinator.Stop()
 	peers := []*daemonrpc.PeerUpdate{
 		{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}},

@@ -159,6 +159,9 @@ func TestCoordinatorRetriesATransientGuardFailureInTheSameReconcile(t *testing.T
 						if tc.first == context.Canceled {
 							cancel() // the reconcile itself ends: never retried
 						}
+						if tc.first == context.Canceled {
+							return client, nil
+						}
 						if tc.onApply {
 							client.failApply = tc.first
 						} else {
@@ -182,8 +185,12 @@ func TestCoordinatorRetriesATransientGuardFailureInTheSameReconcile(t *testing.T
 				t.Fatalf("dials=%d err=%v; want dials=%d failed=%v", dials, err, tc.wantDials, tc.wantFailed)
 			}
 			var op coordinatorOperationError
-			if tc.wantFailed && (!errors.As(err, &op) || op.LocalAccessStep() != "guard_status" || !errors.Is(err, tc.first)) {
-				t.Fatalf("err = %v; want a typed guard_status failure carrying %v", err, tc.first)
+			step := "guard_status"
+			if tc.first == context.Canceled {
+				step = "local_access_setup" // the caller stopped waiting; its cancellation does not cut the guard call
+			}
+			if tc.wantFailed && (!errors.As(err, &op) || op.LocalAccessStep() != step || !errors.Is(err, tc.first)) {
+				t.Fatalf("err = %v; want a typed %s failure carrying %v", err, step, tc.first)
 			}
 		})
 	}

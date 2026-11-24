@@ -78,6 +78,7 @@ func newResetForwardFixture(t *testing.T) *resetForwardFixture {
 		t.Fatal(err)
 	}
 	c.ctx, c.cancel = context.WithCancel(t.Context())
+	c.queueCtx = c.ctx
 	f.c = c
 	f.peers = []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080, 9090}}}
 	if err := c.replaceGuardedRoutes(t.Context(), f.peers); err != nil {

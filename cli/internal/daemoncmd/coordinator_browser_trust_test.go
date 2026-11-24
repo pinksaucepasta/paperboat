@@ -24,6 +24,7 @@ func TestCoordinatorBrowserCertificateFailureKeepsNativeMachineAccess(t *testing
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	for range 2 {
 		if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {

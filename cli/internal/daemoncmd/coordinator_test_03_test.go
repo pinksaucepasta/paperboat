@@ -55,6 +55,7 @@ func TestCoordinatorGenerationCleanupRetainsLateCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
@@ -127,6 +128,7 @@ func TestCoordinatorReconciliationReportsOneEpisodeAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = ctx
+	c.queueCtx = c.ctx
 	machines := []api.UserMachine{{ID: "PRIVATE", Alias: "studio", AssignedIP: "127.100.0.22", State: "online", Online: true, NetworkApproved: true}}
 	for range 2 {
 		if err := c.ApplyMachines(ctx, machines, nil); !errors.Is(err, syscall.EIO) {
@@ -160,6 +162,7 @@ func TestCoordinatorFailedListenerWithdrawsReadinessAndReacquires(t *testing.T) 
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	machines := []api.UserMachine{{ID: "machine", Alias: "studio", AssignedIP: "127.100.0.22", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 2}}
 	services := []api.MachineServicesMachine{{MachineID: "machine", InstallationGeneration: 2, ExpiresAt: time.Now().Add(time.Minute), Services: []api.MachineServicePort{{Port: 45678, AddressFamily: "ipv4"}}}}
@@ -263,6 +266,7 @@ func TestCoordinatorStartRejectsUnfinishedGenerationCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
@@ -352,6 +356,7 @@ func TestCoordinatorReconnectsAfterTheGuardRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	machines := []api.UserMachine{{ID: "PRIVATE", Alias: "studio", AssignedIP: "127.100.0.22", State: "online", Online: true, NetworkApproved: true}}
 	// The dead connection is dropped and the guard dialed again within the same reconcile.
 	if err := c.ApplyMachines(t.Context(), machines, nil); err != nil || connects != 2 {

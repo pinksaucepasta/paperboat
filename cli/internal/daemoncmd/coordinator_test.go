@@ -52,6 +52,7 @@ func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
@@ -88,6 +89,7 @@ func TestCoordinatorBusyHTTPPortKeepsHTTPSBrowserURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
@@ -150,6 +152,7 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}, {PeerId: "second", Alias: "win-target", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
@@ -355,6 +358,7 @@ func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testin
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	t.Cleanup(func() { _ = c.Stop() })
 	peers := []*daemonrpc.PeerUpdate{
 		{PeerId: "local", Alias: "macmini", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{5000, 7000}},
@@ -703,6 +707,7 @@ func TestCoordinatorBoundsGuardReconciliationAndWithdrawsNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
+	coordinator.queueCtx = coordinator.ctx
 	started := time.Now()
 	reconcileCtx, cancel := context.WithTimeout(context.Background(), coordinator.cfg.ReconcileTimeout)
 	defer cancel()
@@ -842,6 +847,7 @@ func testCoordinatorServesMachineHostOnPublishedPorts(t *testing.T, names *coord
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{22, 6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
@@ -940,6 +946,7 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	first := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), first); err != nil {
@@ -997,6 +1004,7 @@ func TestCoordinatorBrowserGatewayWaitsForAJustStartedServiceRoute(t *testing.T)
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peer := func(ports ...int32) []*daemonrpc.PeerUpdate {
 		return []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: ports}}
@@ -1050,6 +1058,7 @@ func TestCoordinatorRefusedListenerSkipsOnlyThatItem(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peers := []*daemonrpc.PeerUpdate{
 		{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{3000, 6767}},

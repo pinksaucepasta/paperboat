@@ -82,7 +82,9 @@ func (c *Coordinator) connectGuardLocked(ctx context.Context) (guardedNameClient
 	if c.cfg.ConnectNameClient == nil {
 		return nil, errors.New("protected machine-name service is unavailable")
 	}
-	connected, err := c.cfg.ConnectNameClient(ctx)
+	connectCtx, cancel := context.WithTimeout(ctx, c.cfg.ReconcileTimeout)
+	defer cancel()
+	connected, err := c.cfg.ConnectNameClient(connectCtx)
 	if err != nil {
 		return nil, coordinatorOperationFailure("guard_connect", err)
 	}
@@ -126,7 +128,8 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 		(op.LocalAccessStep() == "guard_status" || op.LocalAccessStep() == "native_listener") {
 		diagnosticlog.TryWarn("machine guard did not answer; dialing it again", "error", err)
 		// The failed attempt spent most of ctx's budget: the retry gets a full one of its own, ended by Stop.
-		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.ReconcileTimeout)
+		// The retry is ended by Stop, and by the caller's deadline only when there is one (tests).
+		retryCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		defer cancel()
 		defer context.AfterFunc(c.ctx, cancel)()
 		c.resetNameGenerationLocked(retryCtx)
@@ -135,18 +138,103 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	return err
 }
 
+// errSuperseded ends a reconcile between two guard calls because a different snapshot waits; what is held stays, and
+// the next reconcile first withdraws what that snapshot does not authorize.
+var errSuperseded = errors.New("newer machine list received during setup")
+
+func routeKey(machineID, hostname string, ip netip.Addr, port int) string {
+	return machineID + "\x00" + hostname + "\x00" + ip.String() + "\x00" + strconv.Itoa(port)
+}
+
+// withdrawUnauthorizedLocked closes every held listener peers does not authorize exactly, and the browser gateway if
+// any of its URLs points at something peers does not authorize. The rest keeps its guard connection.
+func (c *Coordinator) withdrawUnauthorizedLocked(peers []*daemonrpc.PeerUpdate) {
+	listeners, targets, hosts := make(map[string]bool), make(map[string]bool), make(map[string]string)
+	for _, peer := range peers {
+		if peer == nil || !peer.GetApproved() || !peer.GetOnline() || peer.GetAlias() == "" {
+			continue
+		}
+		ip, err := netip.ParseAddr(peer.GetAssignedIp())
+		if err != nil {
+			continue
+		}
+		hostname := strings.ToLower(peer.GetAlias()) + "." + c.localDomain()
+		for _, raw := range peer.GetExportedPorts() {
+			port, target := int(raw), routeKey(peer.GetPeerId(), "", ip, int(raw))
+			listeners[routeKey(peer.GetPeerId(), hostname, ip, port)] = true
+			targets[target] = true
+			if host, err := splitdns.BrowserHostname(peer.GetAlias(), port, c.localDomain()); err == nil {
+				hosts[host] = target
+			}
+		}
+	}
+	var routes []*guardedRoute
+	for key, route := range c.routes {
+		if !listeners[key] {
+			routes = append(routes, route)
+			delete(c.routes, key)
+		}
+	}
+	var gateways []guardedWebRoute
+	for base, web := range c.webRoutes {
+		for host, route := range web.browserRoutes {
+			target := routeKey(route.MachineID, "", route.Address, route.Port)
+			_, label, err := splitdns.ParseBrowserHostname(strings.TrimPrefix(host, "*."), c.localDomain())
+			numeric := err == nil && label == strconv.Itoa(route.Port)
+			if !targets[target] || numeric && hosts[host] != target {
+				gateways = append(gateways, web)
+				delete(c.webRoutes, base)
+				break
+			}
+		}
+	}
+	if len(routes)+len(gateways) == 0 {
+		return
+	}
+	stopCtx, cancel := context.WithTimeout(c.ctx, c.cfg.ReconcileTimeout)
+	cleanup := c.launchCleanupLocked(func() error {
+		defer cancel()
+		var causes []error
+		for _, web := range gateways {
+			causes = append(causes, lifecycleCleanup(web.proxy.Stop(stopCtx)))
+		}
+		for _, route := range routes {
+			causes = append(causes, route.close())
+		}
+		return coordinatorFailure("withdrawn local routes could not close", causes...)
+	})
+	c.awaitCleanup(c.ctx, cleanup)
+}
+
+// awaitCleanup waits for cleanup, at most ReconcileTimeout: a reconcile itself has no deadline.
+func (c *Coordinator) awaitCleanup(ctx context.Context, cleanup *generationCleanup) bool {
+	ctx, cancel := context.WithTimeout(ctx, c.cfg.ReconcileTimeout)
+	defer cancel()
+	select {
+	case <-cleanup.done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate) error {
 	// Withdrawal first: forwards kept across a reset are cut as soon as a snapshot no longer authorizes their
 	// machine and port, whether or not the guard can be reached to rebuild the listeners below.
 	c.cutWithdrawnDrainingLocked(ctx, peers)
-	nameClient, err := c.connectGuardLocked(ctx)
+	client, err := c.connectGuardLocked(ctx)
 	if err != nil {
 		return err
 	}
+	nameClient := boundGuard(client, c.cfg.ReconcileTimeout)
 	if err := c.resolveLocalDomainLocked(ctx, nameClient); err != nil {
 		c.resetNameGenerationLocked(ctx)
 		return err
 	}
+	if c.setupPartial {
+		c.withdrawUnauthorizedLocked(peers)
+	}
+	c.setupPartial = true
 	wanted := make(map[string]*guardedRoute)
 	wantedWeb := make(map[string]guardedWebRoute)
 	names := make(map[string]netip.Addr)
@@ -237,7 +325,7 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 			if port < 1 || port > 65535 {
 				continue
 			}
-			key := peer.GetPeerId() + "\x00" + hostname + "\x00" + ip.String() + "\x00" + strconv.Itoa(port)
+			key := routeKey(peer.GetPeerId(), hostname, ip, port)
 			if route, ok := c.routes[key]; ok {
 				wanted[key], names[hostname] = route, route.address
 				continue
@@ -263,6 +351,9 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 			c.routes[key] = route
 			c.wg.Add(1)
 			go c.serveRoute(route)
+			if c.superseded() {
+				return coordinatorOperationFailure("native_listener", errSuperseded)
+			}
 		}
 	}
 	// <name>.<domain> opens the named port unless a machine has that name: the machine wins.
@@ -316,6 +407,9 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 	} else {
 		c.browserPending = false
 	}
+	if c.superseded() {
+		return coordinatorOperationFailure("native_listener", errSuperseded)
+	}
 	// One policy transaction for every listener acquired above (one WFP Apply for N peers on Windows; Windows test machine
 	// with ~20 peers timed out applying one per acquire). Until it lands the new addresses stay denied.
 	if err := nameClient.ApplyPolicy(ctx); err != nil {
@@ -364,7 +458,7 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 		var causes []error
 		// One policy change for all of them; each close below then finds its lease already gone. A change per
 		// listener took 350 ms each at 1000 machines, so a few machines leaving outlasted the reconcile.
-		if batch, ok := nameClient.(interface {
+		if batch, ok := client.(interface {
 			ReleaseMachines(context.Context, []netip.AddrPort) error
 		}); ok && len(removedRoutes) > 1 {
 			var listeners []netip.AddrPort
@@ -381,15 +475,14 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 		}
 		return coordinatorFailure("removed local routes could not close", causes...)
 	})
-	select {
-	case <-cleanup.done:
-	case <-ctx.Done():
+	if !c.awaitCleanup(ctx, cleanup) {
 		c.resetNameGenerationLocked(ctx)
-		return errors.Join(ctx.Err(), context.Cause(ctx))
+		return errors.Join(context.DeadlineExceeded, context.Cause(ctx))
 	}
 
 	c.routes = wanted
 	c.webRoutes = wantedWeb
+	c.setupPartial = false
 	return nil
 }
 
@@ -428,10 +521,7 @@ func (c *Coordinator) resetNameGenerationLocked(ctx context.Context) {
 		}
 		return coordinatorFailure("local access generation could not close", causes...)
 	})
-	select {
-	case <-cleanup.done:
-	case <-ctx.Done():
-	}
+	c.awaitCleanup(ctx, cleanup)
 
 }
 
@@ -473,8 +563,5 @@ func (c *Coordinator) cutWithdrawnDrainingLocked(ctx context.Context, peers []*d
 		}
 		return coordinatorFailure("withdrawn local forwards could not close", causes...)
 	})
-	select {
-	case <-cleanup.done:
-	case <-ctx.Done():
-	}
+	c.awaitCleanup(ctx, cleanup)
 }

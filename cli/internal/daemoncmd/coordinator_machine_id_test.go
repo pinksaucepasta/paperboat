@@ -39,6 +39,7 @@ func TestCoordinatorResolvesAMachineWithANewIDToTheAddressItsListenerHolds(t *te
 		t.Fatal(err)
 	}
 	c.ctx, c.cancel = context.WithCancel(t.Context())
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	peer := func(id string) []*daemonrpc.PeerUpdate {
 		return []*daemonrpc.PeerUpdate{{PeerId: id, Alias: "test-s09h", AssignedIp: "127.100.0.7", Approved: true, Online: true, ExportedPorts: []int32{8080}}}

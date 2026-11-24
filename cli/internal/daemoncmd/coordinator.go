@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -43,6 +44,13 @@ type Coordinator struct {
 	connections       chan struct{}
 	wg                sync.WaitGroup
 	snapshotMu        sync.Mutex
+	queueMu           sync.Mutex
+	queued            *reconcileRequest // the newest snapshot waiting for the running reconcile (guarded by queueMu)
+	reconciling       bool              // guarded by queueMu
+	queueCtx          context.Context   // ctx and cancel again, readable while a reconcile holds mu (guarded by queueMu)
+	queueCancel       context.CancelFunc
+	publishedPending  atomic.Pointer[[2]string] // step and detail as last read, for readers while a setup holds mu
+	setupPartial      bool                      // a reconcile ended before it finished (guarded by mu)
 	reconcileErr      error
 	inventoryMu       sync.Mutex
 	inventoryRevision uint64
@@ -163,6 +171,9 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 	// original failure remains observable rather than disappearing on restart.
 	defer func() { c.observe(parent, "lifecycle", cleanupErr) }()
 	c.ctx, c.cancel = context.WithCancel(parent)
+	c.queueMu.Lock()
+	c.queueCtx, c.queueCancel = c.ctx, c.cancel
+	c.queueMu.Unlock()
 	c.mu.Unlock()
 	if c.cfg.ConnectNameClient != nil {
 		connectCtx, cancel := context.WithTimeout(parent, connectTimeout)
@@ -230,19 +241,28 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	if c == nil {
 		return errors.New("local access coordinator is unavailable")
 	}
+	request, err := c.queueMachines(ctx, machines, services)
+	if request == nil {
+		return err
+	}
+	return request.wait(ctx)
+}
+
+// queueMachines never waits for a running reconcile, so a withdrawal reaches it at once.
+func (c *Coordinator) queueMachines(ctx context.Context, machines []api.UserMachine, services []api.MachineServicesMachine) (*reconcileRequest, error) {
 	c.inventoryMu.Lock()
 	defer c.inventoryMu.Unlock()
-	c.mu.Lock()
-	parent := c.ctx
-	c.mu.Unlock()
+	c.queueMu.Lock()
+	parent := c.queueCtx
+	c.queueMu.Unlock()
 	if parent == nil {
-		return errors.New("local access coordinator is not running")
+		return nil, errors.New("local access coordinator is not running")
 	}
 	if parent.Err() != nil {
-		return parent.Err()
+		return nil, parent.Err()
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	c.inventoryMachines = slices.Clone(machines)
 	claimMachines := make([]string, 0, len(machines))
@@ -263,10 +283,6 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	for _, m := range machines {
 		machineAliases[strings.ToLower(m.Alias)] = true
 	}
-	c.mu.Lock()
-	c.claimMachines = claimMachines
-	c.portNames, c.machineAliases = byID, machineAliases
-	c.mu.Unlock()
 	peers := make([]*daemonrpc.PeerUpdate, 0, len(machines))
 	for _, m := range machines {
 		if m.AssignedIP == "" || !m.NetworkApproved || !m.Online || m.State != "online" {
@@ -286,7 +302,7 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	}
 	c.inventoryRevision++
 	revision := c.inventoryRevision
-	return c.reconcileSnapshot(ctx, peers, revision)
+	return c.queueSnapshot(peers, revision, &machineNames{claimMachines, byID, machineAliases}), nil
 }
 
 func (c *Coordinator) reportReconcileError(err error) {
@@ -409,10 +425,109 @@ func (c *Coordinator) applySnapshot(peers []*daemonrpc.PeerUpdate, revision uint
 	_ = c.reconcileSnapshot(parent, peers, revision)
 }
 
+// machineNames is the inventory part of a snapshot, applied with it.
+type machineNames struct {
+	claimMachines  []string
+	portNames      map[string]api.MachineServicesMachine
+	machineAliases map[string]bool
+}
+
+// reconcileRequest is one queued snapshot and everyone waiting for it.
+type reconcileRequest struct {
+	peers    []*daemonrpc.PeerUpdate
+	revision uint64
+	names    *machineNames
+	done     chan struct{}
+	err      error
+	left     atomic.Bool // a caller stopped waiting: the inventory is told when the setup ends
+}
+
+// reconcileSnapshot queues peers and waits for its result until ctx ends. One reconcile runs at a time; snapshots that
+// arrive meanwhile collapse into the newest, and no caller's deadline cuts the running one (a guard call cut halfway
+// drops the guard connection and every listener on it).
 func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
-	c.snapshotMu.Lock()
-	defer c.snapshotMu.Unlock()
-	return c.reconcileSnapshotLocked(ctx, peers, revision)
+	return c.queueSnapshot(peers, revision, nil).wait(ctx)
+}
+
+func (c *Coordinator) queueSnapshot(peers []*daemonrpc.PeerUpdate, revision uint64, names *machineNames) *reconcileRequest {
+	c.queueMu.Lock()
+	defer c.queueMu.Unlock()
+	if c.queued == nil {
+		c.queued = &reconcileRequest{done: make(chan struct{})}
+	}
+	c.queued.peers, c.queued.revision = peers, revision
+	if names != nil {
+		c.queued.names = names
+	}
+	request := c.queued
+	if !c.reconciling {
+		c.reconciling = true
+		go c.runReconciles()
+	}
+	return request
+}
+
+func (r *reconcileRequest) wait(ctx context.Context) error {
+	select {
+	case <-r.done:
+		return r.err
+	case <-ctx.Done():
+		r.left.Store(true)
+		select {
+		case <-r.done:
+			return r.err
+		default:
+		}
+		return coordinatorOperationFailure("local_access_setup", ctx.Err())
+	}
+}
+
+func (c *Coordinator) runReconciles() {
+	for {
+		c.queueMu.Lock()
+		request := c.queued
+		c.queued = nil
+		if request == nil {
+			c.reconciling = false
+			c.queueMu.Unlock()
+			return
+		}
+		c.queueMu.Unlock()
+		c.mu.Lock()
+		ctx := c.ctx
+		if names := request.names; names != nil {
+			c.claimMachines, c.portNames, c.machineAliases = names.claimMachines, names.portNames, names.machineAliases
+		}
+		c.mu.Unlock()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		c.snapshotMu.Lock()
+		started := time.Now()
+		diagnosticlog.TryDebug("local access setup started", "revision", request.revision, "machines", len(request.peers))
+		request.err = c.reconcileSnapshotLocked(ctx, request.peers, request.revision)
+		var operation coordinatorOperationError
+		step := ""
+		if errors.As(request.err, &operation) {
+			step = operation.LocalAccessStep()
+		}
+		diagnosticlog.TryDebug("local access setup ended", "revision", request.revision, "duration_ms", time.Since(started).Milliseconds(), "step", step, "error", request.err)
+		c.snapshotMu.Unlock()
+		close(request.done)
+		if request.left.Load() {
+			select {
+			case c.accessChanged <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// superseded reports whether a snapshot different from the running one waits.
+func (c *Coordinator) superseded() bool {
+	c.queueMu.Lock()
+	defer c.queueMu.Unlock()
+	return c.queued != nil && !slices.EqualFunc(c.lastPeers, c.queued.peers, samePeer)
 }
 
 func (c *Coordinator) reconcileSnapshotLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
@@ -538,9 +653,23 @@ func samePeer(a, b *daemonrpc.PeerUpdate) bool {
 
 // PendingLocalAccessStep names the local access step still being retried after the last reconciliation
 // reported success with browser URLs off (the browser certificate), or "" when nothing is pending.
-func (c *Coordinator) PendingLocalAccessStep() string {
-	c.mu.Lock()
+func (c *Coordinator) PendingLocalAccessStep() string { return c.pendingLocalAccess()[0] }
+
+// pendingLocalAccess never waits for a running setup, which holds mu: it then answers what the last one left.
+func (c *Coordinator) pendingLocalAccess() [2]string {
+	if !c.mu.TryLock() {
+		if last := c.publishedPending.Load(); last != nil {
+			return *last
+		}
+		return [2]string{}
+	}
 	defer c.mu.Unlock()
+	pending := [2]string{c.pendingStepLocked(), c.pendingDetailLocked()}
+	c.publishedPending.Store(&pending)
+	return pending
+}
+
+func (c *Coordinator) pendingStepLocked() string {
 	if c.namesRefused {
 		return "machine_names"
 	}
@@ -564,9 +693,9 @@ func (c *Coordinator) PendingLocalAccessStep() string {
 
 // PendingLocalAccessDetail is what the OS says about the pending step (the program that owns the gateway port),
 // or "" when it cannot tell.
-func (c *Coordinator) PendingLocalAccessDetail() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Coordinator) PendingLocalAccessDetail() string { return c.pendingLocalAccess()[1] }
+
+func (c *Coordinator) pendingDetailLocked() string {
 	if c.browserGatewayBusy || c.browserHTTPBusy {
 		return c.browserGatewayOwner
 	}
@@ -610,9 +739,7 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemo
 		if parent == nil {
 			return errors.New("local access coordinator is not running")
 		}
-		ctx, cancel := context.WithTimeout(parent, c.cfg.ReconcileTimeout)
-		err := c.replaceGuardedRoutes(ctx, localPeers)
-		cancel()
+		err := c.replaceGuardedRoutes(parent, localPeers)
 		if err != nil {
 			err = errors.Join(err, skipped)
 			c.reportReconcileError(fmt.Errorf("local machine access withdrawn; retry after repairing the machine guard or browser trust: %w", err))
@@ -659,6 +786,12 @@ func (c *Coordinator) Stop() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer shutdownCancel()
 	c.resetReconcileRetry()
+	c.queueMu.Lock()
+	if c.queueCancel != nil {
+		c.queueCancel() // ends a running reconcile, which holds mu
+	}
+	c.queueCtx, c.queueCancel = nil, nil
+	c.queueMu.Unlock()
 	c.mu.Lock()
 	server, listener, cancel := c.rpcServer, c.rpcListener, c.cancel
 	c.rpcServer, c.rpcListener, c.ctx, c.cancel, c.running = nil, nil, nil, nil, false

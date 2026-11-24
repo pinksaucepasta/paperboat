@@ -289,6 +289,10 @@ func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guarde
 		if served[port] {
 			continue
 		}
+		if c.superseded() {
+			c.browserPortsPending = true
+			return
+		}
 		listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, port)
 		if errors.Is(err, machineguard.ErrPortInUse) {
 			// Another program (sshd on 22) or a Windows excluded port range owns the port: permanent, like a

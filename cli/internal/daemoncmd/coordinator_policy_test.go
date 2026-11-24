@@ -28,6 +28,7 @@ func TestCoordinatorAppliesTheGuardPolicyOncePerReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	if err := c.replaceGuardedRoutes(t.Context(), manyPeers(20)); err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func TestCoordinatorFailedGuardPolicyWithdrawsTheNewListeners(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
+	c.queueCtx = c.ctx
 	defer c.Stop()
 	err = c.replaceGuardedRoutes(t.Context(), manyPeers(3))
 	var operation coordinatorOperationError
