@@ -210,6 +210,13 @@ func (a *Authority) budgeted() bool { return budgetedEngine(a) }
 
 var budgetedEngine = func(a *Authority) bool { return a.options.Self.Role != "cli" }
 
+// inForce reports whether the configuration of this generation is the one loaded in this process.
+func (a *Authority) inForce(generation uint64) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.current != nil && a.current.Generation == generation
+}
+
 // refresh renews the signed configuration. A non-zero since is satisfied without a request by a renewal
 // that sent its request after since: the server signed that configuration after anything committed before.
 func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.Time) error {
@@ -244,8 +251,9 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		request.Endpoints = a.endpointReportDue()
 		request.HomeRelay = a.homeRelayReport()
 		request.Authority = api.PeerNetworkAuthorityUntilRevoked
-		if !full {
-			request.BaseGeneration = peernetwork.ConfigurationGeneration(held)
+		// A base is named only for the configuration in force here: a restarted process has it on disk but not loaded.
+		if generation := peernetwork.ConfigurationGeneration(held); !full && a.inForce(generation) {
+			request.BaseGeneration = generation
 		}
 		result, err = client.PeerNetworkConfiguration(ctx, request)
 		a.renewalFailing.Store(err != nil) // every renewal path (Run, Refresh, admission) says whether Paperboat answered
@@ -265,6 +273,9 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		if result.Unchanged {
 			if full {
 				return refused("unchanged answer to a request without a base")
+			}
+			if !a.inForce(request.BaseGeneration) {
+				continue // dropped while the request ran: nothing here for "unchanged" to keep
 			}
 			// Nothing changed since the held configuration: it, its candidates and its grants stand.
 			if a.options.OnAuthority != nil {
