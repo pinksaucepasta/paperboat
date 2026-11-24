@@ -107,7 +107,7 @@ func (s unixSweep) settleInventory(ctx context.Context, check bool) error {
 		}
 	}
 	if !check && len(findings) > 0 {
-		s.removeFindings(ctx, findings)
+		s.removeFindings(ctx, findings, sources.Active)
 		// An install that finished meanwhile removed its journal: read the sources again, never name a gone journal.
 		if sources, err = s.sources(ctx); err != nil {
 			return withPurgeStage("final_inventory", err)
@@ -118,7 +118,7 @@ func (s unixSweep) settleInventory(ctx context.Context, check bool) error {
 		// A draining generation owned its files in the first scan and exited before the second: its
 		// definitions are plain leftovers now, with no process left to stop. Remove them once more.
 		if files := fileFindings(findings); len(files) > 0 {
-			s.removeFindings(ctx, files)
+			s.removeFindings(ctx, files, sources.Active)
 			if findings, err = s.versionLeftovers(ctx, sources); err != nil {
 				return withPurgeStage("final_inventory", err)
 			}
@@ -146,7 +146,7 @@ func fileFindings(findings []inventoryFinding) []inventoryFinding {
 	return files
 }
 
-func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFinding) {
+func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFinding, active string) {
 	var units []string
 	var processes []unixProcess
 	for _, finding := range findings {
@@ -170,19 +170,27 @@ func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFindi
 		_ = s.reloadUnits(ctx, units)
 	}
 	_ = s.stopTargets(ctx, processes)
-	// A fixed role that ran a replaced image comes back on the current one.
-	// launchd's KeepAlive and the user unit's Restart=always do that already;
-	// a system unit with Restart=on-failure (the guard) needs a start.
+	// A fixed role that ran a replaced image comes back on the current one. launchd's KeepAlive and the user
+	// unit's Restart=always do that already. Roles restarted only on failure need a start, because a signal
+	// ends them cleanly: the guard's unit and, on both platforms, the active generation's own units.
 	var restart []string
 	for _, process := range processes {
 		unit := process.unit
-		if s.plan.platform == "linux" && process.stale && strings.HasPrefix(unit, "paperboat") &&
-			generationToken(unit) == "" && unit != "paperboatd.service" && !containsString(restart, unit) {
+		if !process.stale || unit == "" || containsString(restart, unit) {
+			continue
+		}
+		generation := generationToken(unit)
+		activeUnit := generation != "" && strings.HasPrefix(active, generation) && ownsInstance(unit, s.plan.instance)
+		if activeUnit || s.plan.platform == "linux" && strings.HasPrefix(unit, "paperboat") && generation == "" && unit != "paperboatd.service" {
 			restart = append(restart, unit)
 		}
 	}
 	for _, unit := range restart {
-		if err := s.run(ctx, "/usr/bin/systemctl", "start", unit); err != nil {
+		command := []string{"/usr/bin/systemctl", "start", unit}
+		if s.plan.platform == "darwin" {
+			command = []string{"/bin/launchctl", "kickstart", "system/" + unit}
+		}
+		if err := s.run(ctx, command[0], command[1:]...); err != nil {
 			observeRuntimeFailure(ctx, "install", runtimeFailure("restarting a replaced role failed", err))
 		}
 	}

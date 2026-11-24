@@ -170,6 +170,35 @@ func TestInstallInventoryUpgradeRemovesThePreviousVersion(t *testing.T) {
 	}
 }
 
+// A failed same-build update left hostd on a replaced image: the inventory's SIGTERM ended it with exit 0, which
+// launchd and systemd do not restart, and the machine stayed offline (support_31ae3a24).
+func TestInstallInventoryStartsTheActiveHostdItStopped(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	for _, test := range []struct{ platform, active, unit, want string }{
+		{"linux", digestA, "paperboat-hostd-u1001-" + digestA[:32] + ".service", "/usr/bin/systemctl start "},
+		{"darwin", digestA, "com.pinksaucepasta.paperboat.hostd.u1001." + digestA[:32], "/bin/launchctl kickstart system/"},
+		{"darwin", digestB, "com.pinksaucepasta.paperboat.hostd.u1001." + digestA[:32], ""},
+		{"darwin", digestA, "com.pinksaucepasta.paperboat.hostd.u1002." + digestA[:32], ""},
+		{"darwin", digestA, "com.pinksaucepasta.paperboat.updated.u1001", ""},
+	} {
+		process := unixProcess{pid: 4001, ppid: 1, exe: invRoot + "/bin/pb", stale: true, started: activated, unit: test.unit}
+		plan, err := newUnixPurgePlan(test.platform, 1001)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake := newPurgeFake(process)
+		fake.termExits[4001] = true
+		testSweep(t.TempDir(), plan, fake).removeFindings(context.Background(), []inventoryFinding{{process: &process}}, test.active)
+		var want []string
+		if test.want != "" {
+			want = []string{test.want + test.unit}
+		}
+		if len(fake.alive) != 0 || strings.Join(fake.commands, "\n") != strings.Join(want, "\n") {
+			t.Errorf("%s %s: commands %v want %v", test.platform, test.unit, fake.commands, want)
+		}
+	}
+}
+
 // An upgrade that failed midway was restored to A: the candidate B started
 // after A's activation, so it is not a draining generation and goes.
 func TestInstallInventoryFailedMidwayUpgradeRemovesTheCandidate(t *testing.T) {
