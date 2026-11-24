@@ -3,8 +3,10 @@
 package hostruntimecmd
 
 import (
+	"context"
 	"errors"
 	"io"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -66,5 +68,17 @@ func TestUpdateCountsSSHConnectionsIntoThisMachine(t *testing.T) {
 		if (err != nil) != test.wantErr || got != test.want {
 			t.Fatalf("%s: %+v, %v", test.name, got, err)
 		}
+	}
+}
+
+// A failed daemon restart during an update was reported as "exit status 1" alone (support_31ae3a24).
+func TestUpdateProbeFailureCarriesTheChildsReason(t *testing.T) {
+	_, err := runUpdateProbe(context.Background(), exec.Command("/bin/sh", "-c", `printf 'launchctl: \033[31mdeadline\n exceeded\n' >&2; exit 1`))
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || !strings.Contains(err.Error(), "probe failed: launchctl: [31mdeadline exceeded") || strings.Contains(err.Error(), "\033") {
+		t.Fatalf("restart failure: %q", err)
+	}
+	if body, err := runUpdateProbe(context.Background(), exec.Command("/bin/sh", "-c", "echo note >&2; echo ok")); err != nil || string(body) != "ok\n" {
+		t.Fatalf("successful probe: %q %v", body, err)
 	}
 }

@@ -12,8 +12,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
@@ -106,15 +109,32 @@ func (p *unixUpdateParticipants) run(ctx context.Context, flags ...string) ([]by
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Credential: &syscall.Credential{Uid: uint32(owner.UID), Gid: uint32(owner.GID), Groups: []uint32{uint32(owner.GID)}}}
 	command.Cancel = func() error { return syscall.Kill(-command.Process.Pid, syscall.SIGKILL) }
 	command.WaitDelay = time.Second
+	return runUpdateProbe(ctx, command)
+}
+
+func runUpdateProbe(ctx context.Context, command *exec.Cmd) ([]byte, error) {
 	var output boundedUpdateProbeOutput
 	command.Stdout = &output
-	// The fixed child has no user output consumer. Return a bounded typed
-	// failure rather than forwarding arbitrary user-service diagnostics.
-	command.Stderr = io.Discard
+	// The child runs as the user, so its text is bounded and stripped before it joins the updater's error.
+	reason := &tailBuffer{limit: 2048}
+	command.Stderr = reason
 	if err := command.Run(); err != nil {
-		return nil, errors.Join(errors.New("enrolled daemon update probe failed"), err, ctx.Err())
+		failure := errors.New("enrolled daemon update probe failed")
+		if text := printableLine(reason.String()); text != "" {
+			failure = errors.New("enrolled daemon update probe failed: " + text)
+		}
+		return nil, errors.Join(failure, err, ctx.Err())
 	}
 	return output.Bytes(), nil
+}
+
+func printableLine(text string) string {
+	return strings.Map(func(r rune) rune {
+		if r != utf8.RuneError && unicode.IsPrint(r) {
+			return r
+		}
+		return -1
+	}, strings.Join(strings.Fields(text), " "))
 }
 
 type boundedUpdateProbeOutput struct{ buffer bytes.Buffer }
