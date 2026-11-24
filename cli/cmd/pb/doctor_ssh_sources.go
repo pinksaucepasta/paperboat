@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 	"time"
 
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
@@ -47,7 +48,7 @@ func loopbackBindable(source netip.Addr) bool {
 func doctorSSHPortCheck(ctx context.Context) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "local", Code: "managed_ssh_port", Status: doctorpkg.StatusPass, Summary: "The configured SSH port is in use."}
 	port, set := configuredSSHTargetPort()
-	if !set || port == 22 {
+	if !set || port == 22 || runtime.GOOS == "windows" { // Windows serves its installed sshd generation's port, not this one
 		check.Summary = "Managed SSH uses the default port."
 		return check
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
@@ -51,7 +52,8 @@ func TestDoctorWarnsWhenNothingAnswersOnTheConfiguredSSHPort(t *testing.T) {
 		t.Fatalf("answering port: %+v", check)
 	}
 	_ = listener.Close()
-	if check := doctorSSHPortCheck(t.Context()); check.Status != doctorpkg.StatusWarning || check.Recovery == "" {
+	wantWarning := runtime.GOOS != "windows"
+	if check := doctorSSHPortCheck(t.Context()); (check.Status == doctorpkg.StatusWarning && check.Recovery != "") != wantWarning {
 		t.Fatalf("silent port: %+v", check)
 	}
 }
