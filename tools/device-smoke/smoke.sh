@@ -557,12 +557,6 @@ test_application_pairs() {
           continue
         fi ;;
       esac
-      case "$kind" in exec-ssh-after-restart)
-        if [ "$source" = "$MACOS_TARGET" ] || [ "$source" = "$WINDOWS_TARGET" ]; then
-          record "$id" SKIP 0 "own-daemon-restart answer inside 5 s fails on the fixed build too on Mac and Windows (newchecks/MAC-XYZ.md, WIN-REPRUN.md); proven on Linux only"
-          continue
-        fi ;;
-      esac
       case "$kind" in ssh-port-change)
         if [ "$target" = "$MACOS_TARGET" ]; then
           record "$id" SKIP 0 "pb config set cannot run through pb exec on a Mac (login keychain locked, no login session)"
@@ -1346,6 +1340,7 @@ test_application_pairs ssh-main ssh_lifecycle.py
 test_application_pairs ssh-tools ssh_tools_lifecycle.py
 test_application_pairs transfer-multi transfer_lifecycle.py
 test_application_pairs transfer-resume transfer_resume.py
+# Open product bug: on Mac and Windows sources the own-daemon-restart answer takes over 5 s (red until fixed; newchecks/MAC-XYZ.md, WIN-REPRUN.md).
 test_application_pairs exec-ssh-after-restart exec_ssh_after_restart.py  # restarts the source's daemon
 test_application_pairs ssh-port-change ssh_port_change.py
 test_application_pairs transfer-large transfer_large.py
