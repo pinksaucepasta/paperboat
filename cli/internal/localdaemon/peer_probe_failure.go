@@ -7,11 +7,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 func peerProbeFailure(ctx context.Context, err error) error {
 	if nativeProbeAuthorityDenied(err) {
 		errorreport.Current().Observe(ctx, "paperboatd", "peer_probe", "rejected", -1)
+		// The 403 hides which authority check refused the probe.
+		diagnosticlog.TryWarn("peer probe authority denied", "error", err)
 		return localapi.PermissionFailure(err)
 	}
 	if !errorreport.HTTPAttemptObserved(err) {
