@@ -196,8 +196,6 @@ the useful set for tunnels and custom domains.
   descriptor (an optional field becomes required; client and server deploy together), tunnel config snapshot
   (hash-relevant field tags and two diverging validators must become one). Also still to check: inspector, tunnel view
   types, config assignment.
-- **Crash-loop restart backoff and candidate-rendered service units** — landing before launch if the device proof
-  passes; otherwise first item after launch (branches `restart-backoff-reapply`, `t3/d55d53e1-candidate-units`).
 - **Errors back to Sentry on 2026-12-02** when the free quota resets (private ops runbook),
   then remove GlitchTip. Paid Sentry plan once Paperboat earns money. Until then GlitchTip takes errors only; Sentry logs,
   traces, release health and cron monitors are paused.
