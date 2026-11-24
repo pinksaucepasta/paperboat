@@ -576,7 +576,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		freshInfo, resolveErr := freshResolver.Resolve(reconnectCtx, reconnectRequest)
 		resolveEnd(resolveErr)
 		if resolveErr != nil {
-			return resolver.ConnectInfo{}, reconnectResolveError(resolveErr)
+			return resolver.ConnectInfo{}, sessionResolveError(reconnectCtx, backend, info.MachineID, terminalSessionID, resolveErr)
 		}
 		if freshInfo.Terminal != nil {
 			prepareTarget(freshInfo.Terminal)

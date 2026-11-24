@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"reflect"
@@ -41,5 +42,36 @@ func TestRefusedGrantEndsTheCommandWithAccessEnded(t *testing.T) {
 	message := commandFailureMessage(ended, classifyCommandFailure(ended))
 	if !strings.HasPrefix(message, "access ended: ") {
 		t.Fatalf("message %q", message)
+	}
+}
+
+type adoptAnswer struct{ err error }
+
+func (a adoptAnswer) AdoptOfflineTerminalSession(context.Context, string, string) (api.TerminalSession, error) {
+	return api.TerminalSession{}, a.err
+}
+
+// A redial of a session opened offline and not registered yet got 404 and ended the terminal for good (F3-18).
+func TestUnregisteredOfflineSessionKeepsReconnecting(t *testing.T) {
+	missing := &api.APIError{Status: http.StatusNotFound, Code: "terminal_session_not_found"}
+	for name, test := range map[string]struct {
+		session string
+		resolve error
+		adopt   error
+		ends    bool
+	}{
+		"registered now":       {"terminal_offline_a", missing, nil, false},
+		"machine restarting":   {"terminal_offline_a", missing, &api.APIError{Status: http.StatusConflict, Code: "machine_offline"}, false},
+		"host not ready":       {"terminal_offline_a", missing, missing, false},
+		"closed elsewhere":     {"terminal_offline_a", missing, &api.APIError{Status: http.StatusConflict, Code: "terminal_session_name_conflict"}, true},
+		"access refused":       {"terminal_offline_a", missing, &api.APIError{Status: http.StatusForbidden, Code: "machine_revoked"}, true},
+		"machine gone":         {"terminal_offline_a", &api.APIError{Status: http.StatusNotFound, Code: "user_machine_not_found"}, nil, true},
+		"session of Paperboat": {"terminal_a", missing, nil, true},
+	} {
+		got := sessionResolveError(context.Background(), adoptAnswer{test.adopt}, "machine_1", test.session, test.resolve)
+		var ended accessEndedError
+		if errors.As(got, &ended) != test.ends {
+			t.Errorf("%s: %v, want ended=%v", name, got, test.ends)
+		}
 	}
 }

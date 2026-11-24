@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 type offlineSessionAdopter interface {
@@ -62,4 +63,32 @@ func adoptOfflineSession(ctx context.Context, client offlineSessionAdopter, mach
 		defer cancel()
 		try(last)
 	}
+}
+
+// sessionResolveError is reconnectResolveError for a connect's own session. Paperboat not knowing a session opened
+// without it only means it is not registered yet: it is registered now and the redial goes on. A session closed
+// elsewhere keeps its id (conflict) and a refused machine refuses the registration too; both end the terminal.
+func sessionResolveError(ctx context.Context, client offlineSessionAdopter, machineID, sessionID string, err error) error {
+	if !resolver.IsOfflineTerminalSessionID(sessionID) || apiErrorCode(err) != "terminal_session_not_found" {
+		return reconnectResolveError(err)
+	}
+	_, adoptErr := client.AdoptOfflineTerminalSession(ctx, machineID, sessionID)
+	switch apiErrorCode(adoptErr) {
+	case "terminal_session_name_conflict":
+		return reconnectResolveError(err)
+	case "terminal_session_not_found": // a restarting host may not know its sessions yet
+		return err
+	}
+	if adoptErr != nil {
+		return reconnectResolveError(adoptErr)
+	}
+	return err
+}
+
+func apiErrorCode(err error) string {
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code
+	}
+	return ""
 }
