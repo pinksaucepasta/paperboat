@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 	"net/http"
+	goruntime "runtime"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // managedSSHService owns optional SSH initialization independently from the
@@ -25,6 +27,7 @@ type managedSSHService struct {
 	gate              server.CapabilityGate
 	initialize        func(context.Context) (Service, error)
 	cleanup           func(context.Context) error
+	retarget          func(context.Context)
 	interval, timeout time.Duration
 	mu                sync.Mutex
 	cancel            context.CancelFunc
@@ -33,7 +36,7 @@ type managedSSHService struct {
 	shutdownErr       error
 }
 
-func newProductionManagedSSH(controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, gate server.CapabilityGate, keyEvents *machineevents.Subscription, audit managedssh.SessionAudit) (*managedssh.Host, Service, error) {
+func newProductionManagedSSH(controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, registered func() (runtimeidentity.Registration, error), identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, gate server.CapabilityGate, keyEvents *machineevents.Subscription, audit managedssh.SessionAudit) (*managedssh.Host, Service, error) {
 	if registration.MachineID == "" || registration.InstallationGeneration < 1 || identity == nil || generation == 0 || gate == nil || keyEvents == nil {
 		return nil, nil, ErrProductionInvalid
 	}
@@ -48,9 +51,29 @@ func newProductionManagedSSH(controlURL string, transport http.RoundTripper, reg
 		return nil, nil, err
 	}
 	service := &managedSSHService{gate: gate, interval: 5 * time.Second, timeout: 45 * time.Second, cleanup: func(ctx context.Context) error { return cleanupProductionManagedSSH(ctx, registration) }, initialize: func(ctx context.Context) (Service, error) {
-		return initializeProductionManagedSSH(ctx, host, controlURL, transport, registration, identity, generation, workerEpoch, keyEvents)
+		return initializeProductionManagedSSH(ctx, host, controlURL, transport, currentSSHPort(registration, registered), identity, generation, workerEpoch, keyEvents)
 	}}
+	if goruntime.GOOS != "windows" { // Windows serves the port of its installed sshd generation
+		service.retarget = func(ctx context.Context) {
+			target, ok := host.Target()
+			if port := currentSSHPort(registration, registered).SSHPort; ok && port != target.Port {
+				if _, err := host.ReconcileTarget(ctx, target.Generation, port); err != nil {
+					diagnosticlog.TryWarn("managed SSH keeps its previous port: the configured one does not answer", "port", port, "error", err)
+				}
+			}
+		}
+	}
 	return host, service, nil
+}
+
+// currentSSHPort is the startup registration with the port `pb config set ssh-target-port` last saved: the running
+// worker follows it without a restart.
+func currentSSHPort(registration runtimeidentity.Registration, registered func() (runtimeidentity.Registration, error)) runtimeidentity.Registration {
+	if current, err := registered(); err == nil && current.SSHPort != 0 &&
+		current.MachineID == registration.MachineID && current.InstallationGeneration == registration.InstallationGeneration {
+		registration.SSHPort = current.SSHPort
+	}
+	return registration
 }
 
 func (s *managedSSHService) Start(ctx context.Context) error {
@@ -158,6 +181,9 @@ func (s *managedSSHService) run(ctx context.Context) {
 			}
 		}
 		if authority != nil && !cleanupPending && s.gate.Enabled("ssh.v1") {
+			if s.retarget != nil {
+				s.retarget(ctx)
+			}
 			if provider, ok := authority.(capabilityHealthProvider); ok {
 				current := provider.CapabilityHealth()
 				s.mu.Lock()

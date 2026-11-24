@@ -313,6 +313,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 	probes = append(probes, doctorCarrierProbes()...)
 	probes = append(probes, doctorDependenciesOf(command.Context()).hostd()...)
 	probes = append(probes, doctorSSHSourceProbes()...)
+	probes = append(probes, doctorpkg.Probe{Code: "managed_ssh_port", Run: doctorSSHPortCheck})
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/netip"
+	"time"
 
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
@@ -37,4 +40,21 @@ func loopbackBindable(source netip.Addr) bool {
 	}
 	_ = listener.Close()
 	return true
+}
+
+// doctorSSHPortCheck reports a port set with `pb config set ssh-target-port` that no SSH server answers on. Every pb ssh
+// to this computer needs one; an unset or default port is the readiness check's business.
+func doctorSSHPortCheck(ctx context.Context) doctorpkg.Check {
+	check := doctorpkg.Check{Category: "local", Code: "managed_ssh_port", Status: doctorpkg.StatusPass, Summary: "The configured SSH port is in use."}
+	port, set := configuredSSHTargetPort()
+	if !set || port == 22 {
+		check.Summary = "Managed SSH uses the default port."
+		return check
+	}
+	if _, err := managedssh.ProbeLoopbackSSH(ctx, port, 3*time.Second); err != nil {
+		check.Status = doctorpkg.StatusWarning
+		check.Summary = fmt.Sprintf("No SSH server answers on port %d of this computer, the port Paperboat is set to use for pb ssh.", port)
+		check.Recovery = "Start the SSH server on that port, or set the right one with `pb config set ssh-target-port <port>`."
+	}
+	return check
 }
