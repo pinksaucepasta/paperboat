@@ -786,7 +786,7 @@ try {
       const rollback = await text('[data-alert="deploy:rolled-back"]')
       expect(rollback.includes("A deploy was rolled back automatically") && rollback.includes("Fix the cause and deploy again"), `rollback alert was: ${rollback}`)
       const cert = await text('[data-alert="edge-certificate:203.0.113.7"]')
-      expect(cert.includes("Certificate renewal is failing on 203.0.113.7") && cert.includes("renew.log"), `certificate alert was: ${cert}`)
+      expect(cert.includes("Certificate renewal is failing on 203.0.113.7") && cert.includes("pbh doctor"), `certificate alert was: ${cert}`)
       expect((await p.locator('[data-alert="edge-certificate:203.0.113.8"]').count()) === 0, "a healthy edge is not an alert")
       await p.keyboard.press("Escape")
     } finally {

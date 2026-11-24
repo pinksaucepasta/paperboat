@@ -17,7 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
-func TestCertificateDomainUsesConfiguredIssuerAndRenewalWindow(t *testing.T) {
+func TestCertificateDomainUsesConfiguredIssuerAndIsDueWhenItsWorkspaceDomainRenewed(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	row := dbsqlc.TunnelDomain{
 		ID:                          "dom_01",
@@ -31,26 +31,18 @@ func TestCertificateDomainUsesConfiguredIssuerAndRenewalWindow(t *testing.T) {
 		CertificateExpiresAt: sql.NullTime{Time: now.Add(20 * 24 * time.Hour), Valid: true},
 		Generation:           3,
 	}
-	for _, test := range []struct {
-		name        string
-		renewBefore time.Duration
-		due         bool
+	for name, test := range map[string]struct {
+		source sql.NullTime
+		due    bool
 	}{
-		{name: "short window", renewBefore: 15 * 24 * time.Hour, due: false},
-		{name: "long window", renewBefore: 60 * 24 * time.Hour, due: true},
+		"workspace domain holds the same certificate": {row.CertificateExpiresAt, false},
+		"workspace domain renewed":                    {sql.NullTime{Time: now.Add(44 * 24 * time.Hour), Valid: true}, true},
+		"workspace domain has no certificate":         {sql.NullTime{}, false},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			domain, err := certificateDomainWithConfig(row, nil, now, test.renewBefore, "acme.example")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if domain.Issuer != "acme.example" {
-				t.Fatalf("issuer = %q, want configured issuer", domain.Issuer)
-			}
-			if domain.RenewalDue != test.due {
-				t.Fatalf("renewal due = %v, want %v", domain.RenewalDue, test.due)
-			}
-		})
+		domain, err := certificateDomainWithConfig(row, nil, now, test.source, "acme.example")
+		if err != nil || domain.Issuer != "acme.example" || domain.RenewalDue != test.due {
+			t.Fatalf("%s: domain = %+v, %v; want due %v", name, domain, err, test.due)
+		}
 	}
 }
 
@@ -79,20 +71,21 @@ func TestCertificateDomainDistributionFailureDoesNotRequestRenewal(t *testing.T)
 		Hostname: "app.example.test", OwnershipChallengeReference: "dns-challenge://dom_01",
 		CertificateStrategy: "managed", CertificateReference: sql.NullString{String: "tcert_existing", Valid: true},
 		CertificateExpiresAt: sql.NullTime{Time: now.Add(89 * 24 * time.Hour), Valid: true}, Generation: 76}
+	source := row.CertificateExpiresAt
 	for _, state := range []string{"ready", "renewing", "failed"} {
 		row.CertificateState = state
-		domain, err := certificateDomainWithConfig(row, nil, now, 30*24*time.Hour, "letsencrypt")
+		domain, err := certificateDomainWithConfig(row, nil, now, source, "letsencrypt")
 		if err != nil || domain.RenewalDue {
 			t.Fatalf("state %s: due=%v err=%v", state, domain.RenewalDue, err)
 		}
 	}
 	row.CertificateExpiresAt.Time = now.Add(29 * 24 * time.Hour)
-	domain, err := certificateDomainWithConfig(row, nil, now, 30*24*time.Hour, "letsencrypt")
+	domain, err := certificateDomainWithConfig(row, nil, now, source, "letsencrypt")
 	if err != nil || !domain.RenewalDue {
-		t.Fatalf("renewal window: due=%v err=%v", domain.RenewalDue, err)
+		t.Fatalf("older copy: due=%v err=%v", domain.RenewalDue, err)
 	}
 	row.CertificateExpiresAt.Valid = false
-	domain, err = certificateDomainWithConfig(row, nil, now, 30*24*time.Hour, "letsencrypt")
+	domain, err = certificateDomainWithConfig(row, nil, now, source, "letsencrypt")
 	if err != nil || !domain.RenewalDue {
 		t.Fatalf("missing expiry: due=%v err=%v", domain.RenewalDue, err)
 	}
@@ -154,7 +147,7 @@ func TestCertificateWorkerRetriesPreviewPlacementWithoutExitingOnPostgres(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := NewCertificateWorker(f.database, coordinator, 30*24*time.Hour, time.Now)
+	worker, err := NewCertificateWorker(f.database, coordinator, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

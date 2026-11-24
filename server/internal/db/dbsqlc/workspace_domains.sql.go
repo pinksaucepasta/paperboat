@@ -52,7 +52,7 @@ SET dns_next_check_at = $1, verification_attempts = 0,
     certificate_attempts = CASE WHEN certificate_state = 'failed' THEN 0 ELSE certificate_attempts END,
     updated_at = $1
 WHERE id = $2
-RETURNING id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at
+RETURNING id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at
 `
 
 type CheckWorkspaceDomainNowParams struct {
@@ -88,6 +88,8 @@ func (q *Queries) CheckWorkspaceDomainNow(ctx context.Context, arg CheckWorkspac
 		&i.CreatedByActorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CertificateRenewalAt,
+		&i.CertificateRenewalCheckAt,
 	)
 	return i, err
 }
@@ -97,7 +99,7 @@ INSERT INTO workspace_domains (id, account_id, owner_team_id, hostname, challeng
 VALUES ($1, $2, $3, $4, $5,
         $6, $7, $7, $7)
 ON CONFLICT (hostname) DO NOTHING
-RETURNING id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at
+RETURNING id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at
 `
 
 type CreateWorkspaceDomainParams struct {
@@ -146,6 +148,8 @@ func (q *Queries) CreateWorkspaceDomain(ctx context.Context, arg CreateWorkspace
 		&i.CreatedByActorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CertificateRenewalAt,
+		&i.CertificateRenewalCheckAt,
 	)
 	return i, err
 }
@@ -163,7 +167,7 @@ func (q *Queries) DeleteWorkspaceDomain(ctx context.Context, id string) (int64, 
 }
 
 const getCoveringWorkspaceDomain = `-- name: GetCoveringWorkspaceDomain :one
-SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at FROM workspace_domains
+SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at FROM workspace_domains
 WHERE hostname IN ($1::text, $2::text)
   AND (($3::text IS NULL AND owner_team_id IS NULL AND account_id = $4)
     OR ($3::text IS NOT NULL AND owner_team_id = $3::text))
@@ -213,12 +217,14 @@ func (q *Queries) GetCoveringWorkspaceDomain(ctx context.Context, arg GetCoverin
 		&i.CreatedByActorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CertificateRenewalAt,
+		&i.CertificateRenewalCheckAt,
 	)
 	return i, err
 }
 
 const getWorkspaceDomain = `-- name: GetWorkspaceDomain :one
-SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at FROM workspace_domains
+SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at FROM workspace_domains
 WHERE id = $1
   AND (($2::text IS NULL AND owner_team_id IS NULL AND account_id = $3)
     OR ($2::text IS NOT NULL AND owner_team_id = $2::text))
@@ -259,12 +265,14 @@ func (q *Queries) GetWorkspaceDomain(ctx context.Context, arg GetWorkspaceDomain
 		&i.CreatedByActorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CertificateRenewalAt,
+		&i.CertificateRenewalCheckAt,
 	)
 	return i, err
 }
 
 const getWorkspaceDomainByHostname = `-- name: GetWorkspaceDomainByHostname :one
-SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at FROM workspace_domains WHERE hostname = $1
+SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at FROM workspace_domains WHERE hostname = $1
 `
 
 func (q *Queries) GetWorkspaceDomainByHostname(ctx context.Context, hostname string) (WorkspaceDomain, error) {
@@ -295,27 +303,39 @@ func (q *Queries) GetWorkspaceDomainByHostname(ctx context.Context, hostname str
 		&i.CreatedByActorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CertificateRenewalAt,
+		&i.CertificateRenewalCheckAt,
 	)
 	return i, err
 }
 
+const getWorkspaceDomainCertificateExpiry = `-- name: GetWorkspaceDomainCertificateExpiry :one
+SELECT certificate_expires_at FROM workspace_domains WHERE id = $1
+`
+
+func (q *Queries) GetWorkspaceDomainCertificateExpiry(ctx context.Context, id string) (sql.NullTime, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceDomainCertificateExpiry, id)
+	var certificate_expires_at sql.NullTime
+	err := row.Scan(&certificate_expires_at)
+	return certificate_expires_at, err
+}
+
 const listDueWorkspaceDomainCertificates = `-- name: ListDueWorkspaceDomainCertificates :many
-SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at FROM workspace_domains
+SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at FROM workspace_domains
 WHERE ownership_state = 'verified'
   AND (certificate_retry_at IS NULL OR certificate_retry_at <= $1)
-  AND (certificate_expires_at IS NULL OR certificate_expires_at <= $2)
-ORDER BY certificate_expires_at NULLS FIRST, id
-LIMIT $3
+  AND (certificate_expires_at IS NULL OR certificate_renewal_at <= $1)
+ORDER BY certificate_renewal_at NULLS FIRST, id
+LIMIT $2
 `
 
 type ListDueWorkspaceDomainCertificatesParams struct {
-	Now        sql.NullTime
-	RenewAfter sql.NullTime
-	RowLimit   int32
+	Now      sql.NullTime
+	RowLimit int32
 }
 
 func (q *Queries) ListDueWorkspaceDomainCertificates(ctx context.Context, arg ListDueWorkspaceDomainCertificatesParams) ([]WorkspaceDomain, error) {
-	rows, err := q.db.Query(ctx, listDueWorkspaceDomainCertificates, arg.Now, arg.RenewAfter, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listDueWorkspaceDomainCertificates, arg.Now, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -348,6 +368,8 @@ func (q *Queries) ListDueWorkspaceDomainCertificates(ctx context.Context, arg Li
 			&i.CreatedByActorID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CertificateRenewalAt,
+			&i.CertificateRenewalCheckAt,
 		); err != nil {
 			return nil, err
 		}
@@ -360,7 +382,7 @@ func (q *Queries) ListDueWorkspaceDomainCertificates(ctx context.Context, arg Li
 }
 
 const listDueWorkspaceDomainDNS = `-- name: ListDueWorkspaceDomainDNS :many
-SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at FROM workspace_domains
+SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at FROM workspace_domains
 WHERE dns_next_check_at <= $1
 ORDER BY dns_next_check_at, id
 LIMIT $2
@@ -405,6 +427,8 @@ func (q *Queries) ListDueWorkspaceDomainDNS(ctx context.Context, arg ListDueWork
 			&i.CreatedByActorID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CertificateRenewalAt,
+			&i.CertificateRenewalCheckAt,
 		); err != nil {
 			return nil, err
 		}
@@ -492,7 +516,7 @@ func (q *Queries) ListWorkspaceDomainUses(ctx context.Context, ids []string) ([]
 }
 
 const listWorkspaceDomains = `-- name: ListWorkspaceDomains :many
-SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at FROM workspace_domains
+SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at FROM workspace_domains
 WHERE ($1::text IS NULL AND owner_team_id IS NULL AND account_id = $2)
    OR ($1::text IS NOT NULL AND owner_team_id = $1::text)
 ORDER BY hostname
@@ -538,6 +562,68 @@ func (q *Queries) ListWorkspaceDomains(ctx context.Context, arg ListWorkspaceDom
 			&i.CreatedByActorID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CertificateRenewalAt,
+			&i.CertificateRenewalCheckAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceDomainsToPlanRenewal = `-- name: ListWorkspaceDomainsToPlanRenewal :many
+SELECT id, account_id, owner_team_id, hostname, challenge_reference, ownership_state, dns_failure_code, observed_records, dns_last_checked_at, dns_next_check_at, verification_attempts, verified_at, certificate_state, certificate_failure_code, certificate_attempts, certificate_retry_at, master_key_reference, certificate_ciphertext, private_key_ciphertext, certificate_fingerprint, certificate_expires_at, created_by_actor_id, created_at, updated_at, certificate_renewal_at, certificate_renewal_check_at FROM workspace_domains
+WHERE ownership_state = 'verified' AND certificate_expires_at IS NOT NULL
+  AND (certificate_renewal_check_at IS NULL OR certificate_renewal_check_at <= $1)
+ORDER BY certificate_renewal_check_at NULLS FIRST, id
+LIMIT $2
+`
+
+type ListWorkspaceDomainsToPlanRenewalParams struct {
+	Now      sql.NullTime
+	RowLimit int32
+}
+
+func (q *Queries) ListWorkspaceDomainsToPlanRenewal(ctx context.Context, arg ListWorkspaceDomainsToPlanRenewalParams) ([]WorkspaceDomain, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceDomainsToPlanRenewal, arg.Now, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkspaceDomain
+	for rows.Next() {
+		var i WorkspaceDomain
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.OwnerTeamID,
+			&i.Hostname,
+			&i.ChallengeReference,
+			&i.OwnershipState,
+			&i.DnsFailureCode,
+			&i.ObservedRecords,
+			&i.DnsLastCheckedAt,
+			&i.DnsNextCheckAt,
+			&i.VerificationAttempts,
+			&i.VerifiedAt,
+			&i.CertificateState,
+			&i.CertificateFailureCode,
+			&i.CertificateAttempts,
+			&i.CertificateRetryAt,
+			&i.MasterKeyReference,
+			&i.CertificateCiphertext,
+			&i.PrivateKeyCiphertext,
+			&i.CertificateFingerprint,
+			&i.CertificateExpiresAt,
+			&i.CreatedByActorID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CertificateRenewalAt,
+			&i.CertificateRenewalCheckAt,
 		); err != nil {
 			return nil, err
 		}
@@ -575,13 +661,38 @@ func (q *Queries) MarkWorkspaceDomainCertificateFailure(ctx context.Context, arg
 	return err
 }
 
+const setWorkspaceDomainRenewalPlan = `-- name: SetWorkspaceDomainRenewalPlan :exec
+UPDATE workspace_domains
+SET certificate_renewal_at = coalesce($1, certificate_renewal_at), certificate_renewal_check_at = $2
+WHERE id = $3 AND certificate_fingerprint = $4
+`
+
+type SetWorkspaceDomainRenewalPlanParams struct {
+	RenewalAt              sql.NullTime
+	CheckAt                sql.NullTime
+	ID                     string
+	CertificateFingerprint []byte
+}
+
+// Only the certificate that was asked about: a renewal finishing meanwhile wins.
+func (q *Queries) SetWorkspaceDomainRenewalPlan(ctx context.Context, arg SetWorkspaceDomainRenewalPlanParams) error {
+	_, err := q.db.Exec(ctx, setWorkspaceDomainRenewalPlan,
+		arg.RenewalAt,
+		arg.CheckAt,
+		arg.ID,
+		arg.CertificateFingerprint,
+	)
+	return err
+}
+
 const storeWorkspaceDomainCertificate = `-- name: StoreWorkspaceDomainCertificate :execrows
 UPDATE workspace_domains
 SET certificate_state = 'ready', certificate_failure_code = NULL, certificate_attempts = 0, certificate_retry_at = NULL,
     master_key_reference = $1, certificate_ciphertext = $2,
     private_key_ciphertext = $3, certificate_fingerprint = $4,
-    certificate_expires_at = $5, updated_at = $6
-WHERE id = $7 AND ownership_state = 'verified'
+    certificate_expires_at = $5, certificate_renewal_at = $6,
+    certificate_renewal_check_at = NULL, updated_at = $7
+WHERE id = $8 AND ownership_state = 'verified'
 `
 
 type StoreWorkspaceDomainCertificateParams struct {
@@ -590,6 +701,7 @@ type StoreWorkspaceDomainCertificateParams struct {
 	PrivateKeyCiphertext   []byte
 	CertificateFingerprint []byte
 	CertificateExpiresAt   sql.NullTime
+	CertificateRenewalAt   sql.NullTime
 	Now                    time.Time
 	ID                     string
 }
@@ -601,6 +713,7 @@ func (q *Queries) StoreWorkspaceDomainCertificate(ctx context.Context, arg Store
 		arg.PrivateKeyCiphertext,
 		arg.CertificateFingerprint,
 		arg.CertificateExpiresAt,
+		arg.CertificateRenewalAt,
 		arg.Now,
 		arg.ID,
 	)

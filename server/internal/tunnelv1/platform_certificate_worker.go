@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
 var (
@@ -97,10 +98,9 @@ type PlatformCertificateWorkerConfig struct {
 	IssuerName             string
 	OwnerID                string
 	Distributor            tunnelcert.CertificateDistributor
-	RenewBefore            time.Duration
+	Renewals               *certrenewal.Schedule
 	LockTTL                time.Duration
 	DistributionTimeout    time.Duration
-	ExpiryAlertWindow      time.Duration
 	MaxCertificateLifetime time.Duration
 	Now                    func() time.Time
 }
@@ -113,7 +113,7 @@ type PlatformCertificateWorker struct {
 	targets     []tunnelcert.PlatformCertificateTargetDefinition
 	coordinator *tunnelcert.Coordinator
 	edgeTargets PlatformEdgeTargetResolver
-	renewBefore time.Duration
+	renewals    *certrenewal.Schedule
 	issuerName  string
 	now         func() time.Time
 
@@ -158,20 +158,14 @@ func NewPlatformCertificateWorker(config PlatformCertificateWorkerConfig) (*Plat
 		IssuerName:             issuerName,
 		OwnerID:                config.OwnerID,
 		LockTTL:                config.LockTTL,
-		RenewBefore:            config.RenewBefore,
 		DistributionTimeout:    config.DistributionTimeout,
-		ExpiryAlertWindow:      config.ExpiryAlertWindow,
 		MaxCertificateLifetime: config.MaxCertificateLifetime,
 		Now:                    now,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: coordinator: %w", ErrPlatformCertificateUnavailable, err)
 	}
-	renewBefore := config.RenewBefore
-	if renewBefore <= 0 || renewBefore >= 365*24*time.Hour {
-		renewBefore = 30 * 24 * time.Hour
-	}
-	return &PlatformCertificateWorker{store: store, targets: definitions, coordinator: coordinator, edgeTargets: config.EdgeTargets, renewBefore: renewBefore, issuerName: issuerName, now: now}, nil
+	return &PlatformCertificateWorker{store: store, targets: definitions, coordinator: coordinator, edgeTargets: config.EdgeTargets, renewals: config.Renewals, issuerName: issuerName, now: now}, nil
 }
 
 func (w *PlatformCertificateWorker) LastError() error {
@@ -273,21 +267,21 @@ func (w *PlatformCertificateWorker) Reconcile(ctx context.Context, limit int) (i
 		// A failed attempt is durable. Do not hammer the issuer while an active
 		// LKG remains usable, but still call Ensure with RenewalDue=false so a
 		// newly replaced edge can receive that LKG immediately.
-		if target.NextRetryAt.After(now) && (!found || current.ExpiresAt.After(now)) {
-			if !found {
-				retryFailure = true
-				w.setLastError(platformRetryError(target.CertificateFailureCode))
-				continue
-			}
+		usable := found && current.ExpiresAt.After(now)
+		if target.NextRetryAt.After(now) && !usable {
+			retryFailure = true
+			w.setLastError(platformRetryError(target.CertificateFailureCode))
+			continue
 		}
-		domain := platformDomain(target, edges, now, w.renewBefore, w.issuerName)
+		domain := platformDomain(target, edges, w.issuerName)
 		if found {
 			domain.CertificateReference = current.CertificateReference
 			domain.CertificateGeneration = current.CertificateGeneration
-			domain.RenewalDue = !current.RenewalAt.After(now) || !current.ExpiresAt.After(now)
-			if target.NextRetryAt.After(now) && current.ExpiresAt.After(now) {
-				domain.RenewalDue = false
+			renewAt, err := w.coordinator.PlanRenewal(ctx, current, w.renewals, now)
+			if err != nil {
+				return changed, err
 			}
+			domain.RenewalDue = !usable || !renewAt.After(now) && !target.NextRetryAt.After(now)
 		} else {
 			domain.RenewalDue = true
 		}
@@ -351,13 +345,12 @@ func platformCertificateOperation(hadCurrent bool) string {
 	return "issue"
 }
 
-func platformDomain(target tunnelcert.PlatformCertificateTarget, edges []tunnelcert.EdgeTarget, now time.Time, renewBefore time.Duration, issuerName string) tunnelcert.Domain {
+func platformDomain(target tunnelcert.PlatformCertificateTarget, edges []tunnelcert.EdgeTarget, issuerName string) tunnelcert.Domain {
 	return tunnelcert.Domain{
 		ID: target.ID, AccountID: target.AccountID, TargetKind: tunnelcert.TargetPlatformWildcard,
 		Hostname: target.Hostname, ChallengeReference: target.ChallengeReference,
 		Generation: target.Generation, Strategy: tunnelcert.StrategyPlatformDNS01, CAAState: "unknown", CertificateReference: target.CertificateReference,
-		RenewalDue: target.CertificateExpiresAt.IsZero() || !target.CertificateExpiresAt.After(now.Add(renewBefore)),
-		Issuer:     issuerName, EdgeTargets: append([]tunnelcert.EdgeTarget(nil), edges...),
+		Issuer: issuerName, EdgeTargets: append([]tunnelcert.EdgeTarget(nil), edges...),
 	}
 }
 

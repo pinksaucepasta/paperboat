@@ -1715,73 +1715,6 @@ func (q *Queries) HasPendingTunnelDomainCreateOperationV1(ctx context.Context, a
 	return exists, err
 }
 
-const listDueTunnelCertificatesV1 = `-- name: ListDueTunnelCertificatesV1 :many
-SELECT id, domain_id, account_id, tunnel_id, hostname, domain_generation, certificate_generation, strategy, state, certificate_reference, master_key_reference, certificate_ciphertext, private_key_ciphertext, fingerprint, issuer, not_before, expires_at, renewal_at, failure_code, revoked_at, created_at, updated_at, leaf_hostname, target_kind, route_id, preview_id, preview_generation, preview_state, preview_expires_at, user_account_id
-FROM tunnel_certificate_records
-WHERE state = 'active'
-  AND target_kind = 'durable_route'
-  AND leaf_hostname IS NULL
-  AND renewal_at <= $1
-ORDER BY renewal_at, id
-LIMIT $2
-`
-
-type ListDueTunnelCertificatesV1Params struct {
-	Now      time.Time
-	RowLimit int32
-}
-
-func (q *Queries) ListDueTunnelCertificatesV1(ctx context.Context, arg ListDueTunnelCertificatesV1Params) ([]TunnelCertificateRecord, error) {
-	rows, err := q.db.Query(ctx, listDueTunnelCertificatesV1, arg.Now, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []TunnelCertificateRecord
-	for rows.Next() {
-		var i TunnelCertificateRecord
-		if err := rows.Scan(
-			&i.ID,
-			&i.DomainID,
-			&i.AccountID,
-			&i.TunnelID,
-			&i.Hostname,
-			&i.DomainGeneration,
-			&i.CertificateGeneration,
-			&i.Strategy,
-			&i.State,
-			&i.CertificateReference,
-			&i.MasterKeyReference,
-			&i.CertificateCiphertext,
-			&i.PrivateKeyCiphertext,
-			&i.Fingerprint,
-			&i.Issuer,
-			&i.NotBefore,
-			&i.ExpiresAt,
-			&i.RenewalAt,
-			&i.FailureCode,
-			&i.RevokedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.LeafHostname,
-			&i.TargetKind,
-			&i.RouteID,
-			&i.PreviewID,
-			&i.PreviewGeneration,
-			&i.PreviewState,
-			&i.PreviewExpiresAt,
-			&i.UserAccountID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPendingTunnelCertificateCleanupIDsV1 = `-- name: ListPendingTunnelCertificateCleanupIDsV1 :many
 SELECT DISTINCT certificate_id
 FROM tunnel_certificate_edge_distributions
@@ -2481,7 +2414,7 @@ WHERE d.id = $2 AND d.account_id = $3
   AND cert.certificate_generation = $6
   AND cert.certificate_reference = d.certificate_reference
   AND cert.certificate_reference = $7
-  AND cert.expires_at > $1 AND cert.renewal_at > $1
+  AND cert.expires_at > $1
   AND EXISTS (
     SELECT 1 FROM tunnel_route_ready_edges_v1 AS ready
     WHERE ready.account_id = d.account_id AND ready.tunnel_id = d.tunnel_id
@@ -2681,6 +2614,22 @@ func (q *Queries) RevokeTunnelPlatformCertificateV1(ctx context.Context, arg Rev
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setPlatformCertificateRenewalAt = `-- name: SetPlatformCertificateRenewalAt :exec
+UPDATE tunnel_certificate_records SET renewal_at = $1
+WHERE id = $2 AND target_kind = 'platform_wildcard' AND state = 'active'
+`
+
+type SetPlatformCertificateRenewalAtParams struct {
+	RenewalAt time.Time
+	ID        string
+}
+
+// updated_at stays: it is what the edges' copies are compared with.
+func (q *Queries) SetPlatformCertificateRenewalAt(ctx context.Context, arg SetPlatformCertificateRenewalAtParams) error {
+	_, err := q.db.Exec(ctx, setPlatformCertificateRenewalAt, arg.RenewalAt, arg.ID)
+	return err
 }
 
 const stageTunnelCertificateEdgeV1 = `-- name: StageTunnelCertificateEdgeV1 :one

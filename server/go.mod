@@ -3,6 +3,31 @@ module github.com/pinksaucepasta/paperboat/server
 go 1.27.4
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.41.5
+	github.com/aws/aws-sdk-go-v2/config v1.32.11
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
+	github.com/aws/smithy-go v1.24.2
+	github.com/coder/websocket v1.8.14
+	github.com/felixge/httpsnoop v1.0.4
+	github.com/fxamacker/cbor/v2 v2.9.3
+	github.com/getsentry/sentry-go v0.49.0
+	github.com/google/go-github/v88 v88.0.0
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/puddle/v2 v2.2.2
+	github.com/miekg/dns v1.1.72
+	github.com/ory/dockertest/v3 v3.12.0
+	github.com/pinksaucepasta/paperboat/shared v0.0.0
+	github.com/pressly/goose/v3 v3.26.0
+	github.com/realclientip/realclientip-go v1.0.0
+	github.com/xeipuuv/gojsonschema v1.2.0
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
+	golang.org/x/net v0.62.0
+	golang.org/x/text v0.43.0
+)
+
+require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -35,6 +60,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
+	github.com/mholt/acmez/v3 v3.1.7 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/sys/user v0.3.0 // indirect
 	github.com/moby/term v0.5.0 // indirect
@@ -52,33 +78,8 @@ require (
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
-	golang.org/x/text v0.43.0
 	golang.org/x/tools v0.52.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-)
-
-require (
-	github.com/aws/aws-sdk-go-v2 v1.41.5
-	github.com/aws/aws-sdk-go-v2/config v1.32.11
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
-	github.com/aws/smithy-go v1.24.2
-	github.com/coder/websocket v1.8.14
-	github.com/felixge/httpsnoop v1.0.4
-	github.com/fxamacker/cbor/v2 v2.9.3
-	github.com/getsentry/sentry-go v0.49.0
-	github.com/google/go-github/v88 v88.0.0
-	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.2
-	github.com/jackc/puddle/v2 v2.2.2
-	github.com/miekg/dns v1.1.68
-	github.com/ory/dockertest/v3 v3.12.0
-	github.com/pinksaucepasta/paperboat/shared v0.0.0
-	github.com/pressly/goose/v3 v3.26.0
-	github.com/realclientip/realclientip-go v1.0.0
-	github.com/xeipuuv/gojsonschema v1.2.0
-	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
-	golang.org/x/net v0.62.0
 )
 
 replace github.com/pinksaucepasta/paperboat/shared => ../shared

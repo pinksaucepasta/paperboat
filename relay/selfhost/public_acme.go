@@ -16,23 +16,22 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 	"golang.org/x/crypto/acme"
 )
 
 // Automatic browser HTTPS for a managed node: the node obtains its endpoint host's certificate from an ACME CA
-// (HTTP-01, answered by the edge from the challenge directory below) and renews it once two thirds of its lifetime
-// have passed, the rule certmagic and the server's own certificates use (RenewalAt = NotAfter - RenewBefore). A failed
-// attempt is recorded for `pbh status` and `pbh doctor` and retried at the next check; the certificate being replaced
+// (HTTP-01, answered by the edge from the challenge directory below) and renews it when the shared rule says so
+// (shared/certrenewal: the CA's suggested window). A failed attempt is recorded for `pbh status` and `pbh doctor` and retried at the next check; the certificate being replaced
 // serves meanwhile. Replaces the manual `pbh configure-tls --https-cert/--https-key` renewals (and the external
 // certbot timer) for nodes that opt in with `pbh configure-tls --acme`.
 const (
 	publicACMEDirName = "public-acme"
-	// Let's Encrypt issues certificates for an IP address only under its short-lived profile; it is used when the CA
-	// advertises it (the CA's directory lists its profiles).
+	// Let's Encrypt issues certificates for an IP address only under its short-lived profile; a DNS name uses the CA's
+	// default profile, which lasts longer.
 	publicACMEProfile = "shortlived"
 	// PublicACMEDirectoryURL is the CA directory the node requests from.
 	PublicACMEDirectoryURL = acme.LetsEncryptURL
-	publicACMERenewAfter   = 2.0 / 3
 	publicACMEAttemptLimit = 3 * time.Minute
 )
 
@@ -56,23 +55,24 @@ type PublicHTTPSStatus struct {
 	LastError    string    `json:"last_error,omitempty"`
 }
 
-// publicHTTPSRenewal reports whether the certificate at certPath is due: two thirds of its validity have passed (or it is
-// missing, unreadable or expired), and when it ends and should be renewed.
-func publicHTTPSRenewal(certPath string, now time.Time) (due bool, notAfter, renewAt time.Time) {
-	pair, err := os.ReadFile(certPath)
+// publicHTTPSRenewal is the certificate at certPath (nil when it is missing or unreadable), when it ends and when it is
+// renewed.
+func publicHTTPSRenewal(ctx context.Context, certPath string, renewals *certrenewal.Schedule, now time.Time) (leaf *x509.Certificate, notAfter, renewAt time.Time) {
+	chain, err := os.ReadFile(certPath)
 	if err != nil {
-		return true, time.Time{}, time.Time{}
+		return nil, time.Time{}, time.Time{}
 	}
-	block, _ := pem.Decode(pair)
-	if block == nil {
-		return true, time.Time{}, time.Time{}
+	if leaf, err = certrenewal.Leaf(chain); err != nil {
+		return nil, time.Time{}, time.Time{}
 	}
-	leaf, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return true, time.Time{}, time.Time{}
-	}
-	renewAt = leaf.NotBefore.Add(time.Duration(float64(leaf.NotAfter.Sub(leaf.NotBefore)) * publicACMERenewAfter))
-	return !now.Before(renewAt) || !now.Before(leaf.NotAfter), leaf.NotAfter, renewAt
+	return leaf, leaf.NotAfter, renewals.Plan(ctx, leaf, now).RenewAt
+}
+
+// publicHTTPSUsable reports whether the node's configured browser certificate can be served: the edge started on it and
+// loads its replacement by itself.
+func publicHTTPSUsable(dir string, now time.Time) bool {
+	s, err := load(dir)
+	return err == nil && s.Config.PublicHTTPSCertFile != "" && validatePublicHTTPS(s.Config.EndpointHost, s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile, now) == nil
 }
 
 // ReadPublicHTTPSStatus is the recorded state of automatic browser HTTPS; Automatic is false when it is not enabled
@@ -85,7 +85,7 @@ func ReadPublicHTTPSStatus(dir string) (PublicHTTPSStatus, error) {
 	if !s.Config.PublicHTTPSAutomatic {
 		var status PublicHTTPSStatus
 		if s.Config.PublicHTTPSCertFile != "" {
-			_, status.NotAfter, status.RenewAt = publicHTTPSRenewal(s.Config.PublicHTTPSCertFile, time.Now())
+			_, status.NotAfter, status.RenewAt = publicHTTPSRenewal(context.Background(), s.Config.PublicHTTPSCertFile, nil, time.Now())
 		}
 		return status, nil
 	}
@@ -98,7 +98,7 @@ func ReadPublicHTTPSStatus(dir string) (PublicHTTPSStatus, error) {
 }
 
 // RenewPublicHTTPS obtains or renews the endpoint host's certificate when automatic browser HTTPS is on and the
-// certificate is due. It reports whether a new certificate was installed; the caller restarts the runtime on it.
+// certificate is due. It reports whether a new certificate was installed; a running edge loads it by itself.
 // directoryURL is the ACME directory (PublicACMEDirectoryURL; tests pass their own CA).
 func RenewPublicHTTPS(ctx context.Context, dir, directoryURL string, now time.Time) (bool, error) {
 	lock, err := lockState(dir)
@@ -114,21 +114,22 @@ func RenewPublicHTTPS(ctx context.Context, dir, directoryURL string, now time.Ti
 		return false, nil
 	}
 	certPath, keyPath := publicACMEFile(dir, "cert.pem"), publicACMEFile(dir, "key.pem")
-	due, notAfter, renewAt := publicHTTPSRenewal(certPath, now)
+	renewals := certrenewal.New(directoryURL, nil)
+	served, notAfter, renewAt := publicHTTPSRenewal(ctx, certPath, renewals, now)
 	// A pair the node cannot serve (a half-written renewal, another host name) is replaced at once.
-	if !due && validatePublicHTTPS(s.Config.EndpointHost, certPath, keyPath, now) == nil {
+	if served != nil && now.Before(renewAt) && validatePublicHTTPS(s.Config.EndpointHost, certPath, keyPath, now) == nil {
 		return false, recordPublicHTTPSStatus(dir, PublicHTTPSStatus{NotAfter: notAfter, RenewAt: renewAt}, now)
 	}
 	ctx, cancel := context.WithTimeout(ctx, publicACMEAttemptLimit)
 	defer cancel()
-	issueErr := obtainPublicHTTPS(ctx, dir, s.Config.EndpointHost, directoryURL, certPath, keyPath)
+	issueErr := obtainPublicHTTPS(ctx, dir, s.Config.EndpointHost, directoryURL, certPath, keyPath, served)
 	if issueErr == nil {
 		issueErr = installPublicHTTPS(dir, certPath, keyPath, now)
 	}
 	if issueErr != nil {
 		return false, errors.Join(issueErr, recordPublicHTTPSStatus(dir, PublicHTTPSStatus{NotAfter: notAfter, RenewAt: renewAt, LastError: issueErr.Error()}, now))
 	}
-	_, notAfter, renewAt = publicHTTPSRenewal(certPath, now)
+	_, notAfter, renewAt = publicHTTPSRenewal(ctx, certPath, renewals, now)
 	return true, recordPublicHTTPSStatus(dir, PublicHTTPSStatus{NotAfter: notAfter, RenewAt: renewAt}, now)
 }
 
@@ -174,7 +175,7 @@ func installPublicHTTPS(dir, certPath, keyPath string, now time.Time) error {
 }
 
 // obtainPublicHTTPS runs one ACME order for host and writes the certificate chain and its key (0600, atomically).
-func obtainPublicHTTPS(ctx context.Context, dir, host, directoryURL, certPath, keyPath string) error {
+func obtainPublicHTTPS(ctx context.Context, dir, host, directoryURL, certPath, keyPath string, replaces *x509.Certificate) error {
 	if err := os.MkdirAll(PublicACMEChallengeDir(dir), 0700); err != nil {
 		return err
 	}
@@ -190,13 +191,15 @@ func obtainPublicHTTPS(ctx context.Context, dir, host, directoryURL, certPath, k
 	if net.ParseIP(host) != nil {
 		identifier.Type = "ip"
 	}
-	var options []acme.OrderOption
-	if directory, err := client.Discover(ctx); err == nil {
-		if _, ok := directory.Profiles[publicACMEProfile]; ok {
-			options = append(options, acme.WithOrderIssuanceProfile(publicACMEProfile))
+	profile := ""
+	if identifier.Type == "ip" {
+		if directory, err := client.Discover(ctx); err == nil {
+			if _, ok := directory.Profiles[publicACMEProfile]; ok {
+				profile = publicACMEProfile
+			}
 		}
 	}
-	order, err := client.AuthorizeOrder(ctx, []acme.AuthzID{identifier}, options...)
+	order, err := certrenewal.AuthorizeOrder(ctx, client, []acme.AuthzID{identifier}, replaces, profile)
 	if err != nil {
 		return fmt.Errorf("start the ACME order: %w", err)
 	}

@@ -116,7 +116,6 @@ func TestPlatformCertificateLifecycleOnPostgres(t *testing.T) {
 		IssuerName:          "acceptance-issuer",
 		OwnerID:             "platform-worker-" + suffix,
 		Distributor:         distributor,
-		RenewBefore:         30 * 24 * time.Hour,
 		DistributionTimeout: 30 * time.Second,
 		Now:                 clock.Now,
 	})

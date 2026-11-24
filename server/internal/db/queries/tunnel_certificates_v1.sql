@@ -103,15 +103,10 @@ UPDATE tunnel_certificate_records
 SET failure_code = sqlc.arg(failure_code), updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id) AND state = 'revoked';
 
--- name: ListDueTunnelCertificatesV1 :many
-SELECT *
-FROM tunnel_certificate_records
-WHERE state = 'active'
-  AND target_kind = 'durable_route'
-  AND leaf_hostname IS NULL
-  AND renewal_at <= sqlc.arg(now)
-ORDER BY renewal_at, id
-LIMIT sqlc.arg(row_limit);
+-- updated_at stays: it is what the edges' copies are compared with.
+-- name: SetPlatformCertificateRenewalAt :exec
+UPDATE tunnel_certificate_records SET renewal_at = sqlc.arg(renewal_at)
+WHERE id = sqlc.arg(id) AND target_kind = 'platform_wildcard' AND state = 'active';
 
 -- name: CreateTunnelCertificateRecordV1 :one
 INSERT INTO tunnel_certificate_records (
@@ -996,7 +991,7 @@ WHERE d.id = sqlc.arg(domain_id) AND d.account_id = sqlc.arg(account_id)
   AND cert.certificate_generation = sqlc.arg(certificate_generation)
   AND cert.certificate_reference = d.certificate_reference
   AND cert.certificate_reference = sqlc.arg(certificate_reference)
-  AND cert.expires_at > sqlc.arg(now) AND cert.renewal_at > sqlc.arg(now)
+  AND cert.expires_at > sqlc.arg(now)
   AND EXISTS (
     SELECT 1 FROM tunnel_route_ready_edges_v1 AS ready
     WHERE ready.account_id = d.account_id AND ready.tunnel_id = d.tunnel_id

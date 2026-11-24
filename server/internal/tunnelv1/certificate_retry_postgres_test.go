@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
@@ -51,7 +50,7 @@ VALUES ($1,$2,$3,$4,$5,'exact',$1,$5,'managed','issuing','ready','clear',$6)`, d
 	}
 	due := func(at time.Time) bool {
 		t.Helper()
-		rows, err := f.database.Queries().ListDueTunnelCertificateDomainsV1(ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: at, RenewBefore: pgtype.Interval{}, RowLimit: 10000})
+		rows, err := f.database.Queries().ListDueTunnelCertificateDomainsV1(ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: at, RowLimit: 10000})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -186,7 +185,7 @@ VALUES ($1,$2,$3,$4,$5,'exact',$1,$5,'managed','issuing','ready','clear',$6)`, d
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := NewCertificateWorker(f.database, coordinator, 30*24*time.Hour, time.Now)
+	worker, err := NewCertificateWorker(f.database, coordinator, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -416,7 +416,7 @@ func (s *SQLStore) Activate(ctx context.Context, id string, domainGeneration uin
 // existing certificate. The query rechecks current ownership, generation and
 // all ready assignment/distribution tuples without completing create work.
 func (s *SQLStore) RecoverDomainCertificateReady(ctx context.Context, domain Domain, certificate StoredCertificate, now time.Time) error {
-	if s == nil || s.db == nil || domain.Validate() != nil || domain.Target().KindValue() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || certificate.DomainGeneration > domain.Generation || !certificate.ExpiresAt.After(now) || !certificate.RenewalAt.After(now) {
+	if s == nil || s.db == nil || domain.Validate() != nil || domain.Target().KindValue() != TargetDurableRoute || domain.RenewalDue || len(domain.EdgeTargets) == 0 || certificate.State != StateActive || !activeCertificateMatchesDomain(certificate, domain) || certificate.DomainGeneration > domain.Generation || !certificate.ExpiresAt.After(now) {
 		return ErrCertificateNotReady
 	}
 	return s.db.InTx(ctx, func(txCtx context.Context, tx *db.Tx) error {

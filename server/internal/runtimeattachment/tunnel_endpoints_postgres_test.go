@@ -21,7 +21,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -536,7 +535,7 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	f.exec(t, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour' WHERE id IN ($1,$2)`, f.node, f.backupNode)
 	due := func() bool {
 		t.Helper()
-		rows, err := f.database.Queries().ListDueTunnelCertificateDomainsV1(f.ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: time.Now().UTC(), RenewBefore: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond)}, RowLimit: 10000})
+		rows, err := f.database.Queries().ListDueTunnelCertificateDomainsV1(f.ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: time.Now().UTC(), RowLimit: 10000})
 		if err != nil {
 			t.Fatal(err)
 		}

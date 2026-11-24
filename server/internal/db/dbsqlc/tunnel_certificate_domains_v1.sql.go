@@ -9,8 +9,6 @@ import (
 	"context"
 	"database/sql"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getExactTunnelCertificateDomainForEdgeV1 = `-- name: GetExactTunnelCertificateDomainForEdgeV1 :one
@@ -97,7 +95,9 @@ WHERE d.deleted_at IS NULL
   AND (lease.user_deadline IS NULL OR lease.user_deadline > $1)
   AND (
     d.certificate_state IN ('pending','issuing','renewing','failed')
-    OR d.certificate_expires_at <= $1::timestamptz + $2::interval
+    OR d.certificate_expires_at <= $1::timestamptz
+    -- The workspace domain renewed: this hostname serves a copy of the certificate it replaced.
+    OR EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.certificate_expires_at<>d.certificate_expires_at)
     OR (
       d.certificate_state = 'ready'
       AND EXISTS (
@@ -138,13 +138,12 @@ WHERE d.deleted_at IS NULL
     )
   )
 ORDER BY d.certificate_expires_at NULLS FIRST, d.id
-LIMIT $3
+LIMIT $2
 `
 
 type ListDuePreviewCertificateDomainsV1Params struct {
-	Now         time.Time
-	RenewBefore pgtype.Interval
-	RowLimit    int32
+	Now      time.Time
+	RowLimit int32
 }
 
 // Preview domains are lease-bound aliases, so their certificate worker uses
@@ -152,7 +151,7 @@ type ListDuePreviewCertificateDomainsV1Params struct {
 // retaining the preview target fence. Lease identity and expiry are resolved
 // separately by the worker before issuance.
 func (q *Queries) ListDuePreviewCertificateDomainsV1(ctx context.Context, arg ListDuePreviewCertificateDomainsV1Params) ([]PreviewDomain, error) {
-	rows, err := q.db.Query(ctx, listDuePreviewCertificateDomainsV1, arg.Now, arg.RenewBefore, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listDuePreviewCertificateDomainsV1, arg.Now, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +209,9 @@ WHERE d.deleted_at IS NULL
   AND NOT (d.certificate_state IN ('renewing','failed') AND d.certificate_retry_at > $1::timestamptz)
   AND (
     d.certificate_state IN ('issuing','renewing','failed')
-    OR d.certificate_expires_at <= $1::timestamptz + $2::interval
+    OR d.certificate_expires_at <= $1::timestamptz
+    -- The workspace domain renewed: this hostname serves a copy of the certificate it replaced.
+    OR EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.certificate_expires_at<>d.certificate_expires_at)
     OR (
       d.certificate_state = 'ready'
       AND EXISTS (
@@ -242,17 +243,16 @@ WHERE d.deleted_at IS NULL
     )
   )
 ORDER BY d.certificate_expires_at NULLS FIRST, d.id
-LIMIT $3
+LIMIT $2
 `
 
 type ListDueTunnelCertificateDomainsV1Params struct {
-	Now         time.Time
-	RenewBefore pgtype.Interval
-	RowLimit    int32
+	Now      time.Time
+	RowLimit int32
 }
 
 func (q *Queries) ListDueTunnelCertificateDomainsV1(ctx context.Context, arg ListDueTunnelCertificateDomainsV1Params) ([]TunnelDomain, error) {
-	rows, err := q.db.Query(ctx, listDueTunnelCertificateDomainsV1, arg.Now, arg.RenewBefore, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listDueTunnelCertificateDomainsV1, arg.Now, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -70,13 +70,13 @@ func TestRegionalCertificateIssueStoreAndServeOnPostgres(t *testing.T) {
 	_, _ = store.Pool().Exec(ctx, `DELETE FROM paperboat.control_server_node_acme_cache WHERE key=$1`, certificateKey)
 	key, domain := "0123456789abcdef0123456789abcdef", "regions.example.test"
 	issuer := &fakeIssuer{lifetime: 90 * 24 * time.Hour}
-	if err := EnsureCertificate(ctx, store, key, domain, issuer, time.Now()); err != nil || issuer.calls != 1 {
+	if err := EnsureCertificate(ctx, store, key, domain, issuer, nil, time.Now()); err != nil || issuer.calls != 1 {
 		t.Fatalf("first issuance: %v calls %d", err, issuer.calls)
 	}
-	if err := EnsureCertificate(ctx, store, key, domain, issuer, time.Now()); err != nil || issuer.calls != 1 {
+	if err := EnsureCertificate(ctx, store, key, domain, issuer, nil, time.Now()); err != nil || issuer.calls != 1 {
 		t.Fatalf("a valid certificate was reissued: %v calls %d", err, issuer.calls)
 	}
-	if err := EnsureCertificate(ctx, store, key, domain, issuer, time.Now().Add(70*24*time.Hour)); err != nil || issuer.calls != 2 {
+	if err := EnsureCertificate(ctx, store, key, domain, issuer, nil, time.Now().Add(70*24*time.Hour)); err != nil || issuer.calls != 2 {
 		t.Fatalf("a certificate near expiry was not renewed: %v calls %d", err, issuer.calls)
 	}
 	var sealed []byte

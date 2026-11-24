@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/miekg/dns"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -26,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
 func openTestDB(t *testing.T) *db.DB {
@@ -199,6 +199,30 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 		t.Fatalf("a fresh certificate was ordered again: %v (%d names)", err, len(issuer.names))
 	}
 
+	// Renewal: once when due, naming the replaced certificate to the CA; the next pass orders nothing.
+	issued, err := certrenewal.Leaf(bundle.CertificatePEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		at     time.Time
+		orders int
+	}{{certrenewal.Fallback(issued).Add(-time.Minute), 1}, {certrenewal.Fallback(issued).Add(time.Minute), 2}, {certrenewal.Fallback(issued).Add(2 * time.Minute), 2}} {
+		worker.now = func() time.Time { return step.at.UTC() }
+		issuer.notBefore = step.at
+		if err := worker.Run(ctx, 500); err != nil || len(issuer.names) != 2*step.orders {
+			t.Fatalf("at %s: %v, %d names ordered, want %d orders", step.at, err, len(issuer.names), step.orders)
+		}
+	}
+	if issuer.domain.Replaces == nil || !issuer.domain.Replaces.Equal(issued) {
+		t.Fatal("the renewal did not name the certificate it replaces")
+	}
+	var planned, checked time.Time
+	if err := database.Pool().QueryRow(ctx, `SELECT certificate_renewal_at, certificate_renewal_check_at FROM paperboat.workspace_domains WHERE id=$1`, view.ID).Scan(&planned, &checked); err != nil || !planned.After(worker.now()) || !checked.After(worker.now()) {
+		t.Fatalf("renewed certificate's plan = %s, check %s, %v", planned, checked, err)
+	}
+	worker.now = func() time.Time { return time.Now().UTC() }
+
 	// Covering: the domain, one label under it and its wildcard; nothing deeper, nothing of another workspace.
 	err = database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		for host, want := range map[string]error{hostname: nil, "app." + hostname: nil, "*." + hostname: nil, "a.b." + hostname: ErrNotCovered, "*.a." + hostname: ErrNotCovered} {
@@ -235,7 +259,7 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	served := func() bool {
 		t.Helper()
 		due, err := database.Queries().ListDueTunnelCertificateDomainsV1(ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{
-			Now: time.Now(), RenewBefore: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true}, RowLimit: 100000})
+			Now: time.Now(), RowLimit: 100000})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -313,9 +337,10 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 }
 
 type fakeIssuer struct {
-	domain  tunnelcert.Domain
-	names   []string
-	onOrder func() // runs while the order is in flight
+	domain    tunnelcert.Domain
+	names     []string
+	onOrder   func() // runs while the order is in flight
+	notBefore time.Time
 }
 
 func (f *fakeIssuer) IssueDNS01Names(_ context.Context, domain tunnelcert.Domain, names []string) (tunnelcert.CertificateBundle, error) {
@@ -328,6 +353,9 @@ func (f *fakeIssuer) IssueDNS01Names(_ context.Context, domain tunnelcert.Domain
 		return tunnelcert.CertificateBundle{}, err
 	}
 	now := time.Now()
+	if !f.notBefore.IsZero() {
+		now = f.notBefore
+	}
 	template := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano()), Subject: pkix.Name{CommonName: names[0]}, DNSNames: names,
 		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(90 * 24 * time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	raw, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)

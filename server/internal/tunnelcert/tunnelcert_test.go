@@ -857,7 +857,6 @@ func TestCoordinatorExpiryAlertsAreIdempotentPerCertificate(t *testing.T) {
 	coordinator, _, _, _ := coordinatorForTest(t, &testIssuer{})
 	alerts := &MemoryAlerts{}
 	coordinator.config.Alerts = alerts
-	coordinator.config.ExpiryAlertWindow = 24 * time.Hour
 	domain := testDomain("app.example.test", StrategyDelegatedDNS01)
 	certificate := StoredCertificate{DomainID: domain.ID, Hostname: domain.Hostname, State: StateActive, CertificateReference: "tcert_alert_01", CertificateGeneration: 3, ExpiresAt: now.Add(time.Hour)}
 	if err := coordinator.alertExpiry(context.Background(), domain, certificate, now); err != nil {

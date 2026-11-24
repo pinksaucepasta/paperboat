@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
 // AddressPublisher is tunnelcert.AddressReconciler: it makes a hostname's A/AAAA records exactly a set.
@@ -29,6 +30,7 @@ type RegionalDNS struct {
 	// Issuer and Key, when set, also keep the regional wildcard certificate issued (EnsureCertificate); a failed
 	// issuance waits 10 minutes before the next attempt (ACME failure rate limits).
 	Issuer       DNS01Issuer
+	Renewals     *certrenewal.Schedule
 	Key          string
 	Logger       *slog.Logger
 	issueBackoff time.Time
@@ -49,7 +51,7 @@ const regionalRefresh = 5 * time.Minute
 func (r *RegionalDNS) Sync(ctx context.Context) error {
 	var certErr error
 	if r.Issuer != nil && time.Now().After(r.issueBackoff) {
-		if certErr = EnsureCertificate(ctx, r.DB, r.Key, r.Domain, r.Issuer, time.Now()); certErr != nil {
+		if certErr = EnsureCertificate(ctx, r.DB, r.Key, r.Domain, r.Issuer, r.Renewals, time.Now()); certErr != nil {
 			r.issueBackoff = time.Now().Add(10 * time.Minute)
 			if r.Logger != nil {
 				r.Logger.Warn("regional certificate not issued; retrying in 10 minutes", "name", wildcardName(r.Domain), "error", certErr)

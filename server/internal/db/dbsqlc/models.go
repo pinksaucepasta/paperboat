@@ -3755,30 +3755,32 @@ type WorkosEventCursor struct {
 }
 
 type WorkspaceDomain struct {
-	ID                     string
-	AccountID              string
-	OwnerTeamID            sql.NullString
-	Hostname               string
-	ChallengeReference     string
-	OwnershipState         string
-	DnsFailureCode         sql.NullString
-	ObservedRecords        []byte
-	DnsLastCheckedAt       sql.NullTime
-	DnsNextCheckAt         time.Time
-	VerificationAttempts   int32
-	VerifiedAt             sql.NullTime
-	CertificateState       string
-	CertificateFailureCode sql.NullString
-	CertificateAttempts    int32
-	CertificateRetryAt     sql.NullTime
-	MasterKeyReference     sql.NullString
-	CertificateCiphertext  []byte
-	PrivateKeyCiphertext   []byte
-	CertificateFingerprint []byte
-	CertificateExpiresAt   sql.NullTime
-	CreatedByActorID       string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID                        string
+	AccountID                 string
+	OwnerTeamID               sql.NullString
+	Hostname                  string
+	ChallengeReference        string
+	OwnershipState            string
+	DnsFailureCode            sql.NullString
+	ObservedRecords           []byte
+	DnsLastCheckedAt          sql.NullTime
+	DnsNextCheckAt            time.Time
+	VerificationAttempts      int32
+	VerifiedAt                sql.NullTime
+	CertificateState          string
+	CertificateFailureCode    sql.NullString
+	CertificateAttempts       int32
+	CertificateRetryAt        sql.NullTime
+	MasterKeyReference        sql.NullString
+	CertificateCiphertext     []byte
+	PrivateKeyCiphertext      []byte
+	CertificateFingerprint    []byte
+	CertificateExpiresAt      sql.NullTime
+	CreatedByActorID          string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	CertificateRenewalAt      sql.NullTime
+	CertificateRenewalCheckAt sql.NullTime
 }
 
 type WorkspaceEdgeSet struct {

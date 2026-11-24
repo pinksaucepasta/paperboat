@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/config"
@@ -96,36 +97,65 @@ func infrastructureTLS(d config.Deployment, identity tls.Certificate, base *tls.
 		if !d.SelfHosted {
 			return base, nil
 		}
-		return serveCertificateOnHost(base, d.ConnectorAdvertiseHost, identity), nil
+		return serveCertificateOnHost(base, d.ConnectorAdvertiseHost, func() *tls.Certificate { return &identity }), nil
 	}
 	if d.PublicHTTPSCertFile == "" || d.PublicHTTPSKeyFile == "" {
 		return nil, errors.New("public infrastructure HTTPS TLS needs both certificate and key files")
 	}
+	certificate, err := loadPublicHTTPS(d)
+	if err != nil {
+		return nil, err
+	}
+	return serveCertificateOnHost(base, d.ConnectorAdvertiseHost, reloadingPublicHTTPS(d, certificate)), nil
+}
+
+var publicHTTPSReload = time.Minute
+
+// reloadingPublicHTTPS serves a renewed certificate file within publicHTTPSReload, without a restart. A pair that does
+// not load (a renewal between its two writes) keeps the one being served.
+func reloadingPublicHTTPS(d config.Deployment, current tls.Certificate) func() *tls.Certificate {
+	var mu sync.Mutex
+	served, checked := &current, time.Now()
+	return func() *tls.Certificate {
+		mu.Lock()
+		defer mu.Unlock()
+		if time.Since(checked) < publicHTTPSReload {
+			return served
+		}
+		checked = time.Now()
+		if next, err := loadPublicHTTPS(d); err == nil {
+			served = &next
+		}
+		return served
+	}
+}
+
+func loadPublicHTTPS(d config.Deployment) (tls.Certificate, error) {
 	for _, path := range []string{d.PublicHTTPSCertFile, d.PublicHTTPSKeyFile} {
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, fmt.Errorf("read public HTTPS TLS files: %w", err)
+			return tls.Certificate{}, fmt.Errorf("read public HTTPS TLS files: %w", err)
 		}
 		if !info.Mode().IsRegular() || info.Size() > 1<<20 {
-			return nil, errors.New("public HTTPS TLS files must be bounded regular files")
+			return tls.Certificate{}, errors.New("public HTTPS TLS files must be bounded regular files")
 		}
 		if path == d.PublicHTTPSKeyFile && info.Mode().Perm()&0077 != 0 {
-			return nil, errors.New("public HTTPS TLS private key requires owner-only permissions")
+			return tls.Certificate{}, errors.New("public HTTPS TLS private key requires owner-only permissions")
 		}
 	}
 	certificate, err := tls.LoadX509KeyPair(d.PublicHTTPSCertFile, d.PublicHTTPSKeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("load public infrastructure HTTPS TLS certificate and key: %w", err)
+		return tls.Certificate{}, fmt.Errorf("load public infrastructure HTTPS TLS certificate and key: %w", err)
 	}
 	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
 	if err != nil {
-		return nil, fmt.Errorf("parse public infrastructure HTTPS TLS certificate: %w", err)
+		return tls.Certificate{}, fmt.Errorf("parse public infrastructure HTTPS TLS certificate: %w", err)
 	}
 	if err := leaf.VerifyHostname(d.ConnectorAdvertiseHost); err != nil {
-		return nil, fmt.Errorf("verify public infrastructure HTTPS TLS hostname: %w", err)
+		return tls.Certificate{}, fmt.Errorf("verify public infrastructure HTTPS TLS hostname: %w", err)
 	}
 	if time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
-		return nil, fmt.Errorf("verify public infrastructure HTTPS TLS validity: %w", x509.CertificateInvalidError{Cert: leaf, Reason: x509.Expired})
+		return tls.Certificate{}, fmt.Errorf("verify public infrastructure HTTPS TLS validity: %w", x509.CertificateInvalidError{Cert: leaf, Reason: x509.Expired})
 	}
 	if len(leaf.ExtKeyUsage) > 0 {
 		allowed := false
@@ -133,18 +163,18 @@ func infrastructureTLS(d config.Deployment, identity tls.Certificate, base *tls.
 			allowed = allowed || usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageAny
 		}
 		if !allowed {
-			return nil, errors.New("public HTTPS TLS certificate does not permit server authentication")
+			return tls.Certificate{}, errors.New("public HTTPS TLS certificate does not permit server authentication")
 		}
 	}
-	return serveCertificateOnHost(base, d.ConnectorAdvertiseHost, certificate), nil
+	return certificate, nil
 }
 
-func serveCertificateOnHost(base *tls.Config, host string, certificate tls.Certificate) *tls.Config {
+func serveCertificateOnHost(base *tls.Config, host string, certificate func() *tls.Certificate) *tls.Config {
 	result := base.Clone()
 	fallback := result.GetCertificate
 	result.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		if hello.ServerName == "" || strings.EqualFold(hello.ServerName, host) {
-			return &certificate, nil
+			return certificate(), nil
 		}
 		return fallback(hello)
 	}

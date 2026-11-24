@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 )
 
 // One certificate for *.<regional_domain> covers every region name. The worker leader issues and renews it with
@@ -25,10 +26,7 @@ import (
 // restart. Prior art: headscale terminates its own TLS in the control server (hscontrol/app.go:1166); Caddy's
 // cluster mode shares one certificate store between instances behind one name.
 
-const (
-	certificateKey = "regional-wildcard"
-	renewBefore    = 30 * 24 * time.Hour
-)
+const certificateKey = "regional-wildcard"
 
 // DNS01Issuer is tunnelcert.ACMEIssuer.
 type DNS01Issuer interface {
@@ -57,19 +55,23 @@ func loadCertificate(ctx context.Context, d *db.DB, key string) (storedCertifica
 	return c, json.Unmarshal([]byte(plain), &c)
 }
 
-// EnsureCertificate issues the regional wildcard when none is stored or it expires within 30 days. The leader
-// calls it; it returns quickly when nothing is due.
-func EnsureCertificate(ctx context.Context, d *db.DB, key, domain string, issuer DNS01Issuer, now time.Time) error {
+// EnsureCertificate issues the regional wildcard when none is stored or it is due for
+// renewal. The leader calls it; it returns quickly when nothing is due.
+func EnsureCertificate(ctx context.Context, d *db.DB, key, domain string, issuer DNS01Issuer, renewals *certrenewal.Schedule, now time.Time) error {
 	current, err := loadCertificate(ctx, d, key)
-	if err == nil && current.NotAfter.Sub(now) > renewBefore {
-		return nil
+	var served *x509.Certificate
+	if err == nil {
+		// An unreadable certificate is replaced.
+		if served, _ = certrenewal.Leaf(current.CertificatePEM); served != nil && now.Before(renewals.Plan(ctx, served, now).RenewAt) {
+			return nil
+		}
 	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("read the regional certificate: %w", err)
 	}
 	bundle, err := issuer.IssueDNS01(ctx, tunnelcert.Domain{ID: "regional_wildcard_v1", AccountID: tunnelcert.PlatformAccountID,
 		TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: wildcardName(domain), Generation: 1,
-		Strategy: tunnelcert.StrategyPlatformDNS01})
+		Strategy: tunnelcert.StrategyPlatformDNS01, Replaces: served})
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", wildcardName(domain), err)
 	}

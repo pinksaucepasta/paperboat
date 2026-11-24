@@ -11,98 +11,23 @@ import (
 	"testing"
 )
 
-// Uninstall deletes the directory edge-ip-certificate.py lives in, so the timer and service that run it must go
-// with it (disabled first); unrelated units stay, and the env file goes only with the confirmed data removal.
-func TestUninstallDisablesAndRemovesTheCertificateTimerAndService(t *testing.T) {
-	for _, removeData := range []bool{false, true} {
-		dir := t.TempDir()
-		env := filepath.Join(dir, "paperboat-edge-certificate.env")
-		other := filepath.Join(dir, "unrelated.service")
-		for _, name := range append([]string{env, other}, filepath.Join(dir, certificateUnits[0]), filepath.Join(dir, certificateUnits[1])) {
-			if err := os.WriteFile(name, []byte("x\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		f := newFakeHost(t, "60000 65535")
-		f.answers = map[string]string{"systemctl disable --now " + certificateUnits[0]: "", "systemctl disable --now " + certificateUnits[1]: ""}
-		if touched, err := removeCertificateUnits(t.Context(), f.run, dir, env, removeData); err != nil || !touched {
-			t.Fatal(err)
-		}
-		for _, unit := range certificateUnits {
-			if f.called("systemctl disable --now "+unit) != 1 {
-				t.Errorf("%s not disabled: %v", unit, f.calls)
-			}
-			if _, err := os.Stat(filepath.Join(dir, unit)); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("%s survived uninstall: %v", unit, err)
-			}
-		}
-		if _, err := os.Stat(other); err != nil {
-			t.Errorf("an unrelated unit was removed: %v", err)
-		}
-		if _, err := os.Stat(env); errors.Is(err, os.ErrNotExist) != removeData {
-			t.Errorf("env file removed = %v, want %v", errors.Is(err, os.ErrNotExist), removeData)
-		}
-	}
-	// Nothing installed: nothing to disable.
-	f := newFakeHost(t, "60000 65535")
-	if touched, err := removeCertificateUnits(t.Context(), f.run, t.TempDir(), filepath.Join(t.TempDir(), "none.env"), true); err != nil || touched || len(f.calls) != 0 {
-		t.Fatalf("err %v calls %v", err, f.calls)
-	}
-}
-
-// A unit that cannot be disabled is reported and stays on disk, so a rerun finds it again.
-func TestUninstallKeepsACertificateUnitItCouldNotDisable(t *testing.T) {
+// A rerun after the unit was removed has nothing to stop and nothing to reload.
+func TestUninstallStopsTheServiceAndSkipsAnAbsentUnit(t *testing.T) {
 	dir := t.TempDir()
-	unit := filepath.Join(dir, certificateUnits[0])
-	if err := os.WriteFile(unit, []byte("x\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, selfhostUnitName), []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := newFakeHost(t, "60000 65535") // systemctl is not answered: the disable fails
-	_, err := removeCertificateUnits(t.Context(), f.run, dir, filepath.Join(dir, "none.env"), false)
-	if err == nil || !strings.Contains(err.Error(), "rerun pbh uninstall") {
-		t.Fatalf("err %v", err)
-	}
-	if _, statErr := os.Stat(unit); statErr != nil {
-		t.Fatalf("the unit was removed although disable failed: %v", statErr)
-	}
-	// The env file the unit reads stays until the unit is gone, even for the confirmed data removal.
-	env := filepath.Join(dir, "paperboat-edge-certificate.env")
-	if err := os.WriteFile(env, []byte("x\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := removeCertificateUnits(t.Context(), f.run, dir, env, true); err == nil {
-		t.Fatal("second failure not reported")
-	}
-	if _, statErr := os.Stat(env); statErr != nil {
-		t.Fatalf("env removed while its unit still exists: %v", statErr)
-	}
-}
-
-// Certificate renewal restarts the service, so it is stopped first; a host without units (--no-service, or a
-// rerun after they were removed) has nothing to stop and nothing to reload.
-func TestUninstallStopsRenewalBeforeTheServiceAndSkipsAbsentUnits(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range append([]string{selfhostUnitName}, certificateUnits...) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("x\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	f := newFakeHost(t, "60000 65535")
-	f.answers = map[string]string{"systemctl disable --now " + certificateUnits[0]: "", "systemctl disable --now " + certificateUnits[1]: "", "systemctl stop " + selfhostUnitName: "", "systemctl disable " + selfhostUnitName: ""}
-	touched, err := stopServices(t.Context(), f.run, dir, filepath.Join(dir, "none.env"), false)
-	if err != nil || !touched {
-		t.Fatalf("touched %v err %v", touched, err)
-	}
-	want := []string{"systemctl disable --now " + certificateUnits[0], "systemctl disable --now " + certificateUnits[1], "systemctl stop " + selfhostUnitName}
-	if strings.Join(f.calls, "|") != strings.Join(want, "|") {
-		t.Fatalf("calls %q, want renewal stopped before the service: %q", f.calls, want)
+	f.answers = map[string]string{"systemctl stop " + selfhostUnitName: "", "systemctl disable " + selfhostUnitName: ""}
+	touched, err := stopServices(t.Context(), f.run, dir)
+	if err != nil || !touched || strings.Join(f.calls, "|") != "systemctl stop "+selfhostUnitName {
+		t.Fatalf("touched %v err %v calls %q", touched, err, f.calls)
 	}
 	if removed, err := removeMainUnit(t.Context(), f.run, dir); err != nil || !removed {
 		t.Fatalf("removed %v err %v", removed, err)
 	}
-	// Rerun: every unit is gone, nothing runs and nothing needs a reload.
 	f.calls = nil
-	touched, err = stopServices(t.Context(), f.run, dir, filepath.Join(dir, "none.env"), false)
+	touched, err = stopServices(t.Context(), f.run, dir)
 	removed, err2 := removeMainUnit(t.Context(), f.run, dir)
 	if err != nil || err2 != nil || touched || removed || len(f.calls) != 0 {
 		t.Fatalf("rerun: touched %v removed %v errs %v %v calls %v", touched, removed, err, err2, f.calls)
@@ -116,7 +41,7 @@ func TestUninstallTreatsAStatFailureAsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newFakeHost(t, "60000 65535")
-	if _, err := stopServices(t.Context(), f.run, notADir, "", false); err == nil {
+	if _, err := stopServices(t.Context(), f.run, notADir); err == nil {
 		t.Fatal("a stat failure (the unit directory is a file) was treated as no units")
 	}
 }
@@ -153,7 +78,7 @@ func TestUninstallRetryAfterAFailedReloadAtTheEntryPoint(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range append([]string{selfhostUnitName}, certificateUnits...) {
+	for _, name := range []string{selfhostUnitName} {
 		if err := os.WriteFile(filepath.Join(unitDir, name), []byte("x\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +98,7 @@ func TestUninstallRetryAfterAFailedReloadAtTheEntryPoint(t *testing.T) {
 			}
 			return "", nil
 		},
-		run: f.run, unitDir: unitDir, certEnv: filepath.Join(root, "none.env"), runtimeDir: runtimeDir,
+		run: f.run, unitDir: unitDir, runtimeDir: runtimeDir,
 		paths: f.paths, binaries: binaries, binary: binary,
 		teardown: func(context.Context) error { return nil }, removeLocal: func() error { return nil },
 	}
@@ -181,7 +106,7 @@ func TestUninstallRetryAfterAFailedReloadAtTheEntryPoint(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rerun pbh uninstall") {
 		t.Fatalf("first run: %v", err)
 	}
-	for _, name := range append([]string{selfhostUnitName}, certificateUnits...) {
+	for _, name := range []string{selfhostUnitName} {
 		if _, statErr := os.Stat(filepath.Join(unitDir, name)); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("%s survived the first run: %v", name, statErr)
 		}
@@ -219,7 +144,7 @@ func TestUninstallCommandLineWiring(t *testing.T) {
 		_ = os.MkdirAll(unitDir, 0o755)
 		return uninstallEnv{
 			systemctl: func(context.Context, string, ...string) (string, error) { return "", nil }, run: f.run,
-			unitDir: unitDir, certEnv: filepath.Join(unitDir, "none.env"), runtimeDir: filepath.Join(root, "no-systemd"), paths: f.paths,
+			unitDir: unitDir, runtimeDir: filepath.Join(root, "no-systemd"), paths: f.paths,
 			binaries: filepath.Join(root, "lib"), binary: filepath.Join(root, "pbh"),
 			teardown: func(context.Context) error { return nil }, removeLocal: func() error { *removed++; return removeErr },
 		}
@@ -257,7 +182,7 @@ func TestUninstallCommandLineWiring(t *testing.T) {
 	}
 	// The default wiring points at the real host paths and the real elevation, with nothing missing.
 	env := defaultUninstallEnv()
-	if env.systemctl == nil || env.run == nil || env.teardown == nil || env.removeLocal == nil || env.unitDir != systemUnitDir || env.certEnv != certificateEnvFile ||
+	if env.systemctl == nil || env.run == nil || env.teardown == nil || env.removeLocal == nil || env.unitDir != systemUnitDir ||
 		env.runtimeDir != systemdRuntimeDir || env.binaries != defaultBinaries || env.binary != "/usr/local/bin/pbh" || env.paths != defaultHostPaths(defaultState) {
 		t.Fatalf("default env %+v", env)
 	}

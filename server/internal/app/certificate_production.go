@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/certrenewal"
 	"net"
 	"os"
 	"strings"
@@ -75,9 +76,10 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 	if certificateConfig.ChallengeType() == config.CertificateChallengeDNS01 {
 		namesIssuer = issuer
 	}
+	renewals := certificateRenewals(cfg)
 	domains, err := workspacedomain.NewWorker(database, workspaceDomainConfig(cfg), workspacedomain.WorkerConfig{
 		Issuer: namesIssuer, CAA: caaInspector, Keys: secrets, MasterKeyReference: certificateConfig.MasterKeyReference,
-		IssuerName: certificateConfig.Issuer, OwnerID: certificateConfig.OwnerID, RenewBefore: certificateConfig.RenewBefore,
+		IssuerName: certificateConfig.Issuer, OwnerID: certificateConfig.OwnerID, Renewals: renewals,
 		LockTTL: certificateConfig.LockTTL, MaxLifetime: certificateConfig.MaxCertificateLifetime,
 	})
 	if err != nil {
@@ -94,10 +96,9 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 		DistributionCredential: distributionCredential,
 		IssuerName:             certificateConfig.Issuer,
 		OwnerID:                certificateConfig.OwnerID,
-		RenewBefore:            certificateConfig.RenewBefore,
+		Renewals:               renewals,
 		LockTTL:                certificateConfig.LockTTL,
 		DistributionTimeout:    certificateConfig.DistributionTimeout,
-		ExpiryAlertWindow:      certificateConfig.ExpiryAlertWindow,
 		MaxCertificateLifetime: certificateConfig.MaxCertificateLifetime,
 		PlatformBases:          platformBases,
 		PlatformEdgeTargets:    platformTargets,
@@ -108,6 +109,11 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 	runtime.HTTP01 = http01
 	runtime.WorkspaceDomains = domains
 	return runtime, nil
+}
+
+// certificateRenewals asks the configured CA when to renew; renewal information needs no account.
+func certificateRenewals(cfg config.Config) *certrenewal.Schedule {
+	return certrenewal.New(cfg.Certificates.DirectoryURL, providerHTTPClient("acme", cfg.HTTP.RequestTimeout))
 }
 
 func workspaceDomainConfig(cfg config.Config) workspacedomain.Config {
