@@ -2321,6 +2321,15 @@ class RemainingFamilyPlumbing(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'approval link'):
                 auth_lifecycle.device_login(url)
 
+    def test_inventory_freshness_reports_the_ssh_failure(self):
+        import inventory_freshness
+        failed = SimpleNamespace(returncode=255, stderr=b'debug\nHost key verification failed.\n')
+        with patch.object(inventory_freshness, 'completes', return_value=True), \
+                patch.object(inventory_freshness.winhost, 'device', return_value=None), \
+                patch.object(inventory_freshness.subprocess, 'run', return_value=failed):
+            with self.assertRaisesRegex(RuntimeError, 'ssh rc 255: .*Host key verification failed'):
+                inventory_freshness.visible_within('m', 'example.test', 0.1)
+
     def test_inventory_alias_probe_uses_the_device_ssh_client(self):
         import inventory_freshness
         calls = []
@@ -2332,12 +2341,12 @@ class RemainingFamilyPlumbing(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, 0, '', '')
 
         with patch.object(winhost, 'device', lambda: object()), patch.object(winhost, 'which', lambda name: SimpleNamespace(run_remote=run_remote)):
-            self.assertTrue(inventory_freshness.resolves('linux.example.test'))
-            self.assertFalse(inventory_freshness.resolves('slow.example.test'))
+            self.assertIsNone(inventory_freshness.ssh_failure('linux.example.test'))
+            self.assertIn('timed out', inventory_freshness.ssh_failure('slow.example.test'))
         self.assertEqual(['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'linux.example.test', 'true'], calls[0])
         done = subprocess.CompletedProcess([], 0, b'', b'')
         with patch.object(winhost, 'device', lambda: None), patch('subprocess.run', return_value=done) as local:
-            self.assertTrue(inventory_freshness.resolves('linux.example.test'))
+            self.assertIsNone(inventory_freshness.ssh_failure('linux.example.test'))
         self.assertEqual(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'linux.example.test', 'true'], local.call_args[0][0])
 
     def test_terminal_checks_type_a_powershell_marker_at_a_windows_target(self):

@@ -28,9 +28,10 @@ def completes(name):
     return any(line.split('\t', 1)[0] == name for line in result.stdout.splitlines())
 
 
-def resolves(host):
-    """Every name under the local access domain resolves to the local proxy, so the alias counts only
-    when plain OpenSSH reaches the machine through it."""
+def ssh_failure(host):
+    """None when plain OpenSSH reaches the machine, else its exit code and last lines. Every name under the local
+    access domain resolves to the local proxy, so only a connection proves the alias; a failed one does not prove
+    the alias is missing (a duplicate host key fails it too)."""
     try:
         if winhost.device():  # the device's own OpenSSH client
             result = winhost.which('ssh').run_remote(['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, *TRUE], timeout=20)
@@ -38,17 +39,25 @@ def resolves(host):
             result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, *TRUE],
                                     capture_output=True, timeout=20, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
-        return False
-    return result.returncode == 0
+        return 'ssh timed out after 20 s'
+    if result.returncode == 0:
+        return None
+    error = result.stderr or ''
+    if isinstance(error, bytes):
+        error = error.decode(errors='replace')
+    return 'ssh rc %d: %s' % (result.returncode, ' | '.join(error.strip().splitlines()[-3:]))
 
 
 def visible_within(name, domain, budget):
+    """Seconds until the name completes and ssh reaches it; after budget, raises with what failed last."""
     started = time.monotonic()
+    failure = 'not checked'
     while time.monotonic() - started < budget:
-        if completes(name) and resolves(name + '.' + domain):
+        failure = ssh_failure(name + '.' + domain) if completes(name) else 'not in shell completion'
+        if failure is None:
             return time.monotonic() - started
         time.sleep(1)
-    return None
+    raise RuntimeError('%s was not reachable by name within %d s: %s' % (name, budget, failure))
 
 
 def rename(current, new):
@@ -76,13 +85,9 @@ def main():
     rename(args.target, renamed)
     try:
         appeared = visible_within(renamed, domain, BUDGET)
-        if appeared is None:
-            raise RuntimeError('the renamed machine did not appear in completion and as an SSH alias within 30 s')
     finally:
         rename(renamed, args.target)
     restored = visible_within(args.target, domain, BUDGET)
-    if restored is None:
-        raise RuntimeError('the original name did not come back in completion and as an SSH alias within 30 s')
     if registration() != before:
         raise RuntimeError('inventory freshness changed the enrolled identity')
     print(json.dumps({'check': 'inventory-freshness', 'target': args.target, 'status': 'PASS', 'wait_s': round(wait_seconds, 1),

@@ -45,6 +45,8 @@ jobs:
           [ -n "$CONTROLLER_PUBKEY" ] && [ -n "$TUNNEL_KEY" ] || { echo 'WINPOOL_CONTROLLER_PUBKEY or WINPOOL_TUNNEL_KEY is not set'; exit 1; }
           port=$((22300 + SLOT))
 
+          # Runner images share the system host keys; Paperboat refuses a key another machine already uses.
+          sudo rm -f /etc/ssh/ssh_host_* && sudo ssh-keygen -A
           # Our own sshd, not the system's Remote Login: loopback only and keys only, whatever the image configures.
           dir=$RUNNER_TEMP/macpool-sshd; mkdir -p "$dir"
           ssh-keygen -q -t ed25519 -N '' -f "$dir/host_ed25519"
