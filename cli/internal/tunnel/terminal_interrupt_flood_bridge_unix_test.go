@@ -5,6 +5,7 @@ package tunnel
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"path/filepath"
 	"sync/atomic"
@@ -90,5 +91,72 @@ func TestCtrlCUnderAFloodStopsThePaintThroughTheLocalStream(t *testing.T) {
 		}
 	case <-time.After(60 * time.Second):
 		t.Fatalf("no sign of the shell 60 s after Ctrl-C, %d bytes painted after it", painted.Load()-before)
+	}
+}
+
+// N6: yes floods, a paste is stuck behind it, Ctrl-C: the window must keep showing output. The daemon's whole path is here
+// (cursor terminal, local stream with its committed cursor, the CLI's queue), because the cursor is what ended the output.
+func TestCtrlCWithAPasteInFlightKeepsTheWindowAlive(t *testing.T) {
+	host, authorizer, _, target := terminalReplayHost(t)
+	bridge := &LocalPeerCursorBridge{}
+	sequence := &atomic.Int64{}
+	target.SequenceSink = func(value int) { sequence.Store(int64(value)) }
+	remote := attachReplayTerminal(t, host, authorizer, &target, newExecCanaryWire())
+	client, daemon := net.Pipe()
+	go func() {
+		_ = ServeLocalPeerTerminalConn(context.Background(), daemon, newCursorTerminal(context.Background(), remote, sequence, bridge.RecordSequence), bridge)
+	}()
+	local, err := NewLocalPeerConn(client, func(int) {}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := NewObservedReconnectingConn(context.Background(), local, 0, time.Second,
+		func(context.Context) (Conn, error) { return nil, ErrTransportLost }, nil, nil, TelemetryContext{},
+		WithReconnectingOutput(config.DefaultTerminalOutputQueueChunks, 0))
+	defer connection.Close()
+	markers := make(chan string, 64)
+	var painted atomic.Int64
+	go func() {
+		var tail []byte
+		buffer := make([]byte, 4096)
+		for {
+			n, err := connection.Read(buffer)
+			painted.Add(int64(n))
+			tail = append(tail, buffer[:n]...)
+			if at := bytes.Index(tail, []byte("PB_STOPPED")); at >= 0 && bytes.IndexByte(tail[at:], '\r') >= 0 {
+				end := at + bytes.IndexByte(tail[at:], '\r')
+				markers <- string(tail[at:end])
+				tail = tail[end:]
+			}
+			tail = tail[max(0, len(tail)-256):]
+			if err != nil {
+				return
+			}
+		}
+	}()
+	write := func(data []byte) {
+		t.Helper()
+		if _, err := connection.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paste := bytes.Repeat(append(bytes.Repeat([]byte("x"), 1023), '\n'), 256)
+	for round := range 20 {
+		before := painted.Load()
+		write([]byte("yes\n"))
+		for deadline := time.Now().Add(10 * time.Second); painted.Load() < before+2<<20 && time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		}
+		write(paste)
+		write([]byte{0x03})
+		time.Sleep(300 * time.Millisecond)
+		write(fmt.Appendf(nil, "printf 'PB_%%s_%d\\r\\n' STOPPED\n", round))
+		select {
+		case got := <-markers:
+			if want := fmt.Sprintf("PB_STOPPED_%d", round); got != want {
+				t.Fatalf("round %d answered %q", round, got)
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatalf("round %d: no output from the shell 15 s after Ctrl-C, cursor %d", round, sequence.Load())
+		}
 	}
 }

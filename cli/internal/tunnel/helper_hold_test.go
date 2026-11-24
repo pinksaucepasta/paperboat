@@ -207,3 +207,22 @@ func TestHoldDropsTheRestOfAChunkReadHalfWay(t *testing.T) {
 		t.Fatalf("read %q, %v, want the output after the cut only", buf[:n], err)
 	}
 }
+
+// The host publishes between the cut and the resync (the Ctrl-C waits there for a stuck paste), so output past the cut is
+// held when the screen that covers it passes. Releasing it after that screen moved the cursor back: the local stream
+// refused it (commitSequence) and the window's output stopped for good while its input worked (N6).
+func TestHoldDropsHeldOutputTheScreenCovers(t *testing.T) {
+	c := holdConn()
+	c.target = &resolver.TerminalTarget{}
+	c.ackNotify = make(chan struct{}, 1)
+	c.startHold(7)
+	c.routeOutput(frame(0, "flood1"))
+	c.routeOutput(frame(6, "flood2"))
+	c.routeOutput(helperOutput{checkpoint: true, data: []byte("SCREEN"), endSequence: 12})
+	c.routeOutput(frame(12, "prompt"))
+	c.resolveHold(7, 8, true)
+	c.routeOutput(frame(18, "answer"))
+	if got := joined(drain(c)); got != "SCREENpromptanswer" {
+		t.Fatalf("painted %q, want the screen and what follows it", got)
+	}
+}

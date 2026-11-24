@@ -12,7 +12,7 @@ import (
 // speed, until the host answers the key (terminal_input_result carries interrupt_through and interrupt_discarded):
 //   - discarded: the host dropped this viewer's queued output up to through and sends a screen instead. The held output
 //     up to through is dropped; later arrivals up to through are dropped too (they were already in flight). The screen
-//     (channel 3) is never held.
+//     (channel 3) is never held, and what was held before it is dropped: the screen covers it.
 //   - not discarded (idle prompt, small backlog, the key was data in raw mode): the held output is released unchanged,
 //     nothing repainted, scrollback kept.
 //   - no answer within helperHoldTimeout, a refused key, a full hold buffer or the end of the stream: released unchanged.
@@ -65,6 +65,11 @@ func (c *helperTerminalConn) routeOutput(output helperOutput) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if output.checkpoint || !output.byteCursor {
+		if output.checkpoint {
+			// The host sends in order, so the screen covers everything held: released after it, that output moves the
+			// cursor back and the local stream ends the window's output (commitSequence).
+			h.buffered, h.bytes = nil, 0
+		}
 		return c.sendOut(output)
 	}
 	if h.active {
