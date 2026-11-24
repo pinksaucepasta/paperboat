@@ -170,8 +170,8 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 					return browserLoginFailure{message: "Login approval could not be displayed. Run pb login again to resume the saved approval.", cause: err}
 				}
 			}
-			if !c.Bool("no-browser") && !c.Bool("json") {
-				if err := hostDependenciesOf(c.Context).openBrowser(state.ApprovalURL); err != nil {
+			if !c.Bool("no-browser") {
+				if err := openBrowserInteractive(c.Context, c.Bool("json"), state.ApprovalURL); err != nil {
 					if _, writeErr := fmt.Fprintln(c.ErrWriter, "Could not open a browser. Use the link above on another device."); writeErr != nil {
 						return browserLoginFailure{message: "Browser opening and fallback guidance did not finish. Run pb login again to resume the saved approval.", cause: errors.Join(err, writeErr)}
 					}

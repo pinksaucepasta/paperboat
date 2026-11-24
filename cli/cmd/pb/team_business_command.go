@@ -394,6 +394,7 @@ func openTeamPortal(c *cobra.Command, team, intent string) error {
 		return err
 	}
 	fmt.Fprintf(c.OutOrStdout(), "Open this link within 5 minutes to continue setup in the WorkOS Admin Portal:\n%s\n", link)
-	_ = hostDependenciesOf(c.Context()).openBrowser(link)
+	jsonOutput, _ := c.Flags().GetBool("json")
+	_ = openBrowserInteractive(c.Context(), jsonOutput, link)
 	return nil
 }

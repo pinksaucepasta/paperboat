@@ -35,6 +35,16 @@ func defaultHostDependencies() hostDependencies {
 	}
 }
 
+// openBrowserInteractive opens target for a person at a terminal. --json or a run without a terminal on standard
+// input (a script, an agent, CI) opens nothing: the caller has printed the link, which is the whole result.
+func openBrowserInteractive(ctx context.Context, jsonOutput bool, target string) error {
+	deps := hostDependenciesOf(ctx)
+	if jsonOutput || !deps.isTerminal() {
+		return nil
+	}
+	return deps.openBrowser(target)
+}
+
 func hostDependenciesOf(ctx context.Context) hostDependencies {
 	return dependenciesIn(ctx, defaultHostDependencies)
 }

@@ -422,7 +422,10 @@ func TestTeamGetPreservesIdentitySuspensionAndResourcePermissions(t *testing.T) 
 func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 	ctx := withTimings(t.Context(), func(timings *commandTimings) { timings.teamCreatePoll = time.Millisecond })
 	var opened string
-	ctx = withHostDependencies(ctx, func(d *hostDependencies) { d.openBrowser = func(target string) error { opened = target; return nil } })
+	ctx = withHostDependencies(ctx, func(d *hostDependencies) {
+		d.isTerminal = func() bool { return true }
+		d.openBrowser = func(target string) error { opened = target; return nil }
+	})
 	var operations []string
 	polls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
