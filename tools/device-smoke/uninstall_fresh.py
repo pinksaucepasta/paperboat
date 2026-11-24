@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""uninstall_fresh.py HOST BINARY [--keep]  (check id: uninstall-fresh, CHECKLIST F1-09 / C021, PB-U1)
+"""uninstall_fresh.py HOST BINARY [--keep] [--foreign]  (check id: uninstall-fresh, CHECKLIST F1-09 / C021, PB-U1)
 
 A fresh throwaway systemd container on HOST (image SMOKE_CT_IMAGE): BINARY is installed and paired as the container user (SMOKE_CT_USER; a
 throwaway machine of the account HOST's pb is signed in to, or of $FRESH_MINT's), the privileged uninstall inventory
@@ -12,6 +12,8 @@ is recorded (it must see the install), then the command a user runs, `pb uninsta
 The container is removed and every machine revoked by exact id (pb machine revoke, then listed by id) on every exit path;
 --keep leaves both for triage. Every leftover path is stat'ed/ls'ed to stderr (owner, times, processes) before the reinstall. Nothing secret is printed or kept
 (the enrollment token only travels through 0600 files, fresh_pair_lib.sh pair_user).
+--foreign (check id uninstall-foreign-files): before the uninstall, foreign files are planted as the user in every Paperboat directory
+(PLANT); they must survive byte-identical, be listed in `left_in_place`, and everything else there must be gone (JUDGE).
 Prints one JSON line {"check":"uninstall-fresh","status":PASS|FAIL,"leftovers":[...],"machine_id":...}; exit 1 on FAIL.
 env: SMOKE_CT_IMAGE/USER/UID/DOCKER (ct_env.py); SMOKE_CT_DOCKER=docker when HOST's user needs no sudo for docker; FRESH_MINT as in fresh_pair_lib.sh.
 Not for a paired device: it only ever touches its own container and the machines it paired.
@@ -60,6 +62,61 @@ ss -xanH 2>/dev/null | grep -i paperboat | cut -c1-160 | while IFS= read -r l; d
 ss -tulnpH 2>/dev/null | grep -E 'users:\(\("(pb|paperboat[^"]*)"' | cut -c1-160 | while IFS= read -r l; do left listener "$l"; done
 ps -eo pid=,comm= | awk '$2=="pb" || tolower($2) ~ /paperboat/ {print $1" "$2}' | while IFS= read -r l; do left process "$l"; done
 '''.replace('@HOME@', CT_HOME).replace('@USER@', CT_USER).replace('@RUNDIR@', CT_RUNDIR)
+# Foreign files, planted as the user in every Paperboat directory that exists after install+pair (the contract of the
+# uninstall-preserves-foreign-files fix): `pb uninstall` must exit 0, list each top-most planted entry in `left_in_place`,
+# leave the files byte-identical and the link a link to an intact outside directory, and remove everything else.
+PLANT = r'''python3 - <<'PY'
+import hashlib, json, os, pathlib
+home = pathlib.Path(os.environ['HOME']); run = os.environ.get('XDG_RUNTIME_DIR', '')
+roots = [home / '.config/paperboat', home / '.local/state/paperboat', home / '.local/state/paperboat/runtime', home / '.cache/paperboat']
+if run:
+    roots.append(pathlib.Path(run) / 'paperboat')
+outside = home / 'foreign-outside'
+outside.mkdir(exist_ok=True)
+(outside / 'sentinel.txt').write_text('sentinel')
+manifest = {'planted': [], 'files': {}, 'roots': [], 'sentinel': str(outside / 'sentinel.txt'), 'outside': str(outside)}
+for root in roots:
+    if not root.is_dir():
+        continue
+    (root / 'my-secret.key').write_bytes(os.urandom(64))
+    (root / 'my-dir').mkdir(exist_ok=True)
+    (root / 'my-dir/a.txt').write_text('a ' + root.name)
+    (root / 'my-link').symlink_to(outside)
+    manifest['roots'].append(str(root))
+    manifest['planted'] += [str(root / n) for n in ('my-secret.key', 'my-dir', 'my-link')]
+    for p in (root / 'my-secret.key', root / 'my-dir/a.txt'):
+        manifest['files'][str(p)] = hashlib.sha256(p.read_bytes()).hexdigest()
+json.dump(manifest, open(home / 'foreign-manifest.json', 'w'))
+print('PLANTED', len(manifest['planted']), 'in', len(manifest['roots']), 'directories')
+PY
+'''
+JUDGE = r'''python3 - <<'PY'
+import hashlib, json, os, pathlib
+m = json.load(open(pathlib.Path(os.environ['HOME']) / 'foreign-manifest.json'))
+bad = []
+for path, digest in m['files'].items():
+    p = pathlib.Path(path)
+    if not p.is_file() or hashlib.sha256(p.read_bytes()).hexdigest() != digest:
+        bad.append('changed or gone: ' + path)
+for path in m['planted']:
+    p = pathlib.Path(path)
+    if not os.path.lexists(path):
+        bad.append('gone: ' + path)
+    elif p.name == 'my-link' and not (p.is_symlink() and os.path.realpath(p) == os.path.realpath(m['outside'])):
+        bad.append('link no longer points outside: ' + path)
+if pathlib.Path(m['sentinel']).read_text() != 'sentinel':
+    bad.append('the directory a planted link points to was changed')
+planted = [pathlib.Path(p) for p in m['planted']]
+for root in m['roots']:
+    for here, dirs, files in os.walk(root):
+        for name in dirs + files:
+            p = pathlib.Path(here) / name
+            keep = any(p == q or q in p.parents or p in q.parents for q in planted)
+            if not keep:
+                bad.append('not removed: ' + str(p))
+print('FOREIGN_OK' if not bad else 'FOREIGN_FAIL ' + json.dumps(bad[:12]))
+PY
+'''
 ACCOUNTS = "getent passwd | cut -d: -f1; echo --; getent group | cut -d: -f1"
 
 
@@ -94,8 +151,9 @@ echo "== sessions"; loginctl list-sessions --no-legend 2>&1 | head; systemctl is
 
 
 class Check:
-    def __init__(self, host, binary, keep=False):
-        self.host, self.binary, self.keep, self.window = host, binary, keep, '?'
+    def __init__(self, host, binary, keep=False, foreign=False):
+        self.host, self.binary, self.keep, self.foreign, self.window = host, binary, keep, foreign, '?'
+        self.planted = []
         self.ct = 'test-pbu1-%d' % int(time.time())
         self.staged = '/tmp/%s.pb' % self.ct
         self.leftovers, self.machine_ids, self.before, self.reinstall, self.digest = [], [], {}, 'not run', ''
@@ -132,8 +190,11 @@ class Check:
         """fresh_pair_lib.sh pair_user: install BINARY as the container user and pair it as ALIAS; one MACHINE_ID= line out."""
         shim = 'sudo() { shift; "$@"; }\n' if DOCKER == 'docker' else ''
         mint = 'FRESH_MINT=%s\n' % shlex.quote(os.environ['FRESH_MINT']) if os.environ.get('FRESH_MINT') else ''
-        script = 'set -euo pipefail\nFRESH_BINARY=%s\n%s%s%s\npair_user %s %s %s %s\n' % (
-            shlex.quote(self.staged), mint, shim, (HERE / 'fresh_pair_lib.sh').read_text(), self.ct, CT_USER, CT_UID, alias)
+        # fresh_pair_lib.sh refuses to run without these (smoke's other fresh checks send ct_env_remote's output the same way)
+        env = 'export CT_IMAGE=%s CT_USER=%s CT_UID=%s CT_DOCKER=%s CT_HOME=%s CT_RUNDIR=%s\n' % tuple(
+            shlex.quote(str(value)) for value in (CT_IMAGE, CT_USER, CT_UID, DOCKER, CT_HOME, CT_RUNDIR))
+        script = 'set -euo pipefail\n%sFRESH_BINARY=%s\n%s%s%s\npair_user %s %s %s %s\n' % (
+            env, shlex.quote(self.staged), mint, shim, (HERE / 'fresh_pair_lib.sh').read_text(), self.ct, CT_USER, CT_UID, alias)
         code, out = self.ssh('bash -s', stdin=script, timeout=600)
         found = re.findall(r'^MACHINE_ID=(machine_[0-9a-f-]+)$', out, re.M)
         if found:
@@ -188,12 +249,23 @@ class Check:
             self.before = receipt.get('leftovers', {})
             return None if receipt.get('status') == 'FAIL' and receipt.get('total', 0) >= 1 else 'inventory saw nothing of the install: ' + json.dumps(receipt)[:200]
         self.step('pre-uninstall-inventory', positive_control)
+        if self.foreign:
+            def plant():
+                code, out = self.exec(PLANT)
+                found = re.search(r'PLANTED (\d+) in (\d+) directories', out)
+                return None if code == 0 and found and int(found.group(2)) >= 2 else 'could not plant foreign files: ' + out[-300:]
+            if not self.step('plant-foreign-files', plant):
+                return
         uninstall = ("%s uninstall --confirmation 'UNINSTALL PAPERBOAT' --hostname \"$(hostname)\" --json" % PB)
         began = self.exec('date +%T.%N', user=False)[1].strip()
         code, out = self.exec(uninstall, timeout=600)
         self.window = '%s .. %s' % (began, self.exec('date +%T.%N', user=False)[1].strip())
         self.step('pb uninstall', lambda: self.check_uninstall_result(code, out))
-        self.check_leftovers(inbox, machine_id, names)
+        if self.foreign:
+            self.step('foreign-files', lambda: self.check_foreign(out))
+            self.step('server-record', lambda: self.record_problem(machine_id))
+        else:
+            self.check_leftovers(inbox, machine_id, names)
         self.step('reinstall', lambda: self.phase_reinstall(alias + '-again'))
 
     @staticmethod
@@ -209,6 +281,22 @@ class Check:
             return 'did not report the Inbox preserved'
         if result.get('server_record_removed') is False:
             return 'server record not removed: ' + str(result.get('server_record_notice', ''))[:200]
+
+    def check_foreign(self, uninstall_out):
+        """Exit 0 and every planted top-most entry named in left_in_place (checked by check_uninstall_result's caller), the
+        planted entries untouched on disk and nothing else of Paperboat's left in those directories."""
+        code, manifest = self.exec('cat "$HOME/foreign-manifest.json"')
+        try:
+            planted = json.loads(manifest)['planted']
+            result = json.loads(uninstall_out.strip().splitlines()[-1])
+            listed = set(result.get('data', result).get('left_in_place') or [])
+        except (ValueError, KeyError, IndexError, AttributeError):
+            return 'could not read the manifest or the uninstall receipt: ' + uninstall_out[-200:]
+        missing = [p for p in planted if p not in listed]
+        if missing:
+            return 'left_in_place does not list %d planted entries, e.g. %s' % (len(missing), missing[0])
+        code, out = self.exec(JUDGE)
+        return None if 'FOREIGN_OK' in out else 'on disk: ' + out.strip()[-400:]
 
     def check_leftovers(self, inbox, machine_id, names_before):
         receipt = self.inventory(inbox)
@@ -267,6 +355,8 @@ class Check:
 
     def revoke(self, machine_id):
         """Exact id, the way a user does (preview, then the printed confirmation); then the record must be gone or revoked."""
+        if self.machine_listed(machine_id) is None:
+            return None  # pb uninstall already removed the record: nothing to revoke
         code, out = self.ssh(f'{self.mint} machine revoke {machine_id} --json', timeout=120)
         token = re.search(r'"confirmation_token":\s*"([A-Z0-9]+)"', out)
         if token:
@@ -291,18 +381,18 @@ class Check:
 
     def line(self):
         status = 'FAIL' if self.leftovers else 'PASS'
-        return json.dumps({'check': 'uninstall-fresh', 'status': status, 'leftovers': self.leftovers,
+        return json.dumps({'check': 'uninstall-foreign-files' if self.foreign else 'uninstall-fresh', 'status': status, 'leftovers': self.leftovers,
                            'machine_id': self.machine_ids[0] if self.machine_ids else None, 'machine_ids': self.machine_ids,
                            'before': self.before, 'reinstall': self.reinstall, 'container': self.ct}), status
 
 
 def main(argv):
-    keep = '--keep' in argv
-    argv = [a for a in argv if a != '--keep']
+    keep, foreign = '--keep' in argv, '--foreign' in argv
+    argv = [a for a in argv if a not in ('--keep', '--foreign')]
     if len(argv) != 3:
-        print(__doc__.splitlines()[0] + ' [--keep]', file=sys.stderr)
+        print(__doc__.splitlines()[0], file=sys.stderr)
         return 2
-    check = Check(argv[1], argv[2], keep)
+    check = Check(argv[1], argv[2], keep, foreign)
     check.run()
     line, status = check.line()
     print(redact(line), flush=True)

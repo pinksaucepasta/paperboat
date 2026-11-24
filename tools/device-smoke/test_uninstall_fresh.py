@@ -1,6 +1,10 @@
 """uninstall_fresh.py with a stubbed ssh/docker: leftovers of every category are listed, teardown runs on failure, no token leaks."""
 import io
 import json
+import os
+import pathlib
+import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -60,7 +64,8 @@ class Host:
             return 0, json.dumps({'ok': True, 'data': {'revoked': True}})
         if 'machine list --all' in command:
             listed = [{'id': ID1, 'state': 'online'}] if k.get('still_listed') and ID1 not in self.revoked else []
-            listed += [{'id': ID2, 'state': 'online'}] if k.get('revoke_ineffective') else []
+            # the reinstalled machine stays listed until it is revoked; the uninstalled one is removed by pb uninstall itself
+            listed += [{'id': ID2, 'state': 'online'}] if k.get('revoke_ineffective') or ID2 not in self.revoked else []
             return 0, json.dumps({'machines': listed})
         if 'owner=%U' in command:
             self.triaged = command
@@ -89,7 +94,7 @@ class UninstallFresh(unittest.TestCase):
         self.assertEqual((code, result['status'], result['leftovers']), (0, 'PASS', []))
         self.assertEqual(set(result), {'check', 'status', 'leftovers', 'machine_id', 'machine_ids', 'before', 'reinstall', 'container'})
         self.assertEqual((result['check'], result['machine_id'], result['machine_ids'], result['reinstall']), ('uninstall-fresh', ID1, [ID1, ID2], 'doctor healthy'))
-        self.assertEqual(host.revoked, [ID1, ID2])
+        self.assertEqual(host.revoked, [ID2])  # ID1 was removed by pb uninstall itself: nothing left to revoke
         self.assertTrue(any(c.startswith('sudo -n docker rm -f test-pbu1-') for c in host.commands))
         self.assertEqual(result['before'], {'files': 3})  # the inventory saw the install before the uninstall
 
@@ -123,7 +128,7 @@ class UninstallFresh(unittest.TestCase):
         code, result, host, _ = run(revoke_ineffective=True)
         self.assertEqual((code, result['status']), (1, 'FAIL'))
         self.assertIn('machine %s is still listed' % ID2, ' '.join(result['leftovers']))
-        self.assertEqual(host.revoked, [ID1, ID2])  # both were revoked by exact id, with the printed confirmation
+        self.assertEqual(host.revoked, [ID2])  # the still-listed machine was revoked by exact id, with the printed confirmation
 
     def test_real_wrapped_uninstall_result_is_not_a_leftover_and_flat_is_accepted(self):
         for knobs in ({}, {'flat': True}):
@@ -151,6 +156,43 @@ class UninstallFresh(unittest.TestCase):
     def test_redact_removes_tokens(self):
         text = uf.redact("PB_TOKEN='%s' and %s" % (TOKEN, TOKEN))
         self.assertNotIn(TOKEN, text)
+
+
+class ForeignFiles(unittest.TestCase):
+    """PLANT and JUDGE run in the container; here against a temp HOME shaped like an installed machine."""
+
+    def setUp(self):
+        self.home = tempfile.TemporaryDirectory()
+        home = pathlib.Path(self.home.name)
+        for d in ('.config/paperboat', '.local/state/paperboat/runtime', '.cache/paperboat'):
+            (home / d).mkdir(parents=True)
+        self.env = dict(os.environ, HOME=str(home), XDG_RUNTIME_DIR=str(home / 'run'))
+        (home / 'run/paperboat').mkdir(parents=True)
+
+    def tearDown(self):
+        self.home.cleanup()
+
+    def sh(self, script):
+        return subprocess.run(['sh', '-c', script], env=self.env, capture_output=True, text=True).stdout
+
+    def test_planting_then_an_untouched_tree_is_judged_ok(self):
+        self.assertIn('PLANTED 15 in 5 directories', self.sh(uf.PLANT))
+        self.assertIn('FOREIGN_OK', self.sh(uf.JUDGE))
+
+    def test_a_leftover_a_changed_file_or_a_removed_link_fails_the_judge(self):
+        self.sh(uf.PLANT)
+        home = pathlib.Path(self.home.name)
+        (home / '.config/paperboat/generated.json').write_text('{}')  # something Paperboat should have removed
+        self.assertIn('not removed: ' + str(home / '.config/paperboat/generated.json'), self.sh(uf.JUDGE))
+        (home / '.config/paperboat/generated.json').unlink()
+        (home / '.cache/paperboat/my-secret.key').write_bytes(b'changed')
+        self.assertIn('changed or gone', self.sh(uf.JUDGE))
+        link = home / '.local/state/paperboat/my-link'
+        link.unlink()
+        self.assertIn('gone: ' + str(link), self.sh(uf.JUDGE))
+
+    def test_a_missing_manifest_or_unplanted_run_does_not_pass(self):
+        self.assertNotIn('FOREIGN_OK', self.sh(uf.JUDGE))
 
 
 if __name__ == '__main__':

@@ -1140,6 +1140,21 @@ test_fresh_token_ssh_tools() {
   fi
 }
 
+# Runs only when SMOKE_FRESH_HOST and SMOKE_FRESH_BINARY are set: a fresh container is installed, paired and uninstalled (uninstall_fresh.py);
+# the second form first plants foreign files in every Paperboat directory, which the uninstall must list in left_in_place and leave untouched.
+test_uninstall_fresh() {
+  local id=$1 flag=${2:-} out status t0
+  skipped "$id" && return
+  [ -n "${SMOKE_FRESH_HOST:-}" ] && [ -n "${SMOKE_FRESH_BINARY:-}" ] || return 0
+  t0=$(now)
+  out=$(python3 "$HERE/uninstall_fresh.py" "$SMOKE_FRESH_HOST" "$SMOKE_FRESH_BINARY" $flag 2>/dev/null); status=$?
+  if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["status"]=="PASS" and not r["leftovers"]' "$out" 2>/dev/null; then
+    record "$id" PASS $(( $(now)-t0 )) "fresh container: uninstall left nothing${flag:+ but the planted foreign files}, reinstall healthy"
+  else
+    record_command_failure "$id" $(( $(now)-t0 )) "$out"
+  fi
+}
+
 # team-lifecycle / team-roles need a controlled teammate profile (a second signed-in account, teammate_profile.py)
 # on the device that runs them. The --teammate device (default: configured teammate) is the fixture team's independent teammate
 # and runs both checks in the member role; every other device of the run runs them in the owner role, a container
@@ -1342,6 +1357,8 @@ test_inbox_approval
 test_private_access
 test_fresh_pair_access
 test_fresh_token_ssh_tools
+test_uninstall_fresh uninstall-fresh
+test_uninstall_fresh uninstall-foreign-files --foreign
 test_application_pairs transfer-manage transfer_manage.py
 test_application_pairs preview-manage preview_manage.py
 test_application_pairs preview-inspect preview_inspect.py
