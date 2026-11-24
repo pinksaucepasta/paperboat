@@ -49,11 +49,13 @@ up() { # machine numbers whose tunnel port listens on the jump host
 }
 
 pending() { # machine numbers whose GitHub job is still queued or starting: GitHub's Mac queue can outlast any claim age
-  local run status
-  for status in queued in_progress; do
-    for run in $(gh run list --workflow macpool.yml --status "$status" --limit 20 --json databaseId --jq '.[].databaseId'); do
-      gh api "repos/{owner}/{repo}/actions/runs/$run/jobs" --jq '.jobs[] | select(.status != "completed") | .name' |
-        sed -nE 's/^macpool-([1-8])$/\1/p'
+  local run status account
+  for account in gh pool_gh; do # start dispatches to the second account's repository when there is one
+    for status in queued in_progress; do
+      for run in $("$account" run list --workflow macpool.yml --status "$status" --limit 20 --json databaseId --jq '.[].databaseId'); do
+        "$account" api "repos/{owner}/{repo}/actions/runs/$run/jobs" --jq '.jobs[] | select(.status != "completed") | .name' |
+          sed -nE 's/^macpool-([1-8])$/\1/p'
+      done
     done
   done
 }
@@ -76,7 +78,8 @@ start() {
   free=("${free[@]:0:count}")
   for n in "${free[@]}"; do ssh-keygen -q -R "[127.0.0.1]:$((22300 + n))" -f "$KNOWN" >/dev/null 2>&1 || true; done
   pool_gh workflow run macpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
-  for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; done
+  # Dated at the lease's end, so the age check above keeps the slot for its owner until then (stop and release remove it).
+  for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; touch -d "+$hours hours" "$CLAIMS/$n"; done
   flock -u 9
   pool_revoke "${free[@]}" || echo "macpool: could not revoke the previous machine records of ${free[*]}; sweep retries" >&2 # leftovers of the runner that held these slots
   echo "started machines ${free[*]} for ${hours} h; waiting for SSH (about 3 minutes)" >&2

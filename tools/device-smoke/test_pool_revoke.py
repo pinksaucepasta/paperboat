@@ -20,7 +20,15 @@ esac
 cat > /dev/null 2>&1 || true
 [ -z "${STUB_SSH_FAIL:-}" ]
 '''
-GH = '#!/bin/bash\necho "gh $*" >> "$STUB_LOG"\n'
+# gh stub: STUB_QUEUE_REPO is the repository (GH_REPO) with a queued macpool run whose job is STUB_QUEUE_JOB.
+GH = '''#!/bin/bash
+echo "gh $*" >> "$STUB_LOG"
+[ -n "${STUB_QUEUE_REPO:-}" ] && [ "${GH_REPO:-}" = "$STUB_QUEUE_REPO" ] || exit 0
+case "$*" in
+  "run list"*queued*) echo 77 ;;
+  *actions/runs/77/jobs*) echo "$STUB_QUEUE_JOB" ;;
+esac
+'''
 # cleanup stub: a dry run lists two ids, --apply reports them; STUB_CLEANUP_FAIL fails every call.
 CLEANUP = '''#!/bin/bash
 echo "cleanup $*" >> "$STUB_LOG"
@@ -153,6 +161,23 @@ class PoolRevokeTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue(any(c.startswith('cleanup --pool linuxpool --slot 3 ') for c in self.env.calls()), self.env.calls())
         self.assertTrue(any(c.startswith('gh workflow run linuxpool.yml') for c in self.env.calls()))
+
+    def test_start_skips_a_slot_queued_in_the_second_repository(self):
+        conf = self.env.home / '.config' / 'paperboat-dev'
+        conf.mkdir(parents=True)
+        (conf / 'linuxpool-gh.repo').write_text('org/runners')
+        (conf / 'linuxpool-gh.token').write_text('t')
+        done = self.env.run('macpool', 'start', '1', STUB_QUEUE_REPO='org/runners', STUB_QUEUE_JOB='macpool-1')
+        self.assertIn('macpool-2', done.stdout, done.stderr)
+
+    def test_start_skips_a_slot_claimed_until_its_lease_ends(self):
+        self.env.run('macpool', 'start', '1', '2')
+        claims = self.env.home / '.ssh' / 'macpool-claims'
+        hour = os.stat(claims / '1').st_mtime - 3600  # an hour later its runner is down but the lease runs
+        os.utime(claims / '1', (hour, hour))
+        done = self.env.run('macpool', 'start', '1')
+        self.assertIn('macpool-2', done.stdout, done.stderr)
+        self.assertFalse(any('--slot 1 ' in c for c in self.env.calls()[-3:]))
 
     def test_revoking_can_be_switched_off(self):
         self.env.claim('linuxpool', 2)
