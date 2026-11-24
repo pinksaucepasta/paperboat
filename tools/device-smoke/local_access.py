@@ -252,6 +252,11 @@ def unblock_udp(controller):
     ssh(controller, 'for t in iptables ip6tables; do sudo -n $t -D %s 2>/dev/null; done; true' % BLOCK)
 
 
+# How long a probe retries. Right after a daemon restart (--restart-first) it is short: a relay path that needs a minute to
+# come back after a restart is the bug that check exists for.
+RETRY_SECONDS = 60
+
+
 def windows_probe(name, machine, port, marker):
     """Run the same six assertions on the device, without a Python installation there."""
     device, binary = winhost.device(), winhost.pb_path()
@@ -302,7 +307,7 @@ def windows_probe(name, machine, port, marker):
                 ping_paths(binary, machine['alias'], name[5:])
 
     with device.udp_blocked() if name == 'path-relay' else contextlib.nullcontext():
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + RETRY_SECONDS
         while True:
             try:
                 probe()
@@ -318,6 +323,7 @@ def main():
     parser.add_argument('--controller', required=True)
     parser.add_argument('--target', required=True, help='machine alias as `pb machine list` shows it')
     parser.add_argument('--only', default='')
+    parser.add_argument('--restart-first', action='store_true', help='Windows controller: restart its daemon, then probe with a 10 s limit')
     args = parser.parse_args()
     if args.controller == 'windows' and winhost.device() is None:
         parser.error('the windows controller needs PB_SMOKE_WINDOWS_PB and SMOKE_WINDOWS_SSH')
@@ -336,6 +342,11 @@ def main():
             port = origin.ports[kind]
             if args.controller == 'windows':
                 try:
+                    if args.restart_first:
+                        global RETRY_SECONDS
+                        RETRY_SECONDS = 10
+                        restarted = winhost.run_pb(winhost.pb_path(), ['service', 'restart'], 120)
+                        assert restarted.returncode == 0, 'pb service restart failed: ' + restarted.stderr.decode(errors='replace')[-120:]
                     windows_probe(name, machine, port, origin.marker)
                     print(f'PASS local-access:{name}:windows->{args.target} {time.time() - started:.1f}s  {title}', flush=True)
                 except Exception as error:

@@ -100,6 +100,8 @@ def checks(args):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
     table['ssh-rsync'] = (['ssh_tools_lifecycle.py', args.peer, '--tools', 'rsync'], ['--peer'])
     table['local-access'] = (['local_access.py', '--controller', 'windows', '--target', args.peer], ['--peer'])
+    table['relay-ping-after-restart'] = (['local_access.py', '--controller', 'windows', '--target', args.peer, '--only', 'path-relay',
+                                         '--restart-first'], ['--peer'])
     table['cli-budget'] = (['perf_dataplane.py', '--cli-only'], [])
     table['terminal-vt'] = (['terminal_vt_input.py', args.peer], ['--peer'])
     table['ctrlc-interactive'] = (['ctrlc_interactive.py', args.peer], ['--peer'])  # a real console Ctrl-C key (ETX through ConPTY) stops pb.exe: the other interrupts are CTRL_BREAK
