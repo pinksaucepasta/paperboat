@@ -200,7 +200,8 @@ FAILED=0
 record() { # record ID STATUS SECONDS DETAIL
   local id=$1 status=$2 secs=$3 detail=${4:-} failure_code=${5:-}
   ROWS+=("$id|$status|$secs|${detail//|//}|$failure_code")
-  [ "$status" = PASS ] || [ "$status" = SKIP ] || FAILED=1
+  # NOT RUN: a row that needs something this run does not have (its own line in the summary, never PASS, never SKIP)
+  [ "$status" = PASS ] || [ "$status" = SKIP ] || [ "$status" = "NOT RUN" ] || FAILED=1
   printf '%-28s %-5s %6ss  %s\n' "$id" "$status" "$secs" "${detail:0:150}"
 }
 # Preserve the actual failure without exposing command output in shared receipts.
@@ -1067,11 +1068,19 @@ test_env_scopes() {
   done
 }
 
+# Rows that update an official install from R1 (SMOKE_RELEASE_OLD) to R2 (SMOKE_RELEASE_NEW), two releases cut from the same
+# code. Without both there is no older release of this code to start from: the row reports NOT RUN and says so, else it says what
+# is still missing.
+release_gap() { # release_gap WHAT_ELSE_IS_MISSING
+  if [ -n "${SMOKE_RELEASE_OLD:-}" ] && [ -n "${SMOKE_RELEASE_NEW:-}" ]; then echo "$1"
+  else echo "no older official release of the current code (SMOKE_RELEASE_OLD and SMOKE_RELEASE_NEW are not both set)"; fi
+}
+
 # F14-06: an official install updates itself at the configured time. Runs only when SMOKE_SCHEDULED_UPDATE=1 and
 # the device is a paired official install older than the newest official release (it takes about 10 minutes).
 test_update_scheduled() {
   skipped update-scheduled && return
-  [ "${SMOKE_SCHEDULED_UPDATE:-}" = 1 ] || return 0
+  [ "${SMOKE_SCHEDULED_UPDATE:-}" = 1 ] || { record update-scheduled "NOT RUN" 0 "$(release_gap "the device is not a paired official install on SMOKE_RELEASE_OLD (SMOKE_SCHEDULED_UPDATE=1)")"; return 0; }
   local device id out status t0
   for device in "${TLIST[@]}"; do
     id="update-scheduled:$device"
@@ -1096,10 +1105,10 @@ test_update_scheduled() {
 # are set. It runs on this host, not on a device; the floor is cleared on every exit path.
 test_update_floor() {
   skipped update-floor && return
-  [ -n "${SMOKE_STAGING_FLOOR_CRED:-}" ] && [ -n "${SMOKE_STAGING_OFFICIAL:-}" ] && [ -n "${SMOKE_STAGING_CUSTOM:-}" ] || return 0
-  local id=update-floor t0 out status
+  [ -n "${SMOKE_STAGING_FLOOR_CRED:-}" ] && [ -n "${SMOKE_STAGING_OFFICIAL:-}" ] && [ -n "${SMOKE_STAGING_CUSTOM:-}" ] || { record update-floor "NOT RUN" 0 "$(release_gap "the staging fixture is not set (SMOKE_STAGING_FLOOR_CRED, SMOKE_STAGING_OFFICIAL on SMOKE_RELEASE_OLD, SMOKE_STAGING_CUSTOM)")"; return 0; }
+  local id=update-floor t0 out status floor=${SMOKE_STAGING_FLOOR:-${SMOKE_RELEASE_NEW:-}}  # the floor is R2: R1 is refused
   t0=$(now)
-  out=$(${SMOKE_UPDATE_FLOOR_CMD:-python3 "$HERE/update_floor.py"} --cred "$SMOKE_STAGING_FLOOR_CRED" --official "$SMOKE_STAGING_OFFICIAL" --custom "$SMOKE_STAGING_CUSTOM" ${SMOKE_STAGING_FLOOR:+--floor $SMOKE_STAGING_FLOOR} 2>&1); status=$?
+  out=$(${SMOKE_UPDATE_FLOOR_CMD:-python3 "$HERE/update_floor.py"} --cred "$SMOKE_STAGING_FLOOR_CRED" --official "$SMOKE_STAGING_OFFICIAL" --custom "$SMOKE_STAGING_CUSTOM" ${floor:+--floor $floor} 2>&1); status=$?
   if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-floor" and r["status"]=="PASS" and r["custom_unaffected"] and r["floor_cleared"] and len(r["refused"])==3' "$out" 2>/dev/null; then
     record "$id" PASS $(( $(now)-t0 )) "staging floor: old official build refused (machine list, session list, exec) with the update message, custom build unaffected, floor cleared and the official build works again"
   else
@@ -1439,7 +1448,8 @@ for source in "${TLIST[@]}"; do ctl "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2
 } > "$RESULTS_DIR/$STAMP.json"
 echo
 pass=$(printf '%s\n' "${ROWS[@]}" | grep -c '|PASS|'); fail=$(printf '%s\n' "${ROWS[@]}" | grep -c '|FAIL|')
-echo "PASS $pass  FAIL $fail   results: $RESULTS_DIR/$STAMP.json"
+notrun=$(printf '%s\n' "${ROWS[@]}" | grep -c '|NOT RUN|')
+echo "PASS $pass  FAIL $fail  NOT RUN $notrun   results: $RESULTS_DIR/$STAMP.json"
 if [ "$FAILED" != 0 ]; then
   python3 "$HERE/last_green.py" "$RESULTS_DIR/$STAMP.json" || \
     echo "Last-green report unavailable; smoke failures still block the gate." >&2

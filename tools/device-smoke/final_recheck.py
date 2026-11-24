@@ -183,12 +183,12 @@ def run_smoke(groups, args, results):
     code, out, secs = run([str(HERE / 'smoke.sh'), '--targets', ','.join(labels), '--expect-version', args.version, '--only-list', str(listing)] + long_exec, env)
     seen = {}
     for line in out.splitlines():
-        m = re.match(r'^(\S+:\S+)\s+(PASS|FAIL|SKIP)\s+(\d+)s\s*(.*)$', line)
+        m = re.match(r'^(\S+:\S+)\s+(PASS|FAIL|SKIP|NOT RUN)\s+(\d+)s\s*(.*)$', line)
         if m:
             seen[m.group(1)] = (m.group(2), int(m.group(3)), m.group(4))
     for group in sorted({i.partition(':')[0] for i in ids}):
         mine = {k: v for k, v in seen.items() if k.partition(':')[0] == group}
-        status = 'FAIL' if not mine or any(v[0] == 'FAIL' for v in mine.values()) else 'PASS' if any(v[0] == 'PASS' for v in mine.values()) else 'SKIP'
+        status = 'FAIL' if not mine or any(v[0] == 'FAIL' for v in mine.values()) else 'PASS' if any(v[0] == 'PASS' for v in mine.values()) else 'NOT RUN' if all(v[0] == 'NOT RUN' for v in mine.values()) else 'SKIP'
         detail = '; '.join('%s %s %s' % (k, v[0], v[2][:80]) for k, v in sorted(mine.items()) if v[0] != 'PASS')[:300] or ('%d runs' % len(mine))
         results.append({'check': 'smoke:' + group, 'kind': 'smoke', 'status': status, 'seconds': sum(v[1] for v in mine.values()),
                         'detail': detail if mine else 'smoke.sh printed no result (exit %d)' % code})
@@ -411,7 +411,8 @@ def cmd_run(args):
         for entry in todo:
             missing = next((f for f in ('previous', 'binary') if '{%s}' % f in entry['spec'] and not getattr(args, f)), None)
             if missing:
-                results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'FAIL', 'seconds': 0, 'detail': 'needs --%s (%s)' % (missing, 'the previous official release' if missing == 'previous' else 'a local build file of the final build, for the update checks that supply one')})
+                # no older official release of this code (R1) to start from is NOT RUN, not a failure of the build
+                results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'NOT RUN' if missing == 'previous' else 'FAIL', 'seconds': 0, 'detail': 'needs --%s (%s)' % (missing, 'the older official release of this code, SMOKE_RELEASE_OLD' if missing == 'previous' else 'a local build file of the final build, for the update checks that supply one')})
             else:
                 run_entry(entry, args, results)
     except RuntimeError as error:
@@ -438,7 +439,7 @@ def report(build, chosen, results):
     for r in chosen:
         mine = ['smoke:' + i.partition(':')[0] for i in r['smoke']] + ['go:%s/%s' % (go_tests()[t], t) for t in r['go']] + r['declared']
         got = [by_check[c]['status'] for c in mine if c in by_check]
-        status = 'FAIL' if 'FAIL' in got else 'PASS' if got else ('NO CHECK' if r['state'] == '[x]' else r['state'])
+        status = 'FAIL' if 'FAIL' in got else 'PASS' if any(g != 'NOT RUN' for g in got) else 'NOT RUN' if got else ('NO CHECK' if r['state'] == '[x]' else r['state'])
         per_row.append((r['row'], r['state'], status, len(got)))
     md = ['# Final Linux re-check %s (%s)' % (build, stamp), '', '| check | kind | status | s | detail |', '|---|---|---|---|---|']
     md += ['| %s | %s | %s | %d | %s |' % (r['check'], r['kind'], r['status'], r['seconds'], r['detail'].replace('|', '/')) for r in results]
@@ -463,7 +464,7 @@ def main():
     go = sub.add_parser('run')
     go.add_argument('--build', required=True)
     go.add_argument('--host', default='linux')
-    go.add_argument('--previous', default='2026.10.27.0', help='the previous official release the update-with-history extra starts from (the update goes to the Latest)')
+    go.add_argument('--previous', default=os.environ.get('SMOKE_RELEASE_OLD', ''), help='the older official release (R1) the update-with-history extra starts from; the update goes to the Latest (R2). Without it that extra reports NOT RUN')
     go.add_argument('--binary', default='', help='local build file for the update checks that install a supplied build ({binary} in the manifest)')
     go.add_argument('--origin', default=os.environ.get('PB_CONSOLE_ORIGIN', ''))
     go.add_argument('--keep', action='store_true')

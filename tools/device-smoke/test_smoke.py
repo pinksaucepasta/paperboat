@@ -806,6 +806,35 @@ TLIST=($DEVICES)
                 p.main()
         self.assertEqual(calls[-1], 22)  # restored although the check failed
 
+    def test_not_run_rows_are_their_own_status_and_never_fail_the_run(self):
+        text = (HERE / 'smoke.sh').read_text()
+        body = text[text.index('record() {'):text.index('# Preserve the actual failure')]
+
+        def failed_after(status):
+            script = 'ROWS=(); FAILED=0\n' + body + '\nrecord x "$1" 0 why >/dev/null\necho "$FAILED"'
+            return subprocess.run(['bash', '-c', script, 'x', status], capture_output=True, text=True).stdout.strip()
+        self.assertEqual(failed_after('NOT RUN'), '0')  # reported in its own summary line, exit code unchanged
+        self.assertEqual(failed_after('FAIL'), '1')
+        self.assertIn("grep -c '|NOT RUN|'", text)  # counted apart from PASS and FAIL
+        self.assertIn('(PASS|FAIL|SKIP|NOT RUN)', (HERE / 'final_recheck.py').read_text())  # the final run reads the new status too
+
+    def test_release_hop_rows_run_with_two_releases_and_say_what_is_missing_without(self):
+        text = (HERE / 'smoke.sh').read_text()
+        body = text[text.index('release_gap() {'):text.index('# F14-06')]
+
+        def gap(**env):
+            script = body + '\nrelease_gap "fixture missing"'
+            return subprocess.run(['bash', '-c', script], capture_output=True, text=True, env={'PATH': os.environ['PATH'], **env}).stdout.strip()
+        self.assertEqual(gap(), 'no older official release of the current code (SMOKE_RELEASE_OLD and SMOKE_RELEASE_NEW are not both set)')
+        self.assertIn('no older official release', gap(SMOKE_RELEASE_OLD='2026.11.25.0'))  # R2 alone is no hop
+        self.assertEqual(gap(SMOKE_RELEASE_OLD='2026.11.25.0', SMOKE_RELEASE_NEW='2026.11.25.1'), 'fixture missing')  # R1 and R2: the row is only missing its fixture
+        for row in ('update-scheduled', 'update-floor'):
+            self.assertRegex(text, r'record %s "NOT RUN" 0 "\$\(release_gap ' % row)
+        self.assertIn('floor=${SMOKE_STAGING_FLOOR:-${SMOKE_RELEASE_NEW:-}}', text)  # the floor is R2, so R1 is the refused build
+        recheck = (HERE / 'final_recheck.py').read_text()
+        self.assertIn("'NOT RUN' if missing == 'previous' else 'FAIL'", recheck)  # no R1: the history extra is NOT RUN, a missing build file stays FAIL
+        self.assertNotIn('2026.10.27.0', recheck)  # no old official release baked in
+
     def test_network_inventory_waits_for_relay_sync_bounded(self):
         import network_inventory
         syncing = SimpleNamespace(returncode=1, stdout=json.dumps(
