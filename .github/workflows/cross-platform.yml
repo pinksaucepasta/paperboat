@@ -27,6 +27,10 @@ on:
         description: Also run Windows with the race detector (works, adds about 12 min; session TestRunPrefersAReadyRemoteExitOverCancellation hangs under it until fixed)
         type: boolean
         default: false
+      native:
+        description: Also run the Windows OpenSSH native qualification (installs OpenSSH machine-wide; fine on a hosted runner)
+        type: boolean
+        default: false
       shared:
         description: Also run the shared module and the harness unit tests (false for a package shard, tools/ci-shards.py)
         type: boolean
@@ -88,6 +92,7 @@ jobs:
           # A narrowed run is -v, so its log shows each test that ran (--- PASS).
           RUN: ${{ inputs.run }}
           COUNT: ${{ inputs.count || '1' }}
+          NATIVE: ${{ inputs.native && '1' || '' }}
           RACE: ${{ !inputs.norace && (matrix.os != 'windows-latest' || inputs.winrace) && '-race' || '' }}
         run: |
           if [ "$RUNNER_OS" = Windows ]; then

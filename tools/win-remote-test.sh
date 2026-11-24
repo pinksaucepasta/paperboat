@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run one module's Go tests for the committed HEAD on a winpool machine, in the same kind of session CI uses.
-#   tools/win-remote-test.sh <winpool-N> <cli|shared> [package...]       env: RUN (-run regexp) COUNT RACE (-race)
+#   tools/win-remote-test.sh <winpool-N> <cli|shared> [package...]       env: RUN (-run regexp) COUNT RACE (-race) NATIVE=1 (OpenSSH native qualification, see win-test.sh)
 # A raw SSH logon is a network session in session 0: the suite shows over a hundred failures there that are not product
 # bugs (no console, pipes, child processes; git cannot create folders). So this starts tools/win-test.sh as a scheduled
 # task of the machine's own user, interactive and highest: it runs in the logged-on console session, as the GitHub
@@ -38,7 +38,7 @@ here=\$(cd "\$(dirname "\$0")" && pwd)
 cd "\$here/$module"
 mkdir -p "\$here/tmp" 
 export RUNNER_TEMP=\$(cygpath -m "\$here/tmp") # a long path: the user TEMP is the 8.3 form (RUNNER~1), which two tests reject (CI has D:\\a\\_temp)
-export PACKAGES=$(printf %q "${*:-./...}") RUN=$(printf %q "${RUN:-}") COUNT=$(printf %q "${COUNT:-1}") RACE=$(printf %q "${RACE:-}") EVENTS="\$here/events"
+export PACKAGES=$(printf %q "${*:-./...}") RUN=$(printf %q "${RUN:-}") COUNT=$(printf %q "${COUNT:-1}") RACE=$(printf %q "${RACE:-}") NATIVE=$(printf %q "${NATIVE:-}") EVENTS="\$here/events"
 "\$here/tools/win-test.sh" > "\$here/log.txt" 2>&1
 echo \$? > "\$here/exit"
 RUN
