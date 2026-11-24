@@ -23,7 +23,9 @@ func newTestBar(t *testing.T, mode, terminal string, width, height int, terminal
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = reader.Close(); _ = output.Close() })
+	// Writer first: on Windows closing the read end waits for a pending Read (the readPipe drain), which ends only
+	// once every writer is closed.
+	t.Cleanup(func() { _ = output.Close(); _ = reader.Close() })
 	bar := New(Options{
 		Mode:           mode,
 		Term:           terminal,
