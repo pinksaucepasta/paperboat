@@ -88,10 +88,11 @@ def main():
         from pairing_lifecycle import invoke
         machines = invoke(pb, 'machine', 'list', '--all', '--json')['machines']  # the default page is 50 machines
         machine = next(item for item in machines if item['id'] == before['machine_id'])
-        invoke(pb, 'setup', '--name', machine['alias'], raw=True,
-               terminal=True, password=password)
-        command(pb, 'doctor', '--json')
-        invoke(pb, 'exec', machine['alias'], '--', *winhost.true_argv(), raw=True, timeout=45)
+        from collect import run_all
+        # Independent steps: a degraded doctor must not hide a dead exec (nor a failed setup hide either).
+        run_all(('setup', lambda: invoke(pb, 'setup', '--name', machine['alias'], raw=True, terminal=True, password=password)),
+                ('doctor', lambda: command(pb, 'doctor', '--json')),
+                ('exec', lambda: invoke(pb, 'exec', machine['alias'], '--', *winhost.true_argv(), raw=True, timeout=45)))
     elif args.check == 'post-reboot':
         boot = (device.ps('boot time', BOOT_TIME)[1] if device
                 else Path('/proc/sys/kernel/random/boot_id').read_text().strip() if os.uname().sysname == 'Linux'

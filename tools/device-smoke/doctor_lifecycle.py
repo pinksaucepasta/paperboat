@@ -68,8 +68,11 @@ def main():
     parser.add_argument('target')
     args = parser.parse_args()
     healthy = doctor()
-    if healthy['overall'] != 'healthy' or not exec_works(args.target) or not terminal_works(args.target):
-        raise RuntimeError('machine must start healthy with working terminal and exec')
+    # All three are evaluated: a not-healthy doctor must not hide a dead exec or terminal.
+    state = {'doctor': healthy['overall'] == 'healthy', 'exec': exec_works(args.target), 'terminal': terminal_works(args.target)}
+    if not all(state.values()):
+        raise RuntimeError('machine must start healthy with working terminal and exec; failing: ' +
+                           ', '.join(name for name, ok in state.items() if not ok))
     if any(c['status'] != 'pass' for c in healthy['checks']):
         raise RuntimeError('healthy doctor reported a non-passing check')
     if run('service', 'stop')[0]:

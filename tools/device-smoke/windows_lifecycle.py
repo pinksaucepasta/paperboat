@@ -24,6 +24,7 @@ import time
 
 import pairing_lifecycle
 import winhost
+from collect import run_all
 from dev_targets import smoke_value
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -151,9 +152,13 @@ def check_install_pair(win, args):
     # Audit C #26: pair returns only once the local daemon serves (the elevated install waits for it), so the first
     # status right after it, with no polling, already says ready.
     status = win.run('status')
-    assert status[0] == 0 and 'Daemon: ready' in status[1], 'the daemon was not ready when pair returned: ' + ' '.join(status[1].split())[:100]
-    wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', linux(f'{PB_LINUX} machine list --all')[1]), 30, 'the machine online in the account within 30 s of pairing')
-    wait_for(lambda: doctor_ok(win.run('doctor')[1]), max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')
+
+    def ready():
+        assert status[0] == 0 and 'Daemon: ready' in status[1], 'the daemon was not ready when pair returned: ' + ' '.join(status[1].split())[:100]
+    # Independent: a daemon that was not ready at pair return must not hide the online and doctor readings after it.
+    run_all(('ready', ready),
+            ('online', lambda: wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', linux(f'{PB_LINUX} machine list --all')[1]), 30, 'the machine online in the account within 30 s of pairing')),
+            ('doctor', lambda: wait_for(lambda: doctor_ok(win.run('doctor')[1]), max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')))
     args.machine = machine_named(machine_id)  # the pair may suffix a taken name
 
 
@@ -399,7 +404,8 @@ def check_availability(win, args):
 def check_exec(win, args):
     marker = 'pbwin-' + secrets.token_hex(4)
     code, out = linux(f"{PB_LINUX} exec {args.machine} -- cmd /c echo {marker}")
-    assert code == 0 and marker in out, f'exec rc={code}: {out.strip()[-120:]}'
+    # The marker alone on a line: an error that quotes the command line contains it too.
+    assert code == 0 and marker in out.replace('\r', '').split('\n'), f'exec rc={code}: {out.strip()[-120:]}'
 
 
 def check_exec_self(win, args):
