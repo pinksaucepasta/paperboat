@@ -193,7 +193,7 @@ func validPurgeRemaining(item string) bool {
 }
 func validPurgeStage(stage string) bool {
 	switch stage {
-	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "shared_payload_parents", "final_inventory", "reset_cli", "command":
+	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "machine_guard_stop", "machine_guard_files", "machine_guard_addresses", "machine_guard_proxy", "machine_guard_trust", "machine_guard_firewall", "machine_guard_account", "shared_payload_parents", "final_inventory", "reset_cli", "command":
 		return true
 	}
 	return false

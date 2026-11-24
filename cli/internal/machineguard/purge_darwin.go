@@ -97,47 +97,65 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 	// denial and therefore copies/restarts a helper; that transition is neither
 	// needed here nor possible after the account executable has been removed.
 	if err := stopDarwinPurgeJob(ctx, p.Run, "system/"+darwinGuardLabel); err != nil {
-		return err
+		return purgeStep("stop", err)
 	}
 	lock, err := lockStoppedGuard(ctx, paths.StateDir)
 	if err != nil {
-		return err
+		return purgeStep("stop", err)
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
 
-	result = errors.Join(result, removeOwnedPath(paths.LaunchPath), removeOwnedPath(paths.HelperPath), removeOwnedPath(paths.NewsyslogPath))
+	result = errors.Join(result, purgeStep("files", errors.Join(removeOwnedPath(paths.LaunchPath), removeOwnedPath(paths.HelperPath), removeOwnedPath(paths.NewsyslogPath))))
 
 	// Trust removal needs the retained root records, so the state directory is
 	// kept whenever it fails.
 	// Owned loopback aliases and the PF enable token are recorded in state.
 	retirePlatformWithin(Config{StateDir: paths.StateDir}, time.Minute)
-	result = errors.Join(result, darwinRetiredPlatformState(paths.StateDir))
-	result = errors.Join(result, p.RestoreProxy(ctx))
+	result = errors.Join(result, purgeStep("addresses", darwinRetiredPlatformState(paths.StateDir)))
+	result = errors.Join(result, purgeStep("proxy", p.RestoreProxy(ctx)))
 	roots, err := uninstallRoots(paths.StateDir)
 	if err != nil {
-		result = errors.Join(result, fmt.Errorf("read machine guard trust state: %w", err))
+		result = errors.Join(result, purgeStep("trust", fmt.Errorf("read machine guard trust state: %w", err)))
 	} else if len(roots) > 0 {
-		result = errors.Join(result, cleanupDarwinTrustEntriesWithRunner(ctx, Config{StateDir: paths.StateDir}, roots, roots, true, p.Run))
+		result = errors.Join(result, purgeStep("trust", cleanupDarwinTrustEntriesWithRunner(ctx, Config{StateDir: paths.StateDir}, roots, roots, true, p.Run)))
 	}
-	result = errors.Join(result, removeBrowserDomainSelection(paths.StateDir))
+	result = errors.Join(result, purgeStep("trust", removeBrowserDomainSelection(paths.StateDir)))
 
 	// Full purge also retires orphaned owned roots whose protected manifests
 	// were already removed by an interrupted historical cleanup. Namespace
 	// retirement still uses its exact retained root records above.
-	result = errors.Join(result, purgeDarwinOrphanTrust(ctx, p.Run))
+	result = errors.Join(result, purgeStep("trust", purgeDarwinOrphanTrust(ctx, p.Run)))
 	// Flushing the owned child anchor removes every retained deny rule.
 	if _, err := p.Run(ctx, "/sbin/pfctl", "-a", paths.Anchor, "-F", "all"); err != nil {
-		result = errors.Join(result, fmt.Errorf("flush machine guard PF anchor: %w", err))
+		result = errors.Join(result, purgeStep("firewall", fmt.Errorf("flush machine guard PF anchor: %w", err)))
 	}
 
-	result = errors.Join(result, purgeDarwinAccount(ctx, p.Run, darwinBrokerAccount))
-	result = errors.Join(result, removeOwnedPath(paths.SocketDir))
+	result = errors.Join(result, purgeStep("account", purgeDarwinAccount(ctx, p.Run, darwinBrokerAccount)))
+	result = errors.Join(result, purgeStep("files", removeOwnedPath(paths.SocketDir)))
 	if result == nil {
-		result = errors.Join(result, removeOwnedPath(paths.StateDir))
+		result = errors.Join(result, purgeStep("files", removeOwnedPath(paths.StateDir)))
 	} else {
 		result = errors.Join(result, fmt.Errorf("machine guard state %s retained; fix the errors above and retry", paths.StateDir))
 	}
 	return result
+}
+
+// purgeStepError names the purge step that failed, for the uninstall's own report (hostruntimecmd): the error text stays
+// on the machine.
+type purgeStepError struct {
+	step  string
+	cause error
+}
+
+func (e purgeStepError) Error() string     { return "machine guard " + e.step + ": " + e.cause.Error() }
+func (e purgeStepError) Unwrap() error     { return e.cause }
+func (e purgeStepError) PurgeStep() string { return e.step }
+
+func purgeStep(step string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return purgeStepError{step: step, cause: err}
 }
 
 func stopDarwinPurgeJob(ctx context.Context, run darwinTrustRunner, domain string) error {

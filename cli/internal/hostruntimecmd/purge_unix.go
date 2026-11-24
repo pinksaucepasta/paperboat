@@ -354,7 +354,12 @@ func (s unixSweep) purgeAccount(ctx context.Context) error {
 	result = errors.Join(result, withPurgeStage("final_inventory", err))
 	if err == nil && !recordsRemain {
 		if err := s.guard(ctx); err != nil {
-			result = errors.Join(result, withPurgeStage("machine_guard", err))
+			stage := "machine_guard"
+			var step interface{ PurgeStep() string }
+			if errors.As(err, &step) {
+				stage += "_" + step.PurgeStep() // the report carries no error text, so the step must be in its name
+			}
+			result = errors.Join(result, withPurgeStage(stage, err))
 		}
 		for _, directory := range s.plan.sharedRuntimeDirs {
 			if err := s.removePath(directory); err != nil {
