@@ -516,7 +516,7 @@ func (c *Client) ProbePeer(ctx context.Context, value PeerStreamRequest) (PeerPr
 	if response.StatusCode != http.StatusOK {
 		return result, decodeRemoteError(response)
 	}
-	if response.Header.Get("Content-Type") != "application/json" || decodeStrictJSON(io.LimitReader(response.Body, maxJSONBytes+1), &result) != nil || !validNativeProbePath(result.Path) || result.ConnectionNanoseconds < 0 {
+	if response.Header.Get("Content-Type") != "application/json" || decodeStrictJSON(io.LimitReader(response.Body, maxJSONBytes+1), &result) != nil || !validNativeProbePath(result.Path) || result.RTTNanoseconds < 0 {
 		return PeerProbeResult{}, ErrInvalidResponse
 	}
 	return result, nil

@@ -452,8 +452,8 @@ recovery instructions before retrying an operation that may have created resourc
 
 	root.AddCommand(doctorCommandV1())
 	ping := &cobra.Command{Use: "ping <machine>", Short: "Measure authenticated connectivity to a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionPing}
-	ping.Flags().Int("count", 4, "number of authenticated native connections")
-	ping.Flags().Duration("timeout", 10*time.Second, "timeout for each connection")
+	ping.Flags().Int("count", 4, "number of round trips to measure")
+	ping.Flags().Duration("timeout", 10*time.Second, "timeout for each sample, the first one including connection setup")
 	ping.Flags().Bool("json", false, "print JSON")
 	root.AddCommand(ping)
 	relay := &cobra.Command{Use: "relay", Short: "Inspect hosted and self-hosted relays"}

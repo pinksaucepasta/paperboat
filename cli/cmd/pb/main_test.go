@@ -122,7 +122,7 @@ func TestPingCommandAndOutputContract(t *testing.T) {
 			t.Fatalf("pingPath(%q)=%q", path, got)
 		}
 	}
-	report := pingReport{Schema: "paperboat.ping/v1", MachineID: "machine_01", MachineName: "workstation", Sent: 1, Received: 1, Samples: []pingSample{{Sequence: 1, Path: "regional_relay", ConnectionMS: 12.5}}}
+	report := pingReport{Schema: "paperboat.ping/v1", MachineID: "machine_01", MachineName: "workstation", Sent: 1, Received: 1, Samples: []pingSample{{Sequence: 1, Path: "regional_relay", RTTMS: 12.5}}}
 	encoded, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
@@ -620,7 +620,7 @@ func TestDoctorNativeReachabilityUsesObservedPath(t *testing.T) {
 		{"regional_relay", doctorpkg.StatusWarning},
 		{"unknown", doctorpkg.StatusPass},
 	} {
-		check := doctorPeerCheck(tunnel.NativeProbe{Path: sample.path, Connection: 8 * time.Millisecond})
+		check := doctorPeerCheck(tunnel.NativeProbe{Path: sample.path, RTT: 8 * time.Millisecond})
 		if check.Status != sample.status || check.SelectedPath != sample.path {
 			t.Fatalf("path=%q check=%#v", sample.path, check)
 		}

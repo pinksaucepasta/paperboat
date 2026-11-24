@@ -152,8 +152,8 @@ type InspectorResult struct {
 }
 
 type PeerProbeResult struct {
-	Path                  string `json:"path"`
-	ConnectionNanoseconds int64  `json:"connection_nanoseconds"`
+	Path           string `json:"path"`
+	RTTNanoseconds int64  `json:"rtt_nanoseconds"`
 }
 
 const RelayInventorySchemaV1 = "paperboat.relay-inventory/v1"

@@ -16,25 +16,25 @@ import (
 )
 
 type pingSample struct {
-	Sequence     int     `json:"sequence"`
-	Path         string  `json:"path,omitempty"`
-	ConnectionMS float64 `json:"connection_ms,omitempty"`
-	Lost         bool    `json:"lost"`
-	Transition   bool    `json:"path_transition"`
+	Sequence   int     `json:"sequence"`
+	Path       string  `json:"path,omitempty"`
+	RTTMS      float64 `json:"rtt_ms,omitempty"`
+	Lost       bool    `json:"lost"`
+	Transition bool    `json:"path_transition"`
 }
 
 type pingReport struct {
-	Schema              string       `json:"schema"`
-	MachineID           string       `json:"machine_id"`
-	MachineName         string       `json:"machine_name"`
-	Sent                int          `json:"sent"`
-	Received            int          `json:"received"`
-	Lost                int          `json:"lost"`
-	LossPercent         float64      `json:"loss_percent"`
-	MinConnectionMS     float64      `json:"min_connection_ms,omitempty"`
-	AverageConnectionMS float64      `json:"average_connection_ms,omitempty"`
-	MaxConnectionMS     float64      `json:"max_connection_ms,omitempty"`
-	Samples             []pingSample `json:"samples"`
+	Schema       string       `json:"schema"`
+	MachineID    string       `json:"machine_id"`
+	MachineName  string       `json:"machine_name"`
+	Sent         int          `json:"sent"`
+	Received     int          `json:"received"`
+	Lost         int          `json:"lost"`
+	LossPercent  float64      `json:"loss_percent"`
+	MinRTTMS     float64      `json:"min_rtt_ms,omitempty"`
+	AverageRTTMS float64      `json:"average_rtt_ms,omitempty"`
+	MaxRTTMS     float64      `json:"max_rtt_ms,omitempty"`
+	Samples      []pingSample `json:"samples"`
 }
 
 // peerProber is the existing authenticated daemon probe boundary.
@@ -61,7 +61,7 @@ func probeDaemonPeer(ctx context.Context, client peerProber, target resolver.Con
 	if err != nil {
 		return tunnel.NativeProbe{}, err
 	}
-	return tunnel.NativeProbe{Path: probe.Path, Connection: time.Duration(probe.ConnectionNanoseconds)}, nil
+	return tunnel.NativeProbe{Path: probe.Path, RTT: time.Duration(probe.RTTNanoseconds)}, nil
 }
 
 func actionPing(command *cobra.Command, args []string) error {
@@ -104,13 +104,13 @@ func actionPing(command *cobra.Command, args []string) error {
 			if command.Context().Err() != nil {
 				return command.Context().Err()
 			}
-			if !errors.Is(pingErr, context.DeadlineExceeded) && !errors.Is(pingErr, context.Canceled) {
+			if !pingLost(pingErr, report.Received > 0) {
 				return fmt.Errorf("authenticated ping sample %d: %w", sequence, pingErr)
 			}
 			report.Lost++
 			report.Samples = append(report.Samples, pingSample{Sequence: sequence, Lost: true})
 			if !jsonOutput {
-				fmt.Fprintf(command.OutOrStdout(), "sample %d: timeout\n", sequence)
+				fmt.Fprintf(command.OutOrStdout(), "sample %d: lost\n", sequence)
 			}
 			continue
 		}
@@ -118,27 +118,27 @@ func actionPing(command *cobra.Command, args []string) error {
 		selection := path
 		transition := previousSelection != "" && previousSelection != selection
 		previousSelection = selection
-		connectionMS := float64(result.Connection) / float64(time.Millisecond)
+		rttMS := float64(result.RTT) / float64(time.Millisecond)
 		report.Received++
-		total += result.Connection
-		if report.MinConnectionMS == 0 || connectionMS < report.MinConnectionMS {
-			report.MinConnectionMS = connectionMS
+		total += result.RTT
+		if report.MinRTTMS == 0 || rttMS < report.MinRTTMS {
+			report.MinRTTMS = rttMS
 		}
-		if connectionMS > report.MaxConnectionMS {
-			report.MaxConnectionMS = connectionMS
+		if rttMS > report.MaxRTTMS {
+			report.MaxRTTMS = rttMS
 		}
-		sample := pingSample{Sequence: sequence, Path: path, ConnectionMS: connectionMS, Transition: transition}
+		sample := pingSample{Sequence: sequence, Path: path, RTTMS: rttMS, Transition: transition}
 		report.Samples = append(report.Samples, sample)
 		if !jsonOutput {
 			transitionText := ""
 			if transition {
 				transitionText = " transition"
 			}
-			fmt.Fprintf(command.OutOrStdout(), "sample %d: path=%s connect=%.2fms%s\n", sequence, path, sample.ConnectionMS, transitionText)
+			fmt.Fprintf(command.OutOrStdout(), "sample %d: path=%s rtt=%.2fms%s\n", sequence, path, sample.RTTMS, transitionText)
 		}
 	}
 	if report.Received > 0 {
-		report.AverageConnectionMS = float64(total) / float64(time.Millisecond) / float64(report.Received)
+		report.AverageRTTMS = float64(total) / float64(time.Millisecond) / float64(report.Received)
 	}
 	report.LossPercent = float64(report.Lost) * 100 / float64(report.Sent)
 	if jsonOutput {
@@ -148,13 +148,23 @@ func actionPing(command *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(command.OutOrStdout(), "summary: sent=%d received=%d loss=%.1f%%", report.Sent, report.Received, report.LossPercent)
 	if report.Received > 0 {
-		fmt.Fprintf(command.OutOrStdout(), " connect min/avg/max=%.2f/%.2f/%.2fms", report.MinConnectionMS, report.AverageConnectionMS, report.MaxConnectionMS)
+		fmt.Fprintf(command.OutOrStdout(), " rtt min/avg/max=%.2f/%.2f/%.2fms", report.MinRTTMS, report.AverageRTTMS, report.MaxRTTMS)
 	}
 	fmt.Fprintln(command.OutOrStdout())
 	if report.Received == 0 {
 		return exitCodeError{code: 1}
 	}
 	return nil
+}
+
+// pingLost reports a sample the machine did not answer. After an answer, a machine that stopped answering also fails a
+// re-dial: that is loss too, not a command failure.
+func pingLost(err error, answered bool) bool {
+	var remote *localapi.RemoteError
+	if answered && errors.As(err, &remote) && remote.Code == "peer_probe_unavailable" {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 func pingPath(path string) string {

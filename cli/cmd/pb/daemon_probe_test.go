@@ -27,10 +27,10 @@ func TestDaemonProbePreservesTargetAuthorityAndNativeResult(t *testing.T) {
 		if request.MachineID != "machine_1" || request.MachineGeneration != 7 || request.EnvironmentID != "environment_1" || request.Consumer != "health_probe" {
 			t.Fatalf("wrong probe: %+v", request)
 		}
-		return localapi.PeerProbeResult{Path: "regional_relay", ConnectionNanoseconds: 100}, nil
+		return localapi.PeerProbeResult{Path: "regional_relay", RTTNanoseconds: 100}, nil
 	})
 	result, err := probeDaemonPeer(ctx, client, target, "ping_1")
-	if err != nil || result.Path != "regional_relay" || result.Connection != 100 {
+	if err != nil || result.Path != "regional_relay" || result.RTT != 100 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	denied := daemonProbeFunc(func(context.Context, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
@@ -38,5 +38,12 @@ func TestDaemonProbePreservesTargetAuthorityAndNativeResult(t *testing.T) {
 	})
 	if _, err := probeDaemonPeer(ctx, denied, target, "wait_transport"); !errors.Is(err, localapi.ErrPermission) {
 		t.Fatalf("authority error=%v", err)
+	}
+}
+
+func TestPingCountsAMachineThatStoppedAnsweringAsLost(t *testing.T) {
+	redial := &localapi.RemoteError{Code: "peer_probe_unavailable"}
+	if !pingLost(redial, true) || pingLost(redial, false) || !pingLost(context.DeadlineExceeded, false) || pingLost(localapi.ErrPermission, true) {
+		t.Fatal("wrong lost samples")
 	}
 }

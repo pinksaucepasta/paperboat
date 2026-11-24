@@ -82,11 +82,10 @@ type cliNativeRuntime struct {
 	reachedDials          sync.Map // machine ID -> time.Time of its last successful dial
 }
 
-// NativeProbe reports an authenticated connection to one admitted machine.
-// Connection is setup duration, not a round-trip measurement.
+// NativeProbe is one measured round trip to an admitted machine, after its authenticated connection was set up.
 type NativeProbe struct {
-	Path       string
-	Connection time.Duration
+	Path string
+	RTT  time.Duration
 }
 
 func (t *PeerTerminalTunnel) ProbeNative(ctx context.Context, machineID string, generation uint64) (NativeProbe, error) {
@@ -116,20 +115,24 @@ func (t *PeerTerminalTunnel) ProbeNative(ctx context.Context, machineID string, 
 	if err != nil {
 		return NativeProbe{}, err
 	}
-	started := time.Now()
 	session, err := runtime.Dial(ctx, machineID, peerquic.ClassInteractive)
 	if err != nil {
 		return NativeProbe{}, err
 	}
 	defer session.Close()
-	if err := ctx.Err(); err != nil {
+	// Dial returns a held connection without asking the peer: only the peer's answer is a sample.
+	rtt, err := runtime.authority.Ping(ctx, machineID)
+	if ctx.Err() != nil {
 		return NativeProbe{}, contextOperationError(ctx)
+	}
+	if err != nil {
+		return NativeProbe{}, err
 	}
 	path, err := runtime.authority.PeerPath(machineID)
 	if err != nil {
 		return NativeProbe{}, err
 	}
-	return NativeProbe{Path: path, Connection: time.Since(started)}, nil
+	return NativeProbe{Path: path, RTT: rtt}, nil
 }
 
 type cliNativeStreamGroup struct {

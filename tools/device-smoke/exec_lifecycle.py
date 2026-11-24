@@ -149,7 +149,7 @@ def readiness(binary, target):
             or ping['sent'] != 2 or ping['received'] != 2 or ping['lost'] != 0):
         raise RuntimeError('authenticated ping did not reach the exact target twice')
     for sample in ping['samples']:
-        if sample['path'] not in ('direct', 'peer_relay', 'regional_relay') or sample['connection_ms'] <= 0 or sample['lost']:
+        if sample['path'] not in ('direct', 'peer_relay', 'regional_relay') or sample['rtt_ms'] <= 0 or sample['lost']:
             raise RuntimeError('authenticated ping did not report its measured path and timing')
     for condition in ['runtime', 'transport', 'ssh']:
         result = invoke(binary, 'wait', target, '--for', condition, '--timeout', '30s', '--json')

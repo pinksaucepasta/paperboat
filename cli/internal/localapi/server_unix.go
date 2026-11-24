@@ -537,7 +537,7 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe failed; check target connectivity with pb doctor")
 		return
 	}
-	if !validNativeProbePath(result.Path) || result.ConnectionNanoseconds < 0 {
+	if !validNativeProbePath(result.Path) || result.RTTNanoseconds < 0 {
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe is unavailable")
 		return
 	}

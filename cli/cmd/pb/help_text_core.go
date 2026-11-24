@@ -93,7 +93,8 @@ Exit status: 0 ready, 203 timed out, 205 cancelled, 1 any other failure.`,
   pb wait studio --json`},
 	"pb ping": {
 		Long: `Send authenticated health exchanges to one machine and print, per sample, the path used
-(direct, peer_relay, regional_relay or unknown) and the connect time, then a loss summary.
+(direct, peer_relay, regional_relay or unknown) and the round-trip time, then a loss summary.
+The connection is set up before the first sample and is not part of any round-trip time.
 --count sets the number of samples (1-100, default 4) and --timeout bounds each (default 10s,
 at most 1m). Exit status is 1 when every sample is lost. An offline machine is an error, not a
 lost sample. A reachable transport does not mean the service on the machine is ready.`,

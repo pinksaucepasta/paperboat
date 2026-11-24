@@ -76,10 +76,10 @@ func TestProbeReportsNativeConnectionPath(t *testing.T) {
 		input := httptest.NewRequest(http.MethodPost, "/v1/peer-probes", bytes.NewReader(body))
 		input.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
-		server := &Server{config: ServerConfig{PeerProbes: reportingProbe{PeerProbeResult{Path: path, ConnectionNanoseconds: 42}}}}
+		server := &Server{config: ServerConfig{PeerProbes: reportingProbe{PeerProbeResult{Path: path, RTTNanoseconds: 42}}}}
 		server.peerProbe(response, input, localRequestID(), Peer{})
 		var result PeerProbeResult
-		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Path != path || result.ConnectionNanoseconds != 42 {
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Path != path || result.RTTNanoseconds != 42 {
 			t.Fatalf("path=%q status=%d result=%#v", path, response.Code, result)
 		}
 	}

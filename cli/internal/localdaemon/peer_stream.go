@@ -208,7 +208,7 @@ func TunnelPeerProbe(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context
 		if err != nil {
 			return localapi.PeerProbeResult{}, peerProbeFailure(ctx, err)
 		}
-		return localapi.PeerProbeResult{Path: result.Path, ConnectionNanoseconds: result.Connection.Nanoseconds()}, nil
+		return localapi.PeerProbeResult{Path: result.Path, RTTNanoseconds: result.RTT.Nanoseconds()}, nil
 	}
 }
 

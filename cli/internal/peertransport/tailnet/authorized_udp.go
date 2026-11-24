@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/netip"
 	"sort"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
@@ -102,10 +103,34 @@ func (a *Authority) PeerIsLocal(endpointID string) bool {
 // PeerPath reports the selected WireGuard underlay only for a currently
 // authorized peer. It returns unknown while the peer is idle or changing paths.
 func (a *Authority) PeerPath(endpointID string) (string, error) {
+	engine, public, err := a.peerEngine(endpointID)
+	if err != nil {
+		return "", err
+	}
+	if engine == nil {
+		return "unknown", nil
+	}
+	return engine.PeerPath(public), nil
+}
+
+// Ping measures one round trip to an admitted peer's engine (mesh.Server.Ping).
+func (a *Authority) Ping(ctx context.Context, endpointID string) (time.Duration, error) {
+	engine, public, err := a.peerEngine(endpointID)
+	if err != nil {
+		return 0, err
+	}
+	if engine == nil {
+		return 0, ErrAuthority
+	}
+	return engine.Ping(ctx, public)
+}
+
+// peerEngine names the running engine (nil when none runs) and key of an admitted peer.
+func (a *Authority) peerEngine(endpointID string) (*mesh.Server, key.NodePublic, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.usableLocked() {
-		return "", ErrAuthority
+		return nil, key.NodePublic{}, ErrAuthority
 	}
 	for _, peer := range a.current.Peers {
 		if peer.Identity.EndpointID != endpointID {
@@ -113,17 +138,17 @@ func (a *Authority) PeerPath(endpointID string) (string, error) {
 		}
 		public, err := publicKey(peer.Identity.WireGuardPublicKey)
 		if err != nil {
-			return "", ErrAuthority
+			return nil, key.NodePublic{}, ErrAuthority
 		}
 		if a.clientEngine != nil {
-			return a.clientEngine.PeerPath(public), nil
+			return a.clientEngine, public, nil
 		}
 		if a.server != nil && a.server.server != nil {
-			return a.server.server.PeerPath(public), nil
+			return a.server.server, public, nil
 		}
-		return "unknown", nil
+		return nil, public, nil
 	}
-	return "", ErrAdmission
+	return nil, key.NodePublic{}, ErrAdmission
 }
 
 // PeerPaths reports the current data path (direct, peer_relay or regional_relay) to every admitted peer
