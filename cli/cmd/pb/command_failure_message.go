@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
@@ -88,6 +89,15 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	}
 	if localDaemonStopped(err) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return localDaemonStoppedSummary + " " + localDaemonStoppedRecovery
+	}
+	// A preparation step words these for its own command; every other command says what Windows refused.
+	if _, worded := soleCommandOwner(err).(commandPreparationFailure); !worded && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+		if boundedErrorWalk(err, func(e error) bool { return e == elevation.ErrElevationRestrictedJob }) {
+			return elevation.ErrElevationRestrictedJob.Error()
+		}
+		if boundedErrorWalk(err, func(e error) bool { return e == elevation.ErrElevationDenied }) {
+			return "Windows administrator approval was not given. Run the command again and approve the Windows prompt."
+		}
 	}
 	if boundedErrorWalk(err, func(e error) bool { return e == preview.ErrOwnerSessionLeaseLimit }) {
 		return previewSessionLimitMessage
