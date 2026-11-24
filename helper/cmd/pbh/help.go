@@ -61,23 +61,11 @@ its own systemd unit; run pbh update to update by hand.`,
 	"selfhost code": `Print this installation's claim address and a fresh single-use code (valid for 15 minutes) for
 Dashboard → Network → Add self-hosted node. The code carries no account identity.`,
 	"status": `Show the paperboat-selfhost service state (systemctl status). A running service is not
-readiness; use pbh doctor for the host and Dashboard → Network for registration. As root it also
-shows the state of automatic browser HTTPS (pbh configure-tls --acme).`,
+readiness; use pbh doctor for the host and Dashboard → Network for registration.`,
 	"doctor": `Check this host for serving public tunnel ports: the outgoing port range, the host firewall for
 the ports this node listens on (carrier, relay, claim, TCP and UDP 443) and the public port range, per-address connection limits, and a reachability test of a
 test port from the control plane. Each failed check names the fix. Installations without a tunnel
 need no host setup and report so. Fails when no installation exists in --state-dir.`,
-	"configure-tls": `Operator command for Paperboat-managed installations only; it refuses customer self-hosted nodes. Set or rotate the browser-trusted HTTPS certificate for this installation's endpoint hostname.
-The certificate hostname, validity, key pairing and owner-only key permissions are checked before
-anything is saved; the service then restarts, and the previous certificate is restored when it
-cannot. Carrier identity and enrollment do not change. With --https-cert/--https-key the certificate
-owner renews the files and reruns this command.
-With --acme the node obtains the certificate itself (ACME HTTP-01: TCP port 80 of the endpoint host
-must reach this node) and renews it when the CA says so; a failing renewal shows in
-pbh doctor and, as root, in pbh status, and the current certificate serves until it expires.
-Examples:
-  pbh configure-tls --acme
-  pbh configure-tls --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
 	"uninstall": `Stop the service and remove its containers, host firewall rules and the pbh
 executables. Protected identity,
 credentials and configuration are kept for a reinstall unless both --remove-data and
@@ -90,18 +78,8 @@ SIGTERM. The paperboat-selfhost systemd unit runs this; run it by hand only to d
 
 func isHelpFlag(arg string) bool { return arg == "--help" || arg == "-h" || arg == "-help" }
 
-// operatorFlags work only on managed installations and stay out of customer help.
-var operatorFlags = map[string]bool{"https-cert": true, "https-key": true}
-
 func printHelp(out io.Writer, name string, fs *flag.FlagSet) {
 	fmt.Fprintf(out, "pbh %s: %s\n\nFlags:\n", name, commandHelp[name])
-	shown := flag.NewFlagSet(name, flag.ContinueOnError)
-	shown.SetOutput(out)
-	fs.VisitAll(func(f *flag.Flag) {
-		if name == "install" && operatorFlags[f.Name] {
-			return
-		}
-		shown.Var(f.Value, f.Name, f.Usage)
-	})
-	shown.PrintDefaults()
+	fs.SetOutput(out)
+	fs.PrintDefaults()
 }

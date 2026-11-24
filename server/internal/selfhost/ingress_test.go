@@ -1,21 +1,16 @@
 package selfhost
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func TestPublicIngressAddressBoundary(t *testing.T) {
@@ -31,76 +26,15 @@ func TestPublicIngressAddressBoundary(t *testing.T) {
 	}
 }
 
-func TestPublicIngressRejectsSelfSignedHTTPSBeforeNodeProof(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(http.StatusOK) }))
-	t.Cleanup(server.Close)
-	transport := publicIngressTransport("example.com", netip.MustParseAddr("127.0.0.1"))
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
-	}
-	t.Cleanup(transport.CloseIdleConnections)
-	client := &http.Client{Transport: transport, Timeout: time.Second}
-	_, err := client.Get("https://example.com/.well-known/paperboat-installation")
-	var untrusted x509.UnknownAuthorityError
-	if !errors.As(err, &untrusted) {
-		t.Fatalf("untrusted HTTPS certificate denial = %T %v", err, err)
-	}
-	if requests.Load() != 0 {
-		t.Fatal("public ingress reached node proof over untrusted HTTPS")
-	}
-}
-
 // pinnedProbe runs probeIngress against server with the pinned-identity transport VerifyIngress uses, minus the
 // fixed port 443.
 func pinnedProbe(t *testing.T, serverURL string, pin []byte) error {
 	t.Helper()
 	address := strings.TrimPrefix(strings.TrimPrefix(serverURL, "https://"), "http://")
-	_, _, err := probeIngress(t.Context(), "127.0.0.1", "node_a", "secret", func(netip.Addr) bool { return true }, func(string, netip.Addr) *http.Transport {
+	_, _, err := probeIngress(t.Context(), "127.0.0.1", "node_a", "secret", func(netip.Addr) bool { return true }, func(netip.Addr) *http.Transport {
 		return PinnedTransport(pin, address)
 	})
 	return err
-}
-
-// Managed (global) edges serve the operator's publicly trusted certificate, not the enrolled identity: they are
-// verified by public trust, never by the pin. Customer scopes stay pinned, so a publicly trusted certificate
-// that is not the enrolled identity is refused for them.
-func TestIngressTransportTrustFollowsTheInstallationScope(t *testing.T) {
-	server := httptest.NewUnstartedServer(challengeHandler("node_a", "secret"))
-	server.EnableHTTP2 = false
-	server.StartTLS()
-	t.Cleanup(server.Close)
-	roots := x509.NewCertPool()
-	roots.AddCert(server.Certificate())
-	spki := sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)
-	wrong := sha256.Sum256([]byte("another identity"))
-	probe := func(scope string, pin []byte, trusted bool) error {
-		_, _, err := probeIngress(t.Context(), "127.0.0.1", "node_a", "secret", func(netip.Addr) bool { return true }, func(host string, ip netip.Addr) *http.Transport {
-			transport := ingressTransportFor(scope, pin, host, ip)
-			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
-			}
-			if trusted {
-				transport.TLSClientConfig.RootCAs = roots
-			}
-			return transport
-		})
-		return err
-	}
-	if err := probe("global", wrong[:], true); err != nil {
-		t.Fatalf("a managed edge with a publicly trusted certificate was refused: %v", err)
-	}
-	if err := probe("global", wrong[:], false); err == nil {
-		t.Fatal("a managed edge with an untrusted certificate was accepted")
-	}
-	for _, scope := range []string{"account", "team"} {
-		if err := probe(scope, wrong[:], true); err == nil {
-			t.Fatalf("%s scope accepted a certificate that is not the enrolled identity", scope)
-		}
-		if err := probe(scope, spki[:], false); err != nil {
-			t.Fatalf("%s scope refused its enrolled identity: %v", scope, err)
-		}
-	}
 }
 
 func challengeHandler(node, credential string) http.Handler {
@@ -112,7 +46,7 @@ func challengeHandler(node, credential string) http.Handler {
 	})
 }
 
-// A self-hosted node serves its enrolled (self-signed) identity and no publicly trusted certificate: the probe
+// Every node (global or customer) serves its enrolled (self-signed) identity and no publicly trusted certificate: the probe
 // accepts exactly that identity, and fails closed on any other certificate or on plain HTTP.
 func TestPinnedIngressProbeAcceptsOnlyTheEnrolledIdentity(t *testing.T) {
 	server := httptest.NewUnstartedServer(challengeHandler("node_a", "secret"))

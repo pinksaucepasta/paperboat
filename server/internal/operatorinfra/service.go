@@ -43,14 +43,14 @@ type Service struct {
 	store *db.DB
 	audit *audit.Writer
 	key   string
-	// probeIngress is selfhost.ProbePublicIngress; tests replace it.
-	probeIngress   func(ctx context.Context, host, node, credential string) (any, any, error)
+	// probeIngress is selfhost.ProbePinnedIngress; tests replace it.
+	probeIngress   func(ctx context.Context, host, node, credential string, pin []byte) (any, any, error)
 	ingressMu      sync.Mutex
 	ingressRetries map[string]ingressRetry
 }
 
 func NewService(store *db.DB, encryptionKey string) *Service {
-	return &Service{store: store, audit: audit.NewWriter(store), key: encryptionKey, probeIngress: selfhost.ProbePublicIngress}
+	return &Service{store: store, audit: audit.NewWriter(store), key: encryptionKey, probeIngress: selfhost.ProbePinnedIngress}
 }
 
 type Region struct {

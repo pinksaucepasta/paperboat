@@ -67405,7 +67405,7 @@
                             "properties": {
                               "source": {
                                 "type": "string",
-                                "pattern": "^(hosts|canary|deploy|edge-certificate:[A-Za-z0-9.:-]{1,253})$"
+                                "pattern": "^(hosts|canary|deploy)$"
                               },
                               "payload": {
                                 "type": "object",
@@ -67519,7 +67519,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Current active operations operator and separate operator session required; Operator-Target is the source. Audited. Accepts at most 49152 request-body bytes and a payload of at most 32768. Edges never write here: each edge's certificate renewal rides in its authenticated heartbeat.",
+        "description": "Current active operations operator and separate operator session required; Operator-Target is the source. Audited. Accepts at most 49152 request-body bytes and a payload of at most 32768.",
         "x-operator-capability": "operations",
         "parameters": [
           {

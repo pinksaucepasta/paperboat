@@ -9654,7 +9654,7 @@ export interface paths {
         put?: never;
         /**
          * Record the latest host capacity, canary or deploy state
-         * @description Current active operations operator and separate operator session required; Operator-Target is the source. Audited. Accepts at most 49152 request-body bytes and a payload of at most 32768. Edges never write here: each edge's certificate renewal rides in its authenticated heartbeat.
+         * @description Current active operations operator and separate operator session required; Operator-Target is the source. Audited. Accepts at most 49152 request-body bytes and a payload of at most 32768.
          */
         post: operations["post_host_health_report"];
         delete?: never;

@@ -28,23 +28,15 @@ type Deployment struct {
 	SelfHosted                bool   `json:"self_hosted,omitempty"`
 	InfrastructureTLSCertFile string `json:"infrastructure_tls_cert_file"`
 	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file"`
-	PublicHTTPSCertFile       string `json:"public_https_cert_file,omitempty"`
-	PublicHTTPSKeyFile        string `json:"public_https_key_file,omitempty"`
-	// PublicACMEChallengeDir holds the ACME HTTP-01 answers pbh writes while it obtains the browser HTTPS certificate;
-	// port 80 serves them. Empty: no automatic certificate.
-	PublicACMEChallengeDir string `json:"public_acme_challenge_dir,omitempty"`
-	BrowserAccessEnabled   bool   `json:"browser_access_enabled"`
-	ControlURL             string `json:"control_url"`
-	CredentialIssuer       string `json:"credential_issuer"`
-	ControlCredentialFile  string `json:"control_credential_file"`
-	// CertificateRenewalStatusFile is where the host's certificate renewal timer writes its last check
-	// (pbh's public-acme/renew-status.json); each heartbeat carries it so the admin panel alerts per node. Empty: none.
-	CertificateRenewalStatusFile string `json:"certificate_renewal_status_file,omitempty"`
-	ControlCAFile                string `json:"control_ca_file"`
-	JWKSFile                     string `json:"jwks_file"`
-	RevocationsFile              string `json:"revocations_file"`
-	UsageSigningKeyFile          string `json:"usage_signing_key_file"`
-	ConnectorAdvertiseHost       string `json:"connector_advertise_host"`
+	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
+	ControlURL                string `json:"control_url"`
+	CredentialIssuer          string `json:"credential_issuer"`
+	ControlCredentialFile     string `json:"control_credential_file"`
+	ControlCAFile             string `json:"control_ca_file"`
+	JWKSFile                  string `json:"jwks_file"`
+	RevocationsFile           string `json:"revocations_file"`
+	UsageSigningKeyFile       string `json:"usage_signing_key_file"`
+	ConnectorAdvertiseHost    string `json:"connector_advertise_host"`
 	// Carrier listeners are dedicated connector-v1 data-plane endpoints. They
 	// require mutual TLS plus the
 	// server's admission-backed peer binding.
@@ -140,9 +132,6 @@ func (d Deployment) validate() error {
 			return errors.New("deployment paths must be bounded and absolute")
 		}
 	}
-	if p := d.CertificateRenewalStatusFile; p != "" && (!filepath.IsAbs(p) || len(p) > 4096) {
-		return errors.New("certificate_renewal_status_file must be bounded and absolute")
-	}
 	// The carrier certificate is the edge's stable identity: the server and hosts pin it, and an
 	// install hands it to the replacement process unchanged (edge/internal/handover).
 	for _, path := range []string{d.InfrastructureTLSCertFile, d.InfrastructureTLSKeyFile} {
@@ -152,17 +141,6 @@ func (d Deployment) validate() error {
 	}
 	if d.ControlCAFile != "" && (!filepath.IsAbs(d.ControlCAFile) || len(d.ControlCAFile) > 4096) {
 		return errors.New("control_ca_file must be a bounded absolute path")
-	}
-	if (d.PublicHTTPSCertFile == "") != (d.PublicHTTPSKeyFile == "") {
-		return errors.New("public HTTPS TLS needs both certificate and key files")
-	}
-	for _, path := range []string{d.PublicHTTPSCertFile, d.PublicHTTPSKeyFile} {
-		if path != "" && (!filepath.IsAbs(path) || len(path) > 4096) {
-			return errors.New("public HTTPS TLS paths must be bounded and absolute")
-		}
-	}
-	if d.PublicACMEChallengeDir != "" && (!filepath.IsAbs(d.PublicACMEChallengeDir) || len(d.PublicACMEChallengeDir) > 4096) {
-		return errors.New("public_acme_challenge_dir must be a bounded absolute path")
 	}
 	// Canonical preview traffic always has both dedicated carrier transports.
 	// There is no safe legacy-only deployment: buildService cannot construct a

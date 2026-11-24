@@ -73,9 +73,6 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		if !ready {
 			return nil
 		}
-		if err := syncPublicHTTPSDeployment(dir); err != nil {
-			return err
-		}
 		dirs, err := ComponentDirectories(dir)
 		if err != nil {
 			return err
@@ -95,11 +92,9 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		started = true
 		return nil
 	}
-	// renewAll renews what is due: the installation's own certificate and the browser HTTPS certificate; renewing
-	// the first, or obtaining the second for the first time, restarts the components so they load it. An unavailable CA keeps the current certificate and is retried at the
-	// next check; only a failed restart ends the run.
+	// renewAll renews the installation's own certificate when due and restarts the components so they load it; a
+	// failed renewal keeps the current certificate and is retried at the next check.
 	renewAll := func(now time.Time) error {
-		restart := false
 		renewed, err := RenewCertificate(dir, now)
 		if err != nil {
 			if observe != nil {
@@ -109,21 +104,8 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		}
 		if renewed {
 			fmt.Fprintln(output, "Infrastructure certificate renewed; runtime components restarted with the same TLS identity.")
-			restart = true
 		}
-		served := publicHTTPSUsable(dir, now)
-		publicRenewed, err := RenewPublicHTTPS(ctx, dir, PublicACMEDirectoryURL, now)
-		if err != nil {
-			if observe != nil {
-				observe(ctx, "selfhost_public_https", err)
-			}
-			fmt.Fprintln(output, "Browser HTTPS certificate renewal failed; the current certificate is retained; retry scheduled. Run pbh status for the reason.")
-		}
-		if publicRenewed {
-			fmt.Fprintln(output, "Browser HTTPS certificate renewed.")
-			restart = restart || !served // an edge serving the previous certificate loads the new one without a restart
-		}
-		if !restart {
+		if !renewed {
 			return nil
 		}
 		stopChildren()
@@ -132,9 +114,6 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		started = false
 		return start()
 	}
-	// The first browser HTTPS attempt waits for the edge to be answering on port 80.
-	firstPublicRenewal := time.NewTimer(30 * time.Second)
-	defer firstPublicRenewal.Stop()
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- serve(ctx, dir, listen, notify, observe) }()
 	for {
@@ -160,14 +139,6 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 				return err
 			}
 		case now := <-renewals:
-			if err := renewAll(now); err != nil {
-				cancel()
-				stopChildren()
-				<-serverDone
-				wg.Wait()
-				return err
-			}
-		case now := <-firstPublicRenewal.C:
 			if err := renewAll(now); err != nil {
 				cancel()
 				stopChildren()

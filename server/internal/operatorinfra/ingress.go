@@ -17,8 +17,8 @@ import (
 // addresses, fenced on the probed process epoch, endpoint, revision (0: the current one) and credential.
 func (s *Service) verifyNodeIngress(ctx context.Context, tx *db.Tx, node string, revision int64) error {
 	var host, epoch string
-	var cipher, runtimeHash []byte
-	err := tx.QueryRow(ctx, `SELECT n.endpoint_host,n.process_epoch,m.runtime_ciphertext,m.runtime_hash,m.revision FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND ($2=0 OR m.revision=$2) AND m.retired_at IS NULL AND r.enabled AND n.state='ready' AND n.ready AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND 'edge'=ANY(n.roles)`, node, revision).Scan(&host, &epoch, &cipher, &runtimeHash, &revision)
+	var cipher, runtimeHash, pin []byte
+	err := tx.QueryRow(ctx, `SELECT n.endpoint_host,n.process_epoch,m.runtime_ciphertext,m.runtime_hash,m.revision,n.tls_spki_sha256 FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND ($2=0 OR m.revision=$2) AND m.retired_at IS NULL AND r.enabled AND n.state='ready' AND n.ready AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND 'edge'=ANY(n.roles)`, node, revision).Scan(&host, &epoch, &cipher, &runtimeHash, &revision, &pin)
 	if err == pgx.ErrNoRows {
 		return ErrConflict
 	}
@@ -35,7 +35,7 @@ func (s *Service) verifyNodeIngress(ctx context.Context, tx *db.Tx, node string,
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	v4, v6, err := s.probeIngress(probeCtx, host, node, credential)
+	v4, v6, err := s.probeIngress(probeCtx, host, node, credential, pin)
 	if err != nil {
 		return ErrConflict
 	}

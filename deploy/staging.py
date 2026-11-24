@@ -477,15 +477,11 @@ def edge(image, second=False):
         "revocations.json": json.dumps({"jtis": [], "environments": [], "connector_generations": [], "key_ids": []}),
         "usage.key": json.dumps({"key_id": usage, "edge_node_id": node, "private_key": b64(raw_seed + raw_pub)}),
         "tls.crt": cert_pem, "tls.key": key_pem,
-        "pub.crt": cert_pem, "pub.key": key_pem,  # the edge refuses the carrier certificate files as the public ones
         "deployment.json": json.dumps({
             "self_hosted": False, "browser_access_enabled": False, "control_url": api, "credential_issuer": api,
             "control_credential_file": "/state/runtime.credential", "control_ca_file": "", "jwks_file": "/state/jwks.json",
             "revocations_file": "/state/revocations.json", "usage_signing_key_file": "/state/usage.key",
             "infrastructure_tls_cert_file": "/state/tls.crt", "infrastructure_tls_key_file": "/state/tls.key",
-            # The infrastructure hostname uses this fixture certificate; publication SNI names
-            # use the platform wildcard distributed by the control plane (infrastructureTLS).
-            "public_https_cert_file": "/state/pub.crt", "public_https_key_file": "/state/pub.key",
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:443",
             "private_https_listen_address": "127.0.0.1:7279", "public_http_listen_address": f"0.0.0.0:{http_port}",

@@ -772,22 +772,17 @@ try {
     await waitReady("relay health")
     world.regionsFail = false
   })
-  await step("admin bell: an automatic rollback and a failing edge certificate renewal are alerts with what to do", async () => {
+  await step("admin bell: an automatic rollback is an alert with what to do", async () => {
     const at = new Date().toISOString()
     world.hostHealth = [
       { source: "deploy", payload: { rolled_back: true, kept_migrated: false, what: "server 2", reason: "no green canary run within 300 s of the switch", green_after: true, rollback_ok: true, at }, reported_at: at },
-      { source: "edge-certificate:203.0.113.7", payload: { ok: false, error: "issue public IP certificate failed; inspect the protected certificate renewal log", stale_after_seconds: 86400 }, reported_at: at },
-      { source: "edge-certificate:203.0.113.8", payload: { ok: true, error: "", stale_after_seconds: 86400 }, reported_at: at },
     ]
     try {
       await p.goto(`${ORIGIN}/audit`)
-      await p.waitForSelector('[data-admin-notices="2"]')
+      await p.waitForSelector('[data-admin-notices="1"]')
       await p.locator("[data-admin-notices]").click()
       const rollback = await text('[data-alert="deploy:rolled-back"]')
       expect(rollback.includes("A deploy was rolled back automatically") && rollback.includes("Fix the cause and deploy again"), `rollback alert was: ${rollback}`)
-      const cert = await text('[data-alert="edge-certificate:203.0.113.7"]')
-      expect(cert.includes("Certificate renewal is failing on 203.0.113.7") && cert.includes("pbh doctor"), `certificate alert was: ${cert}`)
-      expect((await p.locator('[data-alert="edge-certificate:203.0.113.8"]').count()) === 0, "a healthy edge is not an alert")
       await p.keyboard.press("Escape")
     } finally {
       world.hostHealth = []

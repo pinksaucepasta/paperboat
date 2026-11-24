@@ -42,9 +42,6 @@ func TestLatestReportReplacesThePreviousOneAndBadReportsAreRefusedPostgres(t *te
 	}
 	for _, bad := range []Report{
 		{Source: "other", Payload: json.RawMessage(`{}`)},
-		{Source: "edge-certificate:", Payload: json.RawMessage(`{}`)},
-		{Source: "edge-certificate:a b", Payload: json.RawMessage(`{}`)},
-		{Source: "edge-certificate:" + strings.Repeat("a", 254), Payload: json.RawMessage(`{}`)},
 		{Source: "hosts", Payload: json.RawMessage(`[1]`)},
 		{Source: "hosts", Payload: json.RawMessage(`null`)},
 		{Source: "hosts", Payload: json.RawMessage(`{"x":"` + strings.Repeat("a", maxPayload) + `"}`)},
@@ -54,29 +51,14 @@ func TestLatestReportReplacesThePreviousOneAndBadReportsAreRefusedPostgres(t *te
 			t.Fatalf("report %.40s: err = %v, want ErrInvalid", bad.Payload, err)
 		}
 	}
-	// Edge rows never come from here: each edge's certificate renewal rides in its own heartbeat.
-	for _, source := range []string{"edge-certificate:203.0.113.7", "edge-certificate:node-edge-a"} {
-		if err := s.Ingest(ctx, Report{Source: source, Payload: json.RawMessage(`{"ok":true}`)}); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("source %s: err = %v, want ErrInvalid", source, err)
-		}
-	}
 	if err := s.Ingest(ctx, Report{Source: "deploy", Payload: json.RawMessage(`{"ok":false}`)}); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := store.Pool().Exec(ctx, `INSERT INTO host_health_reports(source,payload) VALUES('edge-certificate:example.com','{}')`); err == nil {
-		t.Fatal("the table accepted an edge row")
 	}
 	entries, err := s.Snapshot(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var operator []Entry
-	for _, e := range entries {
-		if !strings.HasPrefix(e.Source, "edge-certificate:") {
-			operator = append(operator, e)
-		}
-	}
-	if len(operator) != 2 || operator[0].Source != "deploy" || operator[1].Source != "hosts" || string(operator[1].Payload) != `{"hosts": 2}` {
-		t.Fatalf("snapshot = %+v; want deploy and the second hosts report", operator)
+	if len(entries) != 2 || entries[0].Source != "deploy" || entries[1].Source != "hosts" || string(entries[1].Payload) != `{"hosts": 2}` {
+		t.Fatalf("snapshot = %+v; want deploy and the second hosts report", entries)
 	}
 }

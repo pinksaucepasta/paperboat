@@ -66,28 +66,10 @@ one name per host, an `A` and an `AAAA` record each (the hosts have global IPv6 
 controls and outside the preview, tunnel and runtime base domains. The same name serves the edge carrier, the
 relay and the public HTTPS listener of that host. Install with `pbh install --endpoint-host <name>`: the carrier
 certificate gets the name as SAN and the node registers it; an existing installation refuses a changed
-`--endpoint-host`, so a host that advertises its IP is uninstalled and installed again. Public HTTPS for the name:
-`pbh configure-tls --acme` (below) orders a certificate for that name. Check from a
+`--endpoint-host`, so a host that advertises its IP is uninstalled and installed again. An IP works too (such a node is unreachable
+from IPv6-only machines behind NAT64). No certificate is needed: the edge
+serves its enrolled identity there and the control plane pins it. Check from a
 v6-only host: `getent ahostsv6 <name>` returns a `64:ff9b::` address, `pb ping` shows a path.
-
-## Public HTTPS for enrolled IP edges
-
-Operator-only: `pbh configure-tls` and the install flags `--https-cert`/`--https-key` work on Paperboat-managed
-(global-scope) installations only and refuse a customer self-hosted node (those need no certificate: the control
-plane pins the node's enrolled identity, and browser terminals use managed edges). They are not in `pbh help`.
-
-Relay/edge installations live on their own hosts. An installation advertising a
-public IP needs a publicly trusted IP certificate in addition to its enrolled
-carrier certificate. These identities serve different connections; keep the
-carrier key and runtime credentials unchanged.
-
-Run `pbh configure-tls --acme` once on the node: `pbh serve` then obtains the certificate over HTTP-01 (TCP port 80,
-answered by the running edge) 30 seconds after start and renews it when the CA says so (ARI; a third of its
-lifetime left when the CA cannot be asked, half under ten days). It checks every six hours and at every service start;
-there is no timer to install. The edge loads a renewed certificate without a restart. Each check is written to `public-acme/status.json` (`pbh status`, `pbh doctor`) and
-`public-acme/renew-status.json`; the edge carries the latter in every heartbeat over its own enrolled node credential,
-so a failing renewal, or no check for a day, is an alert in the admin bell for that node. `pbh doctor` fails when a
-renewal fails, is overdue or is not being checked.
 
 ## Managed server upgrades
 

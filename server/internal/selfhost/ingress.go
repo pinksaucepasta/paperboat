@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -60,24 +59,23 @@ func publicIngressIP(ip netip.Addr) bool {
 }
 
 // VerifyIngress probes only the installation's registered public hostname on
-// HTTPS 443. A customer installation's certificate must be the node's enrolled identity
-// (tls_spki_sha256), so no publicly trusted certificate is needed; a managed (global)
-// installation serves the operator's publicly trusted certificate, which renews, so it is
-// checked against the WebPKI roots for the hostname. Resolution is pinned before dialing,
+// HTTPS 443. Its certificate must be the node's enrolled identity (tls_spki_sha256), for a
+// global installation as for a customer's: no publicly trusted certificate is needed.
+// Resolution is pinned before dialing,
 // redirects/proxies are disabled, and every advertised address must prove possession of
 // this node's credential.
 func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	var node, host, epoch, scopeKind string
+	var node, host, epoch string
 	var pin []byte
-	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch,n.tls_spki_sha256,i.scope_kind FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND `+nodeLiveSQL, id).Scan(&node, &host, &epoch, &pin, &scopeKind); err != nil {
+	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch,n.tls_spki_sha256 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND `+nodeLiveSQL, id).Scan(&node, &host, &epoch, &pin); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrIngress
 		}
 		return err
 	}
-	if scopeKind != "global" && len(pin) != sha256.Size {
+	if len(pin) != sha256.Size {
 		return ErrIngress
 	}
 	credential, err := s.RuntimeCredential(ctx, node)
@@ -87,7 +85,7 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	v4, v6, err := probeIngress(ctx, host, node, credential, s.ingressIP, func(host string, ip netip.Addr) *http.Transport { return ingressTransportFor(scopeKind, pin, host, ip) })
+	v4, v6, err := probeIngress(ctx, host, node, credential, s.ingressIP, func(ip netip.Addr) *http.Transport { return pinnedIngressTransport(pin, ip) })
 	if err != nil {
 		return err
 	}
@@ -105,16 +103,18 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 	return nil
 }
 
-// ProbePublicIngress verifies that every public address for host serves this
-// exact node's credential over publicly trusted HTTPS, independently of its
-// pinned carrier identity. The caller must fence its state write.
-func ProbePublicIngress(ctx context.Context, host, node, credential string) (any, any, error) {
-	return probeIngress(ctx, host, node, credential, publicIngressIP, publicIngressTransport)
+// ProbePinnedIngress verifies that every public address for host serves this exact node's credential under the
+// identity with this SPKI SHA-256. The caller must fence its state write.
+func ProbePinnedIngress(ctx context.Context, host, node, credential string, pin []byte) (any, any, error) {
+	if len(pin) != sha256.Size {
+		return nil, nil, ErrIngress
+	}
+	return probeIngress(ctx, host, node, credential, publicIngressIP, func(ip netip.Addr) *http.Transport { return pinnedIngressTransport(pin, ip) })
 }
 
-// probeIngress is ProbePublicIngress with the address rule given: managed nodes stay public-only, and a
+// probeIngress is ProbePinnedIngress with the address rule given: managed nodes stay public-only, and a
 // self-hosted node may be private when the service allows it (staging).
-func probeIngress(ctx context.Context, host, node, credential string, allowed func(netip.Addr) bool, transportFor func(host string, ip netip.Addr) *http.Transport) (any, any, error) {
+func probeIngress(ctx context.Context, host, node, credential string, allowed func(netip.Addr) bool, transportFor func(ip netip.Addr) *http.Transport) (any, any, error) {
 	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
 		return nil, nil, ingressProbeError(err)
@@ -148,7 +148,7 @@ func probeIngress(ctx context.Context, host, node, credential string, allowed fu
 	}
 	challenge := base64.RawURLEncoding.EncodeToString(nonce[:])
 	for _, ip := range addresses {
-		if err = verifyIngressAddress(ctx, transportFor(host, ip), host, node, challenge, credential); err != nil {
+		if err = verifyIngressAddress(ctx, transportFor(ip), host, node, challenge, credential); err != nil {
 			return nil, nil, ingressProbeError(err)
 		}
 	}
@@ -321,26 +321,10 @@ func (s *Service) observeIngressIteration(ctx context.Context, err error) {
 	}
 }
 
-// ingressTransportFor: managed (global) edges present a renewing public certificate, so they are verified by
-// WebPKI trust for host; every customer scope is pinned to the identity its node enrolled.
-func ingressTransportFor(scopeKind string, pin []byte, host string, ip netip.Addr) *http.Transport {
-	if scopeKind == "global" {
-		return publicIngressTransport(host, ip)
-	}
-	return pinnedIngressTransport(pin, ip)
-}
-
 // pinnedIngressTransport dials ip:443 and accepts only the node's enrolled certificate (PinnedTransport).
 func pinnedIngressTransport(pin []byte, ip netip.Addr) *http.Transport {
 	transport := PinnedTransport(pin, net.JoinHostPort(ip.String(), "443"))
 	transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout = 4*time.Second, 4*time.Second
 	transport.DisableKeepAlives, transport.MaxResponseHeaderBytes = true, 4096
 	return transport
-}
-
-func publicIngressTransport(host string, ip netip.Addr) *http.Transport {
-	dialer := &net.Dialer{Timeout: 4 * time.Second}
-	return &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		return dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), "443"))
-	}, TLSHandshakeTimeout: 4 * time.Second, ResponseHeaderTimeout: 4 * time.Second, DisableKeepAlives: true, MaxResponseHeaderBytes: 4096}
 }

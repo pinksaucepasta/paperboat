@@ -6,7 +6,6 @@ export type HostsPayload = { hosts: Record<string, { resources: Record<string, H
 export type CanaryStep = { step: string; ok: boolean; error: string }
 export type CanaryRun = { started: string; finished: string; ok: boolean; steps: CanaryStep[] }
 export type DeployPayload = { rolled_back: boolean; kept_migrated: boolean; what: string; reason?: string; deploy_failed?: boolean; green_after?: boolean; rollback_ok?: boolean; at: string }
-export type EdgeCertificatePayload = { ok: boolean; error: string; stale_after_seconds: number }
 export type CanaryPayload = { red: boolean; red_since: string | null; failing: Record<string, number>; last: CanaryRun | null; account_last: CanaryRun | null; stale_after_seconds: number }
 
 export type Reports = Data<"/v1/admin/host-health">["reports"]
@@ -53,16 +52,5 @@ export function openAlerts(reports: Reports | undefined, now: number): Alert[] {
   }
   if (deploy?.kept_migrated === true)
     alerts.push({ id: "deploy:kept-migrated", level: "critical", title: "A failed deploy could not be rolled back", body: `${deploy.what} failed its canary check, but its database migrations have no passing compatibility check with the previous server, so the new server keeps serving. Deploy a fix forward.`, since: deploy.at })
-  for (const report of reports ?? []) {
-    if (!report.source.startsWith("edge-certificate:") || typeof report.payload !== "object") continue
-    // The entry comes from that edge's own authenticated heartbeat, keyed by its node ("node-<id>").
-    const node = report.source.slice("edge-certificate:node-".length)
-    const cert = { payload: report.payload as EdgeCertificatePayload, reported_at: report.reported_at }
-    const edge = `edge node ${node}`
-    const stale = isStale(cert, now)
-    // Only an explicit success is healthy: a malformed report reads as a failure, and a failure stays critical until a success arrives.
-    if (cert.payload.ok !== true) alerts.push({ id: `edge-certificate:${node}`, level: "critical", title: `Certificate renewal is failing on ${edge}`, body: `${typeof cert.payload.error === "string" && cert.payload.error ? cert.payload.error : "The renewal failed."}${stale ? " The edge has also stopped reporting checks." : ""} Browsers will refuse this edge when its certificate expires. Run pbh doctor on the edge, fix the cause, then restart paperboat-selfhost.service.`, since: cert.reported_at })
-    else if (stale) alerts.push({ id: `edge-certificate-stale:${node}`, level: "warning", title: `${edge} has not checked its certificate`, body: "No certificate renewal check arrived for a day. Run pbh doctor on that edge.", since: cert.reported_at })
-  }
   return alerts.sort((a, b) => Number(b.level === "critical") - Number(a.level === "critical"))
 }

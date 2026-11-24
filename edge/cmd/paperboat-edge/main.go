@@ -559,7 +559,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("schedule process carrier trust refresh: %w", err)
 	}
 	forwardSink := &forwardStats{NodeSink: client}
-	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: forwardSink, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM, PublicHTTPSPort: uint16(publicHTTPSPort)}, Interval: deployment.ControlInterval, Ready: nodeReady, Metrics: nodeMetrics(), CertificateRenewal: certificateRenewal(deployment.CertificateRenewalStatusFile), OnAnswer: func(answer control.NodeAnswer) error {
+	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: forwardSink, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM, PublicHTTPSPort: uint16(publicHTTPSPort)}, Interval: deployment.ControlInterval, Ready: nodeReady, Metrics: nodeMetrics(), OnAnswer: func(answer control.NodeAnswer) error {
 		if answer.IngressLimits == nil {
 			return nil
 		}
@@ -757,10 +757,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	carrierComponent = trackedCarrier
 	nodeWorker.Drain = trackedCarrier.Drain // an operator Drain reaches the edge in its heartbeat answer
 	redirectHandler := portEightyHandler()
-	publicTLS, err := infrastructureTLS(deployment, carrierTrust.Certificate, certificateSelector.TLSConfig())
-	if err != nil {
-		return nil, err
-	}
+	publicTLS := infrastructureTLS(deployment.ConnectorAdvertiseHost, carrierTrust.Certificate, certificateSelector.TLSConfig())
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
 	forwarding, err := newForwardComponent(forwardSpec{deployment: deployment, nodeID: cfg.NodeID, epoch: processEpoch, certificate: carrierTrust.Certificate, client: client, ready: nodeReady,
 		held: forwardHeld{matcher: routeMatcher, durable: durableRoutes, assignments: canonicalRoutes, authority: ingressAuthority}, public: publicTCP, metrics: typedMetrics, reporter: reporter, stats: forwardSink})
@@ -789,7 +786,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 				previewHTTPSMatcher.HasAdmittedHTTPSHostname(host) ||
 				(!deployment.SelfHosted && edgehttp.NewPreviewCarrierRouteMatcher(runtimeRoutes).HasAdmittedHTTPSHostname(host))
 		})
-	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: ingressAuthority.HTTP01Handler(acmeChallenge(deployment.PublicACMEChallengeDir, redirectHandler))})
+	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: ingressAuthority.HTTP01Handler(redirectHandler)})
 	if err != nil {
 		if carrierCleanup != nil {
 			_ = carrierCleanup()

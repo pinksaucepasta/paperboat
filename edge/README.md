@@ -39,13 +39,11 @@ relative paths, or a missing carrier listener stop startup with a typed error.
 - **Control plane:** `control_url`, `credential_issuer`, `control_credential_file`,
   `control_ca_file`, `jwks_file`, `revocations_file`, `usage_signing_key_file`.
 - **Carrier identity:** `infrastructure_tls_cert_file` and `infrastructure_tls_key_file` are
-  the edge's stable carrier certificate, which hosts and the control plane pin. An install
+  the edge's stable carrier certificate, which hosts and the control plane pin; the edge also serves it on 443 for its own name. An install
   hands it to the replacement process unchanged.
 - **Listeners:** `carrier_tcp_listen_address` and `carrier_quic_listen_address` (both
   required, distinct ports), `public_https_listen_address`, `public_http_listen_address`
   (redirects to HTTPS), and `private_https_listen_address` (loopback only).
-- **Public HTTPS certificate:** `public_https_cert_file` and `public_https_key_file`, both or
-  neither.
 - **Names:** `connector_advertise_host`, `preview_base_domain`, `tunnel_base_domain`,
   `runtime_base_domain`.
 - **Limits:** `max_body_bytes` (default 100 MiB), `max_header_bytes`

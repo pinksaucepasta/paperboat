@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -54,7 +53,7 @@ func TestInstallationChallengeBindsNodeAndNonce(t *testing.T) {
 }
 
 func TestInfrastructureTLSNoSNIAndNamedRouteSelection(t *testing.T) {
-	makeCertificate := func(name string, ip net.IP) (tls.Certificate, []byte, []byte) {
+	makeCertificate := func(name string, ip net.IP) tls.Certificate {
 		t.Helper()
 		private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
@@ -68,38 +67,17 @@ func TestInfrastructureTLSNoSNIAndNamedRouteSelection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		keyDER, err := x509.MarshalPKCS8PrivateKey(private)
+		leaf, err := x509.ParseCertificate(der)
 		if err != nil {
 			t.Fatal(err)
 		}
-		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-		cert, err := tls.X509KeyPair(certPEM, keyPEM)
-		if err != nil {
-			t.Fatal(err)
-		}
-		cert.Leaf, err = x509.ParseCertificate(der)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return cert, certPEM, keyPEM
+		return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: private, Leaf: leaf}
 	}
-	infrastructure, certPEM, keyPEM := makeCertificate("infra.example.test", net.ParseIP("127.0.0.1"))
-	browser, _, _ := makeCertificate("route.example.test", nil)
-	directory := t.TempDir()
-	certPath, keyPath := filepath.Join(directory, "cert.pem"), filepath.Join(directory, "key.pem")
-	if err := os.WriteFile(certPath, certPEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
-		t.Fatal(err)
-	}
+	infrastructure := makeCertificate("infra.example.test", net.ParseIP("127.0.0.1"))
+	browser := makeCertificate("route.example.test", nil)
 	base := &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) { return &browser, nil }}
 	for _, host := range []string{"127.0.0.1", "infra.example.test"} {
-		server, err := infrastructureTLS(config.Deployment{ConnectorAdvertiseHost: host, PublicHTTPSCertFile: certPath, PublicHTTPSKeyFile: keyPath}, tls.Certificate{}, base)
-		if err != nil {
-			t.Fatal(err)
-		}
+		server := infrastructureTLS(host, infrastructure, base)
 		tests := []struct {
 			name string
 			cert tls.Certificate
@@ -148,27 +126,6 @@ func TestInfrastructureTLSNoSNIAndNamedRouteSelection(t *testing.T) {
 			})
 		}
 	}
-	// A renewed file pair is served without a restart; a pair that does not match keeps the served one.
-	defer func(previous time.Duration) { publicHTTPSReload = previous }(publicHTTPSReload)
-	publicHTTPSReload = 0
-	server, err := infrastructureTLS(config.Deployment{ConnectorAdvertiseHost: "infra.example.test", PublicHTTPSCertFile: certPath, PublicHTTPSKeyFile: keyPath}, tls.Certificate{}, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	renewed, renewedPEM, renewedKeyPEM := makeCertificate("infra.example.test", nil)
-	for _, step := range []struct {
-		path string
-		data []byte
-		want tls.Certificate
-	}{{keyPath, renewedKeyPEM, infrastructure}, {certPath, renewedPEM, renewed}} {
-		if err := os.WriteFile(step.path, step.data, 0600); err != nil {
-			t.Fatal(err)
-		}
-		got, err := server.GetCertificate(&tls.ClientHelloInfo{ServerName: "infra.example.test"})
-		if err != nil || !bytes.Equal(got.Certificate[0], step.want.Certificate[0]) {
-			t.Fatalf("after writing %s: %v, wrong certificate served", step.path, err)
-		}
-	}
 }
 
 func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
@@ -189,7 +146,7 @@ func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
 	if err = os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0600); err != nil {
 		t.Fatal(err)
 	}
-	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath, PublicHTTPSCertFile: "/unused-public-cert", PublicHTTPSKeyFile: "/unused-public-key"}
+	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath}
 	for _, customerOwned := range []bool{true, false} {
 		deployment.SelfHosted = customerOwned
 		for _, epoch := range []string{"first", "replacement"} {
@@ -210,67 +167,5 @@ func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
 	}
 	if _, err := carrierServerTrust(config.Deployment{}, "node", "hosted", "127.0.0.1", now); err == nil {
 		t.Fatal("an edge without its stable carrier certificate minted a per-process one")
-	}
-}
-
-// A customer self-hosted edge presents its enrolled identity on the endpoint host, with no certificate files;
-// a managed edge without files keeps the distributed certificates only.
-func TestInfrastructureTLSWithoutFilesServesIdentityOnlyOnSelfHostedEdge(t *testing.T) {
-	identity, other := tls.Certificate{Certificate: [][]byte{{1}}}, tls.Certificate{Certificate: [][]byte{{2}}}
-	base := &tls.Config{GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &other, nil }}
-	pick := func(config *tls.Config, sni string) *tls.Certificate {
-		t.Helper()
-		got, err := config.GetCertificate(&tls.ClientHelloInfo{ServerName: sni})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return got
-	}
-	selfHosted, err := infrastructureTLS(config.Deployment{SelfHosted: true, ConnectorAdvertiseHost: "edge.example.test"}, identity, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pick(selfHosted, "edge.example.test").Certificate[0][0] != 1 || pick(selfHosted, "").Certificate[0][0] != 1 {
-		t.Fatal("self-hosted endpoint host does not serve the enrolled identity")
-	}
-	if pick(selfHosted, "route.example.test").Certificate[0][0] != 2 {
-		t.Fatal("self-hosted publication SNI lost its distributed certificate")
-	}
-	managed, err := infrastructureTLS(config.Deployment{ConnectorAdvertiseHost: "edge.example.test"}, identity, base)
-	if err != nil || managed != base {
-		t.Fatalf("managed edge without files must keep the base TLS config: %v", err)
-	}
-}
-
-// pbh answers ACME HTTP-01 for the browser HTTPS certificate through files; port 80 serves exactly those answers.
-func TestACMEChallengeServesOnlyTokensPbhWrote(t *testing.T) {
-	dir := t.TempDir()
-	const token = "abcdefghijklmnop0123456789_-ABCD"
-	if err := os.WriteFile(filepath.Join(dir, token), []byte(token+".thumbprint"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	handler := acmeChallenge(dir, next)
-	get := func(method, path string) *httptest.ResponseRecorder {
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, httptest.NewRequest(method, "http://203.0.113.7"+path, nil))
-		return w
-	}
-	if w := get("GET", "/.well-known/acme-challenge/"+token); w.Code != 200 || w.Body.String() != token+".thumbprint" {
-		t.Fatalf("written token = %d %q, want its key authorization", w.Code, w.Body.String())
-	}
-	for _, c := range []struct{ method, path string }{
-		{"GET", "/.well-known/acme-challenge/notwrittentoken0123456789"}, // unknown token
-		{"GET", "/.well-known/acme-challenge/../" + token},               // traversal
-		{"GET", "/.well-known/acme-challenge/short"},                     // not a token
-		{"POST", "/.well-known/acme-challenge/" + token},                 // wrong method
-		{"GET", "/anything-else"},
-	} {
-		if w := get(c.method, c.path); w.Code != http.StatusTeapot {
-			t.Fatalf("%s %s = %d, want it to fall through", c.method, c.path, w.Code)
-		}
-	}
-	if w := acmeChallenge("", next); w == nil {
-		t.Fatal("no challenge directory must pass the handler through")
 	}
 }

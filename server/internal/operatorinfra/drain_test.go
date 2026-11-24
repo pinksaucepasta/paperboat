@@ -189,7 +189,7 @@ func TestManagedIngressIsVerifiedAutomatically(t *testing.T) {
 	}
 	probes := 0
 	fail := true
-	s.probeIngress = func(context.Context, string, string, string) (any, any, error) {
+	s.probeIngress = func(context.Context, string, string, string, []byte) (any, any, error) {
 		probes++
 		if fail {
 			return nil, nil, errors.New("not reachable yet")
