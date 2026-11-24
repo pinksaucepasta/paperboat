@@ -47,12 +47,13 @@ remove)
       wire=\$(sudo tcpdump -nnr /tmp/pbcut-$ct.pcap 2>/dev/null | grep -v ' docker0 \| veth' | grep ' Out ' | grep -c ' UDP')
       inner=\$(sudo tcpdump -nnr /tmp/pbcut-$ct.pcap 2>/dev/null | grep -c ' docker0 *In ')
       sudo rm -f /tmp/pbcut-$ct.pcap /tmp/pbcut-$ct.pid
-      echo \"capture during the cut on $host: sent=\$wire UDP packets to the wire, \$inner from $ct dropped silently (rule counters \$dropped)\""
+      echo \"capture during the cut on $host: sent=\$wire UDP packets to the wire, \$inner from $ct dropped silently dropped=\$dropped\""
     exit
   fi
   ssh "$host" "ip=\$(sudo docker exec $ct sh -c \"ip -4 -o addr show eth0 | awk '{print \\\$4}' | cut -d/ -f1\")
     own=\$(sudo docker exec $ct sh -c \"ip -o addr show eth0 | awk '{print \\\$4}' | cut -d/ -f1\" | sed 's/^/src host /' | paste -sd'|' | sed 's/|/ or /g; s/^/(ip or ip6) and (/; s/\$/)/')
     sudo kill \$(cat /tmp/pbcut-$ct.pid) 2>/dev/null; sleep 1  # the capture ends while every rule still holds
+    dropped=\$(for t in iptables ip6tables; do sudo docker exec $ct \$t -vnxL; done | awk '/pbcut/ {n+=\$1} END {print n+0}')
     for t in iptables ip6tables; do
       while sudo docker exec $ct \$t -S | grep -q pbcut; do
         r=\$(sudo docker exec $ct \$t -S | grep pbcut | head -1 | sed 's/^-A/-D/'); sudo docker exec $ct sh -c \"\$t \$r\"
@@ -64,7 +65,7 @@ remove)
     printf '%s\\n' \"\$sent\" | head -5 | grep . | sed 's/^/  sent: /' >&2
     arp=\$(sudo tcpdump -nnr /tmp/pbcut-$ct.pcap arp 2>/dev/null | wc -l)
     sudo rm -f /tmp/pbcut-$ct.pcap /tmp/pbcut-$ct.pid
-    echo \"capture during the cut on $ct eth0: sent=\$out received=\$in (IP packets; ARP \$arp)\""
+    echo \"capture during the cut on $ct eth0: sent=\$out received=\$in dropped=\$dropped (IP packets; ARP \$arp)\""
   ;;
 *) echo "usage: container_cut.sh SSH_HOST CONTAINER add all|server IP...|remove" >&2; exit 2 ;;
 esac

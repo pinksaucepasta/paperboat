@@ -184,6 +184,9 @@ def peer_cut(*args):
     out = done.stdout.strip()
     if out:
         print(out, file=sys.stderr, flush=True)
+    # sent=0 alone also holds for an idle peer or a capture that never ran: the rules must have dropped something
+    if args[0] == 'remove' and not (re.search(r'\bsent=0\b', out) and re.search(r'\bdropped=[1-9]', out)):
+        raise RuntimeError('not cut: the peer cut did not block traffic: ' + (out or 'no capture line'))
     return out
 
 

@@ -106,9 +106,7 @@ def cut(seconds):
 
 def release(block):
     if winhost.PEER_CUT:
-        capture = winhost.peer_cut('remove')
-        if ' sent=0 ' not in capture:
-            raise RuntimeError('the peer cut did not hold: ' + capture)
+        winhost.peer_cut('remove')
     elif DARWIN:
         pf_release(block)
     else:

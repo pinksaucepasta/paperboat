@@ -423,11 +423,23 @@ class WindowsChecksRunner(unittest.TestCase):
         calls = []
         with patch.object(winhost, "PEER_CUT", ["cut.sh", "h", "ct"]), \
                 patch.object(winhost.subprocess, "run", lambda argv, **kw: calls.append(argv[3:]) or
-                                  subprocess.CompletedProcess(argv, 0, 'capture sent=0' if argv[3] == 'remove' else '', '')):
+                                  subprocess.CompletedProcess(argv, 0, 'capture sent=0 dropped=7' if argv[3] == 'remove' else '', '')):
             with self.assertRaises(RuntimeError), winhost.peer_cut_held('silent', '203.0.113.7') as capture:
                 raise RuntimeError('the check failed')  # the cut is lifted on every path
         self.assertEqual([['add', 'silent', '203.0.113.7'], ['remove']], calls)
-        self.assertEqual(['capture sent=0'], capture)
+        self.assertEqual(['capture sent=0 dropped=7'], capture)
+
+    def test_a_peer_cut_that_blocked_nothing_fails_the_check(self):
+        for out, ok in (('sent=0 received=3 dropped=7', True), ('sent=0 received=0 dropped=0', False),  # idle peer: nothing proven
+                        ('sent=2 dropped=7', False), ('sent=0 received=3', False), ('', False)):
+            with self.subTest(out), patch.object(winhost, 'PEER_CUT', ['cut.sh', 'h', 'ct']), \
+                    patch.object(winhost.subprocess, 'run', lambda argv, **kw: subprocess.CompletedProcess(argv, 0, out, '')):
+                winhost.peer_cut('add', 'all')
+                if ok:
+                    self.assertEqual(out, winhost.peer_cut('remove'))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'not cut'):
+                        winhost.peer_cut('remove')
 
     def test_the_linux_cut_is_silent_and_lifted_on_every_path(self):
         calls = []
