@@ -196,7 +196,7 @@ def yes_count(pb, target):
 
 
 def main(pb, target, session, baseline):
-    s = ConPTYSession('"%s" connect %s --name %s --status-bar off' % (pb, target, session))
+    s = ConPTYSession('"%s" connect %s --session %s --status-bar off' % (pb, target, session))
     try:
         # The marker is computed by the shell: the typed line holds "%s", so only the command's output holds the marker.
         ready = uuid.uuid4().hex

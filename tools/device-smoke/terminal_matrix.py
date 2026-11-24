@@ -774,7 +774,7 @@ def device_rows(events, baseline, gone):
     return rows
 
 
-def windows_client_ctrl_c(target, name):
+def windows_client_ctrl_c(target, session):
     """The flood, paste and Ctrl-C of N6 for a Windows client, typed by terminal_matrix_conpty.py in a ConPTY on the device."""
     baseline = host_yes(target)
     python = winhost.which('python')
@@ -784,7 +784,7 @@ def windows_client_ctrl_c(target, name):
     else:
         with DEVICE.temp_dir('pb-n6') as work:
             (work / 'driver.py').write_bytes(Path(__file__).with_name('terminal_matrix_conpty.py').read_bytes())
-            process = DEVICE.spawn([str(python), str(work / 'driver.py'), str(PB), target, name, str(baseline)], work)
+            process = DEVICE.spawn([str(python), str(work / 'driver.py'), str(PB), target, session, str(baseline)], work)
             try:
                 deadline = time.monotonic() + 240
                 while time.monotonic() < deadline:
@@ -825,7 +825,7 @@ def fast_output(a, sessions):
         # delivers Ctrl-C ahead of the stuck paste and discards what is left of it (F3-11).
         if DEVICE and not win():  # a Windows client's Ctrl-C is typed in a ConPTY on the device: the ssh -tt hop loses it under a flood
             c1.close()  # the driver is the session's client now; c2 stays attached and stalled
-            windows_client_ctrl_c(a.target, name)
+            windows_client_ctrl_c(a.target, s['id'])
         else:
             c1.send((windows_target.flood_line() if win() else 'yes') + '\r')
             for _ in range(30):  # read the screen so `pending` shows the flood arriving (sleeping alone reads nothing)
