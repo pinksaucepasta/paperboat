@@ -1095,6 +1095,55 @@ func TestInventoryRefreshesWhenLocalAccessChanges(t *testing.T) {
 	}
 }
 
+// A change signalled while a refresh finishes (after its reconcile, here as it reports) is not lost.
+func TestInventoryKeepsANudgeSentAsARefreshEnds(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	nudge := make(chan struct{}, 1)
+	signal := func() { // as the coordinator does
+		select {
+		case nudge <- struct{}{}:
+		default:
+		}
+	}
+	reconciled := make(chan struct{}, 8)
+	first := true
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second,
+		Nudge: nudge, ReconcileMachines: func(context.Context, []api.UserMachine) error {
+			reconciled <- struct{}{}
+			signal() // the reconcile's own signal, which it observed itself
+			return nil
+		},
+		OnRefresh: func(error) {
+			if first {
+				first = false
+				signal()
+			}
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	for range 2 {
+		select {
+		case <-reconciled:
+		case <-time.After(30 * time.Second):
+			t.Fatal("a change signalled as the refresh ended was lost")
+		}
+	}
+	select {
+	case <-reconciled:
+		t.Fatal("the reconcile's own signal started another refresh")
+	case <-time.After(3 * requestedRefreshSpacing):
+	}
+}
+
 // F14-03: a daemon that just started and has not finished its first local-access setup (the native listener waits for
 // the peer network) reports starting, which a supplied install waits for; past the grace, or after a setup that
 // succeeded, a failure is degraded, which fails the install at once.

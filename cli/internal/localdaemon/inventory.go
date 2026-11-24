@@ -219,14 +219,6 @@ func (i *Inventory) Run(ctx context.Context) error {
 		failed = i.refresh(ctx, reuse && !requested, forceReconcile || !reuse, freshness) != nil
 		forceReconcile = false
 		requested = false
-		// ApplyMachines can signal its own local-step transition. The completed reconcile already
-		// observed it. Keep the wake when a pending step may have cleared during the refresh.
-		if !i.pendingLocalAccess.Load() {
-			select {
-			case <-i.nudge:
-			default:
-			}
-		}
 	}
 	refresh := func(reuse bool) { refreshWithin(reuse, inventoryProjectionFreshness) }
 	i.restoreCachedMachines()
@@ -325,6 +317,15 @@ func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool, fre
 		// Native access is set up; one step (the browser certificate) is still being retried by the coordinator.
 		if errors.As(reconcileErr, &pending) {
 			reconcileErr = nil
+		}
+		// ApplyMachines can signal its own local-step transition, which the completed reconcile observed: drop that
+		// wake here, before anything else runs, so a later one is never lost. Keep it after a failure (the setup may still
+		// finish in the background) and when a pending step may have cleared during the reconcile.
+		if reconcileErr == nil && pending.Step == "" {
+			select {
+			case <-i.nudge:
+			default:
+			}
 		}
 	}
 	i.pendingLocalAccess.Store(pending.Step != "")
