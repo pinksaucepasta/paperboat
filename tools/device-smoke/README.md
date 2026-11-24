@@ -125,9 +125,9 @@ tools/device-smoke/linuxpool.sh stop          # all of yours (release N keeps on
   the jump host's loopback port `22400+N` (1-12), written to `~/.ssh/linuxpool.conf`. Start and stop only from the controller.
 - The jump host's `winpool` tunnel account must allow ports 22401-22412 in both `70-winpool.conf` and the key's `permitlisten=`.
 - `remote-test.sh` runs one job per host at a time (host lock); start several hosts to run suites in parallel.
-- With `~/.config/paperboat-dev/linuxpool-gh.{repo,token}` (0600) on the controller, `start` dispatches the same workflow in that
-  repository, whose account has its own job limit and its own tunnel key (`permitlisten=` 22401-22412 only). After changing
-  `linuxpool.yml`, copy it there.
+- With `~/.config/paperboat-dev/linuxpool-gh.{repo,token}` (0600) on the controller, `start` (macpool.sh too) dispatches the same workflow in that
+  repository, whose account has its own job limit and its own tunnel key (`permitlisten=` 22301-22308 and 22401-22412 only).
+  After changing `linuxpool.yml` or `macpool.yml`, copy it there.
 - A host is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
 
 ### Pool runners revoke their machine records (linuxpool, macpool, winpool)

@@ -75,7 +75,7 @@ start() {
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of $MAX machines are free (macpool.sh list)"
   free=("${free[@]:0:count}")
   for n in "${free[@]}"; do ssh-keygen -q -R "[127.0.0.1]:$((22300 + n))" -f "$KNOWN" >/dev/null 2>&1 || true; done
-  gh workflow run macpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
+  pool_gh workflow run macpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
   for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; done
   flock -u 9
   pool_revoke "${free[@]}" || echo "macpool: could not revoke the previous machine records of ${free[*]}; sweep retries" >&2 # leftovers of the runner that held these slots

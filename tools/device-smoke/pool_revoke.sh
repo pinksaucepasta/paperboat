@@ -49,3 +49,10 @@ pool_revoke() {
   fi
   for n in "${slots[@]}"; do rm -f "$CLAIMS/$n.machines"; done
 }
+
+# Runners start in the second account's runner repository when this controller has one (owner/name and token files): its job
+# limit is its own, so the Linux and macOS hosts leave the main account's slots to Windows and CI.
+pool_gh() {
+  local conf=$HOME/.config/paperboat-dev/linuxpool-gh
+  if [ -s "$conf.repo" ] && [ -s "$conf.token" ]; then GH_REPO=$(cat "$conf.repo") GH_TOKEN=$(cat "$conf.token") gh "$@"; else gh "$@"; fi
+}
