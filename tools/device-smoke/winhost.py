@@ -171,7 +171,6 @@ PEER_UDP_CUT = ("if($req.action -eq 'remove'){Get-NetFirewallRule -DisplayName $
                 "Get-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-*' -ErrorAction SilentlyContinue|Remove-NetFirewallRule\n"
                 "foreach($d in 'Outbound','Inbound'){[void](New-NetFirewallRule -DisplayName $req.name -Direction $d -Action Block -Protocol UDP -RemoteAddress @($req.addr))}\n"
                 "foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe add $a mask 255.255.255.255 0.0.0.0 if 1 metric 1 *>$null;if($LASTEXITCODE){throw \"route to $a failed\"}}}")
-# Every non-loopback IPv4 and global/link-local/unique-local IPv6 address.
 # SMOKE_PEER_CUT: a command that cuts the PEER instead of the Windows device (`<cmd> add all`, `<cmd> add server IP...`,
 # `<cmd> add addresses IP...`, `<cmd> remove`; container_cut.sh HOST CONTAINER). NET_CUT has to stop pb.exe for its rule
 # to apply, which turns "survives a network cut" into "survives a restart"; a peer-side cut leaves pb.exe running.
@@ -245,7 +244,6 @@ def linux_silent_cut(out_match, in_match):
         print(proof[0], file=sys.stderr, flush=True)
 
 
-NON_LOOPBACK = ['0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '2000::/3', 'fe80::/10', 'fc00::/7']
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
 WHICH = "(Get-Command $req.name -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1).Source"
@@ -652,9 +650,11 @@ class WindowsDevice:
                 self.stop(pid)
 
     def cut_network(self, seconds, addresses=None, inbound=True, ports=None, protocols=('TCP',)):
-        """Drop pb.exe's traffic to `addresses` (default: everything but loopback), only those `ports` (of `protocols`, TCP unless told) when given, until release(), or after `seconds`
+        """Drop pb.exe's traffic to `addresses`, only those `ports` (of `protocols`, TCP unless told) when given, until release(), or after `seconds`
         when a detached timer on the device removes the rule whatever happens to this controller."""
-        return self._cut(seconds, NET_CUT, addresses, '', dict(addr=list(addresses or NON_LOOPBACK), inbound=inbound, ports=ports, protos=list(protocols)))
+        if not addresses:  # NET_CUT stops pb.exe: a full cut would kill the client and terminal worker under test
+            raise DeviceError('a full network cut on Windows is made on the peer: set SMOKE_PEER_CUT (container_cut.sh HOST CONTAINER)')
+        return self._cut(seconds, NET_CUT, addresses, '', dict(addr=list(addresses), inbound=inbound, ports=ports, protos=list(protocols)))
 
     def cut_peer_udp(self, seconds, addresses):
         """Drop UDP between the device and `addresses` (the peer's: PEER_UDP_CUT) without restarting any pb.exe; same release rules as cut_network."""

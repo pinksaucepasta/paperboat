@@ -6,9 +6,9 @@ anchor under com.apple), rule removed on every exit path and by a root failsafe 
 during and after.
 Usage: network_drop.py TARGET [--drop-seconds N]   (needs passwordless or cached sudo)
 
-With PB_SMOKE_WINDOWS_PB set the client is the Windows device (winhost.py; TARGET is a Unix machine): the drop is a
-firewall block of pb.exe's own traffic (winhost.cut_network), so the SSH that drives the device keeps working; a
-timer on the device removes the rule whatever happens here.
+With PB_SMOKE_WINDOWS_PB set the client is the Windows device (winhost.py; TARGET is a Unix machine): the drop is made
+on the peer (SMOKE_PEER_CUT, container_cut.sh HOST CONTAINER), because a Windows Firewall rule only blocks new flows and every pb.exe
+must keep running for the check to test resume.
 """
 import argparse
 import json
@@ -92,8 +92,10 @@ def failures_since(moment):
 def cut(seconds):
     """Drop this client's outbound traffic for at most `seconds` (a root failsafe or a timer on the device lifts it
     whatever happens to this process); returns (block, failsafe) for release() and failsafe.terminate()."""
+    if winhost.PEER_CUT:
+        return winhost.peer_cut('add', 'all'), None
     if DEVICE:
-        return DEVICE.cut_network(seconds), None
+        raise RuntimeError('a Windows client needs SMOKE_PEER_CUT (container_cut.sh HOST CONTAINER)')
     if DARWIN:
         return pf_block(PF_RULE, seconds), None
     failsafe = subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep %d; iptables -D %s' % (seconds, ' '.join(RULE))],
@@ -103,8 +105,10 @@ def cut(seconds):
 
 
 def release(block):
-    if DEVICE:
-        block.release()
+    if winhost.PEER_CUT:
+        capture = winhost.peer_cut('remove')
+        if ' sent=0 ' not in capture:
+            raise RuntimeError('the peer cut did not hold: ' + capture)
     elif DARWIN:
         pf_release(block)
     else:
@@ -132,11 +136,12 @@ def main():
         held = shell_pid(terminal.expect('\n'))
 
         def type_line(number):
-            terminal.send("echo IN_%d >> %s; printf '\\nPB_ACK_%d\\n'\r" % (number, log, number))
+            # the shell computes the token: the typed text never contains it, so an echo of our input cannot match
+            terminal.send("echo IN_%d >> %s; printf '\\nPB_%s_%s\\n' ACK $((%d+1000))\r" % (number, log, '%s', '%s', number))
 
         for number in (1, 2, 3):
             type_line(number)
-            terminal.expect('PB_ACK_%d' % number)
+            terminal.expect('PB_ACK_%d' % (number + 1000))
         started = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
         block, failsafe = cut(args.drop_seconds + 60)
         blocked = True
@@ -148,9 +153,9 @@ def main():
         release(block)
         blocked = False
         for number in (4, 5, 6):
-            terminal.expect('PB_ACK_%d' % number, timeout=150)
+            terminal.expect('PB_ACK_%d' % (number + 1000), timeout=150)
         type_line(7)
-        terminal.expect('PB_ACK_7', timeout=60)
+        terminal.expect('PB_ACK_1007', timeout=60)
         terminal.send("printf '\\nPB_AGAIN_%s\\n' \"$$\"\r")
         terminal.expect('PB_AGAIN_', timeout=30)
         again = shell_pid(terminal.expect('\n'))
