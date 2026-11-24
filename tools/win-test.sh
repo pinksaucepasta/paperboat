@@ -40,7 +40,8 @@ status=0
 go test -json $RACE -exec "$exec_dir/win-test-exec.exe" -skip "^($all_elevated)\$" -timeout 15m -count "$COUNT" \
   ${RUN:+-run "$RUN"} $PACKAGES | report main || status=1
 if [ -n "$elevated" ]; then
-  go test -json $RACE -exec "$exec_dir/win-test-exec.exe -elevated" -run "^($(paste -sd'|' <<<"$elevated"))\$" \
+  # PB_TEST_ELEVATED_LOCAL_CA opts TestElevatedAdministratorLocalCAState in: it writes a CA under ProgramData (removed after).
+  PB_TEST_ELEVATED_LOCAL_CA=1 go test -json $RACE -exec "$exec_dir/win-test-exec.exe -elevated" -run "^($(paste -sd'|' <<<"$elevated"))\$" \
     -timeout 15m -count "$COUNT" $PACKAGES | report elevated || status=1
   # A renamed or deleted elevated test would make the second pass run nothing and look green.
   if [ -z "$RUN" ] && [ "$PACKAGES" = "./..." ]; then
