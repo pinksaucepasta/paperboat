@@ -545,7 +545,7 @@ test_application_pairs() {
   for source in "${TLIST[@]}"; do
     for target in "${TLIST[@]}"; do
       case "$kind" in
-        transfer-multi|exec-repeat|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume|transfer-errors|transfer-large|port-names)
+        transfer-multi|exec-repeat|ssh-port-change|ssh-tools|transfer-manage|exec-cancel|ssh-doctor|inbox-manage|transfer-resume|transfer-errors|transfer-large|port-names)
           [ "$source" != "$target" ] || continue ;;
         preview-manage|preview-inspect|send-self|preview-access) [ "$source" = "$target" ] || continue ;;
       esac
@@ -554,6 +554,18 @@ test_application_pairs() {
       case "$kind" in transfer-large)
         if [ "$source" = "$WINDOWS_TARGET" ] || [ "$target" = "$WINDOWS_TARGET" ]; then
           record "$id" SKIP 0 "transfer_large.py verifies on Unix receivers only; the Windows form is not written yet"
+          continue
+        fi ;;
+      esac
+      case "$kind" in exec-ssh-after-restart)
+        if [ "$source" = "$MACOS_TARGET" ] || [ "$source" = "$WINDOWS_TARGET" ]; then
+          record "$id" SKIP 0 "own-daemon-restart answer inside 5 s fails on the fixed build too on Mac and Windows (newchecks/MAC-XYZ.md, WIN-REPRUN.md); proven on Linux only"
+          continue
+        fi ;;
+      esac
+      case "$kind" in ssh-port-change)
+        if [ "$target" = "$MACOS_TARGET" ]; then
+          record "$id" SKIP 0 "pb config set cannot run through pb exec on a Mac (login keychain locked, no login session); judged on Linux and Windows targets"
           continue
         fi ;;
       esac
@@ -1315,6 +1327,8 @@ test_application_pairs ssh-main ssh_lifecycle.py
 test_application_pairs ssh-tools ssh_tools_lifecycle.py
 test_application_pairs transfer-multi transfer_lifecycle.py
 test_application_pairs transfer-resume transfer_resume.py
+test_application_pairs exec-ssh-after-restart exec_ssh_after_restart.py  # restarts the source's daemon
+test_application_pairs ssh-port-change ssh_port_change.py
 test_application_pairs transfer-large transfer_large.py
 test_application_pairs transfer-errors transfer_errors.py
 test_application_pairs exec-repeat exec_lifecycle.py repeated

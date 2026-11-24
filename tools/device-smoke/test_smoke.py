@@ -761,6 +761,51 @@ TLIST=($DEVICES)
         self.assertNotIn('    return\n  fi\n  start_long_ssh', body)  # a dead terminal no longer ends the update early
         self.assertIn('terminal_ready=0', body)
 
+    def test_exec_ssh_after_restart_needs_a_remote_answer_inside_the_deadline(self):
+        import exec_ssh_after_restart as e
+        self.assertEqual(e.verdict(1.0, 0, '12345\r\n', '12345'), (True, ''))
+        self.assertFalse(e.verdict(5.1, 0, '12345\n', '12345')[0])  # too late
+        self.assertFalse(e.verdict(1.0, 255, '12345\n', '12345')[0])  # failed
+        self.assertFalse(e.verdict(1.0, 0, 'echo $((1+2))=12345\n', '12345')[0])  # the number only inside quoted text
+        for windows in (False, True):
+            with patch.object(e.windows_target, 'is_windows', lambda *a: windows):
+                argv, expected = e.probe(None, 'peer')
+                self.assertNotIn(expected, ' '.join(argv))  # the answer is computed remotely, not typed
+        with patch.object(e.windows_target, 'is_windows', lambda *a: False):
+            argv, expected = e.probe(None, 'peer', 'ssh')
+            self.assertEqual(len(argv), 1)  # pb ssh joins its arguments for the remote shell: one command string
+            self.assertTrue(argv[0].startswith('echo $(('))
+        clock = iter([6])
+        with self.assertRaisesRegex(RuntimeError, 'still failing 5s after the restart'):
+            e.attempt(None, 'exec', 'peer', argv, expected, 0, now=lambda: next(clock))
+
+    def test_ssh_port_change_puts_the_port_back_and_waits_for_a_remote_answer(self):
+        import ssh_port_change as p
+        calls = []
+
+        def fake_set(binary, target, port):
+            calls.append(port)
+        restarts = []
+        with patch.object(p, 'set_port', fake_set), patch.object(p, 'works', lambda *a: None), \
+                patch.object(p, 'restart_worker', lambda *a: restarts.append(list(calls))), \
+                patch.object(p.winhost, 'pb_path', lambda: 'pb'), patch.object(p.sys, 'argv', ['x', 'peer']):
+            p.main()
+        self.assertEqual(calls, [p.UNUSED_PORT, 22, 22])  # away, back, and the exit-path restore
+        self.assertEqual(restarts, [[p.UNUSED_PORT]])  # the new worker starts while the unusable port is saved
+        calls.clear()
+        outcomes = iter([None, RuntimeError('still failing')])
+
+        def second_fails(*a):
+            outcome = next(outcomes)
+            if outcome:
+                raise outcome
+        with patch.object(p, 'set_port', fake_set), patch.object(p, 'works', second_fails), \
+                patch.object(p, 'restart_worker', lambda *a: None), \
+                patch.object(p.winhost, 'pb_path', lambda: 'pb'), patch.object(p.sys, 'argv', ['x', 'peer']):
+            with self.assertRaisesRegex(RuntimeError, 'did not work again within 30s of the port going back to 22 on a worker started while 2201 was saved'):
+                p.main()
+        self.assertEqual(calls[-1], 22)  # restored although the check failed
+
     def test_network_inventory_waits_for_relay_sync_bounded(self):
         import network_inventory
         syncing = SimpleNamespace(returncode=1, stdout=json.dumps(

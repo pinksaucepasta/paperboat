@@ -81,6 +81,8 @@ def checks(args):
     table['readiness-main'] = (['exec_lifecycle.py', args.peer, '--check', 'readiness'], ['--peer'])
     table['exec-repeat'] = (['exec_lifecycle.py', args.peer, '--check', 'repeated'], ['--peer'])
     table['exec-cancel'] = (['exec_cancel.py', args.peer], ['--peer'])
+    table['exec-ssh-after-restart'] = (['exec_ssh_after_restart.py', args.peer, '--self', args.machine], ['--peer', '--machine'])
+    table['ssh-port-change'] = (['ssh_port_change.py', args.peer], ['--peer'])
     table['exec-messages'] = (['exec_messages.py'], [])
     table['transfer-manage'] = (['transfer_manage.py', args.peer], ['--peer'])
     table['transfer-multi'] = (['transfer_lifecycle.py', args.peer], ['--peer'])
