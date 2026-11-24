@@ -115,7 +115,9 @@ func TestProbeOnlyQUICProducesAuthenticatedHealthEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("exchange %d: %v", index+1, err)
 		}
-		if ptos != 0 {
+		// The PTO counter itself is covered by TestPTOTraceCountsExpirationsAcrossResets. On loopback an exchange needs
+		// none, but one scheduling stall of a loaded runner (windows-latest, 2026-11-24) fires exactly one.
+		if ptos > 1 {
 			t.Fatalf("loopback exchange %d reported %d PTOs", index+1, ptos)
 		}
 	}
