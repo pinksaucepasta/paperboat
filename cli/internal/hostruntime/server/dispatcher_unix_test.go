@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"io"
 	"net"
@@ -300,6 +301,13 @@ func TestSSHStreamPreservesBridgeDiagnosticCause(t *testing.T) {
 		t.Fatalf("opened=%v err=%v", opened, err)
 	}
 	defer stream.Close()
+	refusal, err := stream.Next(ctx)
+	if err != nil || !bytes.Contains(refusal.Data, []byte(streamauth.SSHRefusalPrefix+managedssh.RefusedServerUnreachable)) {
+		t.Fatalf("client was not told why: %q %v", refusal.Data, err)
+	}
+	if refusal.Release != nil {
+		refusal.Release()
+	}
 	_, err = stream.Next(ctx)
 	if err == nil {
 		t.Fatal("failed SSH bridge returned a successful stream result")
