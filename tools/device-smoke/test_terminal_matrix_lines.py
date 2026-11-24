@@ -29,3 +29,30 @@ class Lines(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WindowsClientCtrlC(unittest.TestCase):
+    def test_events_ignore_everything_but_json_objects(self):
+        text = 'noise\n{"flood": 2}\n[1]\n{"sent": 10.5}\n{bad\n{"quiet": 0.2}\n'
+        self.assertEqual(matrix.device_events(text), {'flood': 2, 'sent': 10.5, 'quiet': 0.2})
+
+    def test_rows_pass_when_yes_ends_under_five_seconds_and_the_shell_answers(self):
+        events = {'flood': 2, 'sent': 100.0, 'quiet': 1.2, 'answered': True}
+        rows = matrix.device_rows(events, 1, 102.4)
+        self.assertEqual([ok for _, ok, _ in rows], [True, True, True, True])
+        self.assertIn('2.4 s', rows[1][2])
+
+    def test_rows_fail_when_yes_ends_late_or_never_and_keep_the_same_names(self):
+        events = {'flood': 2, 'sent': 100.0, 'quiet': 1.0, 'answered': False}
+        late, never = matrix.device_rows(events, 1, 106.0), matrix.device_rows(events, 1, None)
+        self.assertEqual([ok for _, ok, _ in late], [True, False, True, False])
+        self.assertFalse(never[1][1])
+        self.assertEqual([n for n, _, _ in late], [n for n, _, _ in never])
+
+    def test_a_driver_error_fails_every_row_with_its_reason(self):
+        rows = matrix.device_rows({'error': 'no shell answer in 60 s'}, 0, None)
+        self.assertEqual(len(rows), 4)
+        self.assertTrue(all(not ok and 'no shell answer' in detail for _, ok, detail in rows))
+
+    def test_a_flood_that_never_started_fails_the_flood_row(self):
+        self.assertFalse(matrix.device_rows({'flood': 1}, 1, None)[0][1])

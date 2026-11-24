@@ -18,6 +18,7 @@ Usage: terminal_matrix.py TARGET [--only ROW,ROW] [--member-cmd CMD [--member-pb
 import argparse
 import contextlib
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -746,6 +747,63 @@ def host_yes(target):
     return int(result.stdout.decode(errors='replace').strip().splitlines()[-1] or 0)
 
 
+def device_events(text):
+    """The driver's JSON lines (terminal_matrix_conpty.py) merged into one dict; anything else it printed is ignored."""
+    events = {}
+    for line in text.splitlines():
+        with contextlib.suppress(ValueError):
+            value = json.loads(line)
+            if isinstance(value, dict):
+                events.update(value)
+    return events
+
+
+def device_rows(events, baseline, gone):
+    """The four N6 rows of a Windows client from the driver's events and the target-clock time the flood's `yes` ended (None: still running)."""
+    why = events.get('error', 'the driver did not get that far')
+    flood, sent, quiet = events.get('flood'), events.get('sent'), events.get('quiet')
+    rows = [('N6 the flood is running before Ctrl-C', flood is not None and flood > baseline, 'yes on the target' if flood is not None else why)]
+    if sent is None:
+        rows.append(('N6 Ctrl-C stops yes promptly', False, why))
+    elif gone is None:
+        rows.append(('N6 Ctrl-C stops yes promptly', False, 'yes still running on the target 60 s after Ctrl-C'))
+    else:
+        rows.append(('N6 Ctrl-C stops yes promptly', gone - sent < 5, f'yes on the target ended {gone - sent:.1f} s after Ctrl-C (target clock)'))
+    rows.append(('N6 the output stops after Ctrl-C', quiet is not None, f'output stopped {quiet:.1f} s after Ctrl-C' if quiet is not None else 'output still flowing after Ctrl-C' if sent is not None else why))
+    rows.append(('N6 the shell answers after Ctrl-C', events.get('answered') is True, '' if events.get('answered') is True else 'no answer' if sent is not None else why))
+    return rows
+
+
+def windows_client_ctrl_c(target, name):
+    """The flood, paste and Ctrl-C of N6 for a Windows client, typed by terminal_matrix_conpty.py in a ConPTY on the device."""
+    baseline = host_yes(target)
+    python = winhost.which('python')
+    events, watcher = {}, None
+    if python is None:
+        events['error'] = 'no python on the device (the Ctrl-C driver needs it)'
+    else:
+        with DEVICE.temp_dir('pb-n6') as work:
+            (work / 'driver.py').write_bytes(Path(__file__).with_name('terminal_matrix_conpty.py').read_bytes())
+            process = DEVICE.spawn([str(python), str(work / 'driver.py'), str(PB), target, name, str(baseline)], work)
+            try:
+                deadline = time.monotonic() + 240
+                while time.monotonic() < deadline:
+                    done = process.returncode() is not None  # read the output after the exit code: nothing is written later
+                    events = device_events(process.stdout().decode(errors='replace'))
+                    if 'flood' in events and watcher is None:
+                        watcher = YesWatcher(target, baseline)
+                    if done or 'error' in events or 'answered' in events:
+                        break
+                    time.sleep(1)
+                else:
+                    events.setdefault('error', 'the driver did not finish in 240 s')
+            finally:
+                process.kill()
+    gone = watcher.gone_at(60) if watcher and 'sent' in events else None
+    for name_, ok, detail in device_rows(events, baseline, gone):
+        row(name_, ok, detail)
+
+
 def fast_output(a, sessions):
     """W9: 50 MB of output with a stalled second window; the first stays live, Ctrl-C works."""
     name = fresh_name(); sessions.append(name)
@@ -765,37 +823,29 @@ def fast_output(a, sessions):
         # The hardest real case at once: the foreground job floods output (yes) and never reads the
         # 256 KiB paste, which fills the tty queue, and the second viewer (c2) is stalled. The host
         # delivers Ctrl-C ahead of the stuck paste and discards what is left of it (F3-11).
-        host_side = bool(DEVICE) and not win()  # a Windows client's ssh -tt + ConPTY hop buffers seconds of flood: see host_yes
-        yes_before = host_yes(a.target) if host_side else 0
-        c1.send((windows_target.flood_line() if win() else 'yes') + '\r')
-        for _ in range(30):  # read the screen so `pending` shows the flood arriving (sleeping alone reads nothing)
-            if select.select([c1.fd], [], [], 0.1)[0]:
-                c1.drain()
-        flooding = host_yes(a.target) > yes_before if host_side else len(c1.pending) > 0
-        row('N6 the flood is running before Ctrl-C', flooding, 'yes on the target' if host_side else 'output arriving')
-        watcher = YesWatcher(a.target, yes_before) if host_side else None
-        c1.send(('x' * 1023 + '\n') * 256)
-        c1.send('\x03')
-        sent = time.time()
-        if host_side:  # the producer must stop promptly; what the hop already buffered may take longer to reach the screen
-            gone = watcher.gone_at(60)
-            if gone is None:
-                row('N6 Ctrl-C stops yes promptly', False, 'yes still running on the target 60 s after Ctrl-C')
+        if DEVICE and not win():  # a Windows client's Ctrl-C is typed in a ConPTY on the device: the ssh -tt hop loses it under a flood
+            c1.close()  # the driver is the session's client now; c2 stays attached and stalled
+            windows_client_ctrl_c(a.target, name)
+        else:
+            c1.send((windows_target.flood_line() if win() else 'yes') + '\r')
+            for _ in range(30):  # read the screen so `pending` shows the flood arriving (sleeping alone reads nothing)
+                if select.select([c1.fd], [], [], 0.1)[0]:
+                    c1.drain()
+            row('N6 the flood is running before Ctrl-C', len(c1.pending) > 0, 'output arriving')
+            c1.send(('x' * 1023 + '\n') * 256)
+            c1.send('\x03')
+            # The tty discards input typed before the interrupt lands, so wait for yes to stop
+            # (output goes quiet) before typing the next command.
+            stopped = c1.quiet_after(1.0, 30)
+            if stopped is None:
+                row('N6 Ctrl-C stops yes promptly', False, 'output still flowing after Ctrl-C')
             else:
-                row('N6 Ctrl-C stops yes promptly', gone - sent < 5, f'yes on the target ended {gone - sent:.1f} s after Ctrl-C (target clock)')
-        # The tty discards input typed before the interrupt lands, so wait for yes to stop
-        # (output goes quiet) before typing the next command.
-        stopped = c1.quiet_after(1.0, 60 if host_side else 30)
-        label = 'N6 the output stops after Ctrl-C' if host_side else 'N6 Ctrl-C stops yes promptly'
-        if stopped is None:
-            row(label, False, 'output still flowing after Ctrl-C')
-        else:  # the 5 s bound is the unix client's; a Windows client's screen only has to go quiet (the producer's stop is the row above)
-            row(label, True if host_side else stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
-        try:
-            c1.run_discarding(noop(), 15)
-            row('N6 the shell answers after Ctrl-C', True)
-        except RuntimeError as error:
-            row('N6 the shell answers after Ctrl-C', False, str(error))
+                row('N6 Ctrl-C stops yes promptly', stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
+            try:
+                c1.run_discarding(noop(), 15)
+                row('N6 the shell answers after Ctrl-C', True)
+            except RuntimeError as error:
+                row('N6 the shell answers after Ctrl-C', False, str(error))
         c2.resume()
         t0 = time.monotonic()
         try:
