@@ -57,7 +57,7 @@ func TestHeldRuntimeStreamCrossesAWorkerHandover(t *testing.T) {
 			}
 			waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1 })
 			oldServer, oldClient := streamingCarrier(t, identity(oldRuntime), expected, "old")
-			go func() { _ = w.Handle(ctx, oldServer) }()
+			handleInBackground(t, ctx, w, oldServer)
 			host := oldRuntime.Hostname
 			waitRuntime(t, func() bool { r, ok := routes.Lookup(host); return ok && r.Server == oldServer })
 			transport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: routes, StreamOpenTimeout: time.Second})
@@ -111,7 +111,7 @@ func TestHeldRuntimeStreamCrossesAWorkerHandover(t *testing.T) {
 			source.admissions = []runtimewire.Admission{newRuntime}
 			source.mu.Unlock()
 			newServer, _ := streamingCarrier(t, identity(newRuntime), expected, "new")
-			go func() { _ = w.Handle(ctx, newServer) }()
+			handleInBackground(t, ctx, w, newServer)
 			waitRuntime(t, func() bool { r, ok := routes.Lookup(host); return ok && r.Server == newServer })
 			expect(300 * time.Millisecond) // several pulls and carrier rechecks
 			fresh := get("/name")
@@ -134,7 +134,7 @@ func TestHeldRuntimeStreamCrossesAWorkerHandover(t *testing.T) {
 			source.admissions = []runtimewire.Admission{thirdRuntime}
 			source.mu.Unlock()
 			thirdServer, _ := streamingCarrier(t, identity(thirdRuntime), expected, "third")
-			go func() { _ = w.Handle(ctx, thirdServer) }()
+			handleInBackground(t, ctx, w, thirdServer)
 			waitRuntime(t, func() bool { r, ok := routes.Lookup(host); return ok && r.Server == thirdServer })
 			_ = newServer.Close()
 			expect(300 * time.Millisecond)

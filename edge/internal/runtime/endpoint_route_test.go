@@ -80,7 +80,7 @@ func TestEndpointRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 	defer func() { _ = w.Shutdown(context.Background()) }()
 	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 2 })
 	server := newTestCarrierServer(t, ea.Identity)
-	go func() { _ = w.Handle(ctx, server) }()
+	handleInBackground(t, ctx, w, server)
 	readyRoutes := func() map[string]bool {
 		source.mu.Lock()
 		defer source.mu.Unlock()
@@ -149,7 +149,7 @@ func TestEndpointRouteIsAdmittedByTheFastPullBetweenFullPulls(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := newTestCarrierServer(t, ea.Identity)
-	go func() { _ = w.Handle(ctx, server) }()
+	handleInBackground(t, ctx, w, server)
 	waitRuntime(t, func() bool { return routes.Len() == 1 })
 	started := time.Now()
 	source.mu.Lock()

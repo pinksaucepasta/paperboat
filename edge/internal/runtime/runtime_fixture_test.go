@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
 )
@@ -19,4 +20,21 @@ func newTestCarrierServer(t *testing.T, identity datacarrier.Identity) *datacarr
 	}
 	t.Cleanup(func() { _ = server.Close() })
 	return server
+}
+
+// handleInBackground runs w.Handle for server and, when the test ends, closes the server and waits for
+// Handle to return. An unjoined Handle logs runtime_route_detached into whichever test runs next
+// (TestEndpointRemovalsAreLoggedWithReason swaps the global slog default).
+func handleInBackground(t *testing.T, ctx context.Context, w *RuntimeCarrierWorker, server *datacarrier.Server) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); _ = w.Handle(ctx, server) }()
+	t.Cleanup(func() {
+		_ = server.Close()
+		select {
+		case <-done:
+		case <-time.After(runtimeWaitBound):
+			t.Error("Handle did not return after its carrier closed")
+		}
+	})
 }

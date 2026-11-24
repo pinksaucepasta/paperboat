@@ -59,7 +59,7 @@ func TestEndpointRouteMovesToTheNextWorkerWithoutAFailedRequest(t *testing.T) {
 		return ea.Identity
 	}
 	oldServer, oldClient := handoverCarrier(t, identity(oldEndpoint), expected, "old")
-	go func() { _ = w.Handle(ctx, oldServer) }()
+	handleInBackground(t, ctx, w, oldServer)
 	host := oldEndpoint.Hostname
 	waitRuntime(t, func() bool { r, ok := endpoints.Lookup(host); return ok && r.Server == oldServer })
 
@@ -113,7 +113,7 @@ func TestEndpointRouteMovesToTheNextWorkerWithoutAFailedRequest(t *testing.T) {
 	}
 
 	newServer, _ := handoverCarrier(t, identity(newEndpoint), expected, "new")
-	go func() { _ = w.Handle(ctx, newServer) }()
+	handleInBackground(t, ctx, w, newServer)
 	waitRuntime(t, func() bool { r, ok := endpoints.Lookup(host); return ok && r.Server == newServer })
 	time.Sleep(200 * time.Millisecond)
 	_ = oldClient.Close()
