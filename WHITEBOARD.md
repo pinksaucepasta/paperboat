@@ -404,3 +404,10 @@ On machines without App Installer/winget for LocalSystem (plain Windows Server, 
 
 ## Edge hostname published at enroll (user 2026-11-21)
 A self-hosted or managed edge enrolled with only an IP (address auto-detected) can't pass verify-ingress: the probe dials its endpoint over WebPKI HTTPS and an IP gets no certificate (selfhost/ingress.go:112-130). Europe (falkenstein-1) needed a hand-made DNS-only A record `edge-falkenstein-1.pprbt.dev` and a reinstall with `--endpoint-host`. Direction: at enroll, the server publishes the edge's own hostname (`edge-<node>.<domain>`, DNS-only, to the detected address) through its DNS publisher and hands it to pbh as the endpoint host, so the edge gets its Let's Encrypt cert and verifies with no manual DNS. Start when the user says.
+
+## Per-feature switches for a whole workspace (user 2026-11-24)
+
+A switch per feature that turns it fully on or off for a whole workspace (for example terminals, exec, SSH, file transfer, previews,
+tunnels, ENV, recordings). Off means off everywhere: the server refuses it, every `pb` command and console page says it is turned off,
+and what is already running stops. Open: who flips it (the workspace's owners and admins, Paperboat's operators in the admin panel, or
+both), whether a team can also lock a feature on, and how it sits next to the existing team access rules.
