@@ -5,8 +5,11 @@ import (
 	"errors"
 	"time"
 
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=round-trip-ping
 	"tailscale.com/ipn/ipnstate"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=round-trip-ping
 	"tailscale.com/tailcfg"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=round-trip-ping
 	"tailscale.com/types/key"
 )
 
