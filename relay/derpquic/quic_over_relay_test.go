@@ -270,15 +270,17 @@ func TestQUICBulkThroughRelayGetsMostOfTheAccountSpeed(t *testing.T) {
 
 // A QUIC transfer over a path with a 500 ms round trip still gets most of the account speed. quic-go's HyStart used to leave slow start
 // after 16 ms of delay jitter, at about 69 KB of congestion window, and then grew the window by one packet per round trip: 1.4 Mbit/s
-// whatever the plan (the fork's README.paperboat.md). With the patch a 5 Mbit/s account gets about 4.2 Mbit/s.
+// whatever the plan (the fork's README.paperboat.md). The fork now runs BBR (7ec5d64d5), whose 20 s average on a 5 Mbit/s account was
+// 3.24-4.41 Mbit/s over 40 runs (mean 3.89, sd 0.28; 3.06-4.26 over 20 runs with -race): the old 70% bound (3.5) was set for HyStart's
+// 4.2 and failed 2 of 40 runs. 55% is 4 sd below the mean and still far above the 28% stall this test exists to catch.
 func TestQUICBulkOverALongPathGetsMostOfTheAccountSpeed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("takes about 25 s")
 	}
 	goodput, dropped, _ := quicThroughput(t, 5, 250*time.Millisecond, 20*time.Second, bulkWrites)
 	t.Logf("500 ms round trip, account speed 5 Mbit/s: QUIC goodput %.2f Mbit/s, relay dropped %d datagrams", goodput, dropped)
-	if goodput < 3.5 || goodput > 5.25 {
-		t.Fatalf("a QUIC transfer over a 500 ms path through an account capped at 5 Mbit/s got %.2f Mbit/s, want 3.5-5.25 (70-105%%)", goodput)
+	if goodput < 2.75 || goodput > 5.25 {
+		t.Fatalf("a QUIC transfer over a 500 ms path through an account capped at 5 Mbit/s got %.2f Mbit/s, want 2.75-5.25 (55-105%%)", goodput)
 	}
 }
 
