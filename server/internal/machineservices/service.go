@@ -141,6 +141,37 @@ func ResolveTx(ctx context.Context, tx *sql.Tx, actor, machine string, port int)
 	return out, nil
 }
 
+type machinePort struct {
+	machine string
+	port    int32
+}
+
+// grantedPortsTx makes ResolveTx's decision for many machine ports in one round trip: an authority without a
+// team wins, otherwise every authority must name the same team.
+func grantedPortsTx(ctx context.Context, tx *sql.Tx, actor string, machines []string, ports []int32) (granted map[machinePort]bool, resultErr error) {
+	granted = map[machinePort]bool{}
+	if len(machines) == 0 {
+		return granted, nil
+	}
+	rows, e := tx.QueryContext(ctx, `SELECT p.machine,p.port FROM unnest($2::text[],$3::int[]) p(machine,port)
+ CROSS JOIN LATERAL paperboat.machine_service_authorities($1,p.machine,p.port) a
+ GROUP BY 1,2 HAVING bool_or(coalesce(a.team_id,'')='') OR count(DISTINCT a.team_id)=1`, actor, machines, ports)
+	if e != nil {
+		return nil, e
+	}
+	defer func() {
+		resultErr = withServiceCleanupFailure(resultErr, rows.Close())
+	}()
+	for rows.Next() {
+		var p machinePort
+		if e = rows.Scan(&p.machine, &p.port); e != nil {
+			return nil, e
+		}
+		granted[p] = true
+	}
+	return granted, rows.Err()
+}
+
 // TeamPrivateAccessOffTx reports whether the actor holds a private_access grant on the machine through
 // a team that has not turned private access on: the only thing between them and the ports.
 func TeamPrivateAccessOffTx(ctx context.Context, tx *sql.Tx, actor, machine string) (bool, error) {
@@ -371,7 +402,7 @@ func (s *Service) List(ctx context.Context, actor string) (items []wire.Item, re
 	defer captureServiceRollback(tx, &resultErr)
 	// Candidates are the only machines machine_service_authorities can grant: the actor's own, machines bound to an
 	// active team of the actor, and hosts of lazy policies or tunnels bound to such a team. Without them every
-	// daemon's 8-second poll evaluated the authorities for every online machine in the database. ResolveTx below
+	// daemon's 8-second poll evaluated the authorities for every online machine in the database. grantedPortsTx
 	// decides each port once and drops machines with none; an SQL prefilter on the same authorities doubled the work.
 	rows, e := tx.QueryContext(ctx, `WITH teams AS (SELECT tm.team_id FROM paperboat.team_members tm WHERE tm.account_id=$1 AND tm.active),
 bound AS (SELECT b.resource_kind,b.resource_id FROM paperboat.team_resource_bindings b JOIN teams USING(team_id) WHERE b.active AND b.resource_kind IN ('machine','lazy_policy','tunnel')),
@@ -420,23 +451,30 @@ SELECT m.id,m.alias,s.installation_generation,s.boot_id,m.machine_service_policy
 	if len(candidates) > MaxCandidateMachines {
 		return nil, ErrDenied
 	}
+	var machines []string
+	var ports []int32
+	for index, i := range candidates {
+		for _, p := range i.Services {
+			if !automaticPersonal[index] || !wire.AutomaticPort(p.Port) {
+				machines, ports = append(machines, i.MachineID), append(ports, int32(p.Port))
+			}
+		}
+	}
+	granted, e := grantedPortsTx(ctx, tx, actor, machines, ports)
+	if e != nil {
+		return nil, e
+	}
 	out := []wire.Item{}
 	for index, i := range candidates {
 		allowed := []wire.PublishedPort{}
 		for _, p := range i.Services {
-			var e error
-			if !automaticPersonal[index] || !wire.AutomaticPort(p.Port) {
-				_, e = ResolveTx(ctx, tx, actor, i.MachineID, p.Port)
-			}
-			if e == nil {
+			if (automaticPersonal[index] && wire.AutomaticPort(p.Port)) || granted[machinePort{i.MachineID, int32(p.Port)}] {
 				hostname, err := NativeBrowserHostname(i.Alias, p.Port, s.LocalAccessBaseDomain)
 				if err != nil {
 					return nil, err
 				}
 				p.BrowserURL = "https://" + hostname
 				allowed = append(allowed, p)
-			} else if e != ErrDenied {
-				return nil, e
 			}
 		}
 		if len(allowed) > 0 {

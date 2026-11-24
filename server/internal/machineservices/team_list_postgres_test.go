@@ -2,6 +2,7 @@ package machineservices_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
@@ -53,12 +54,13 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'office','linux','amd64','/workspace','online','occupied',true,1)`, machine, owner, environment)
 	s := machineservices.New(store, "local.example.test")
-	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: time.Now().UTC().Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 5432, AddressFamily: "ipv4"}}}
+	snapshot := wire.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-012345678901", StartedAt: time.Now().UTC().Add(-time.Minute), Generation: 1, Services: []wire.Port{{Port: 80, AddressFamily: "ipv4"}, {Port: 5432, AddressFamily: "ipv4"}}}
 	if _, e = s.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 		t.Fatal(e)
 	}
 	// The announcement must not expire mid-test whatever the database latency.
-	exec(`UPDATE paperboat.machine_service_snapshots SET expires_at=now()+interval '1 hour' WHERE machine_id=$1`, machine)
+	// Port 22 is outside the automatic set, so the daemon may not announce it: it is stored here to be denied.
+	exec(`UPDATE paperboat.machine_service_snapshots SET expires_at=now()+interval '1 hour',services='[{"port":22,"address_family":"ipv4"}]'::jsonb||services::jsonb WHERE machine_id=$1`, machine)
 	for _, team := range []string{teamA, teamB} {
 		exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 		exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, team, owner, member)
@@ -66,18 +68,41 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 	}
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'machine',$2,$3,true,1)`, teamA, machine, owner)
 	exec(`UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, machine, teamA)
+	online := true
 	listed := func(actor string) int {
 		t.Helper()
 		items, e := s.List(ctx, actor)
 		if e != nil {
 			t.Fatal(e)
 		}
-		n := 0
+		// The list decides every port in one query; ResolveTx, asked port by port, must agree.
+		tx, e := store.SQL().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer tx.Rollback()
+		resolved := map[int]bool{}
+		for _, port := range []int{22, 80, 5432} {
+			if _, e := machineservices.ResolveTx(ctx, tx, actor, machine, port); e == nil {
+				resolved[port] = true
+			} else if e != machineservices.ErrDenied {
+				t.Fatal(e)
+			}
+		}
+		n, shown := 0, 0
+		defer func() {
+			if online && shown != len(resolved) {
+				t.Fatalf("%s: list shows %d ports, ResolveTx grants %v", actor, shown, resolved)
+			}
+		}()
 		for _, item := range items {
 			if item.MachineID == machine {
 				n++
-				if len(item.Services) != 1 || item.Services[0].Port != 5432 {
-					t.Fatalf("services %+v", item.Services)
+				shown = len(item.Services)
+				for _, service := range item.Services {
+					if !resolved[service.Port] {
+						t.Fatalf("%s: list shows port %d, ResolveTx denies it", actor, service.Port)
+					}
 				}
 			}
 		}
@@ -169,6 +194,23 @@ INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,su
 	}
 	want("setting turned on through the mutation", member, 1)
 
+	// Two teams granting the same port may be ambiguous.
+	exec(`UPDATE paperboat.team_resource_bindings SET active=true,generation=generation+1 WHERE team_id=$1`, teamB)
+	listed(member) // ResolveTx is the expectation
+	exec(`UPDATE paperboat.team_resource_bindings SET active=false,generation=generation+1 WHERE team_id=$1`, teamB)
+	// The owner's personal machine: every announced port from the automatic set, not port 22; with automatic
+	// discovery off, only what the team grants.
+	exec(`UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`, machine)
+	want("personal owner", owner, 1)
+	exec(`UPDATE paperboat.user_machines SET personal_auto_enabled=false WHERE id=$1`, machine)
+	listed(owner) // still granted through the team binding; ResolveTx is the expectation
+	exec(`UPDATE paperboat.user_machines SET personal_auto_enabled=true,owner_team_id=$2 WHERE id=$1`, machine, teamA)
+	// Offline machines stay authorized but are not listed.
+	online = false
+	exec(`UPDATE paperboat.user_machines SET online=false,state='offline' WHERE id=$1`, machine)
+	want("machine offline", member, 0)
+	exec(`UPDATE paperboat.user_machines SET online=true,state='online' WHERE id=$1`, machine)
+	online = true
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, machine)
 	want("machine revoked", member, 0)
 }
