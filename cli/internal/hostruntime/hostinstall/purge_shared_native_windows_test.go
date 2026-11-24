@@ -24,7 +24,11 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 	const ownerSID = "S-1-5-21-49157-49158-49159-1001"
 	for _, scenario := range []string{"empty inherited scaffolding", "foreign and other account", "held diagnostic", "diagnostic hardlink", "mutable diagnostic", "reparse diagnostic", "canceled"} {
 		t.Run(scenario, func(t *testing.T) {
-			root := t.TempDir()
+			// The cleanup compares final paths, so the fixture must not sit behind a short (8.3) name.
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 			program := filepath.Join(root, "program")
 			state := filepath.Join(root, "state")
 			for _, p := range []string{program, state} {
@@ -60,6 +64,20 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 				if err := os.WriteFile(foreignLog, []byte("other owner"), 0600); err != nil {
 					t.Fatal(err)
 				}
+			}
+			// The services and the installer create these owned by SYSTEM or Administrators. What this test creates is
+			// owned by the token's default owner, which on some machines is the account itself.
+			administrators, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := filepath.WalkDir(root, func(path string, _ os.DirEntry, err error) error {
+				if err != nil || path == root || path == program || path == state {
+					return err
+				}
+				return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, administrators, nil, nil, nil)
+			}); err != nil {
+				t.Fatal(err)
 			}
 			var held windows.Handle
 			switch scenario {
@@ -104,7 +122,7 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			err := purgeWindowsSharedResidue(ctx, shared, state, instance, ownerSID)
+			err = purgeWindowsSharedResidue(ctx, shared, state, instance, ownerSID)
 			switch scenario {
 			case "empty inherited scaffolding":
 				if err != nil {

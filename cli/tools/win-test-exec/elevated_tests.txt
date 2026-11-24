@@ -91,8 +91,7 @@ TestReleaseAllWithdrawsOnlyTheCallersListenersInOnePolicyChange
 # Tried and left out (still skip or fail on a plain elevated runner): TestElevatedAdministratorLocalCAState (needs a
 # LocalSystem-protected machine guard directory), TestWindowsRepositoryCredentialExistingForeignOwnerRejected (needs a
 # token whose default owner is not the user), TestWindowsPurgeConvergesWhileAnOldCLIIsRunning (needs no ProgramData
-# tree: another elevated test leaves one), TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue (fails: purge helper
-# answers "invalid privileged installation request").
+# tree: another elevated test leaves one).
 TestPrepareWindowsLocalDaemonStateRepairsSiblingStateTree
 TestApplyLetsAnyUserConnectToTheGateway
 TestApplyRetiresTheFiltersOfAWithdrawnLease
@@ -107,6 +106,7 @@ TestUnsafeSnapshotReasonOwnersAndWriters
 TestNativeCarrierLockPublication
 TestNativeHostInstallStateFailureAndRecovery
 TestNativeSharedProgramRootMigrationPreservesChild
+TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue
 TestNativeWindowsSharedPurgeRemovesTheAccountsOwnInstallLog
 TestWindowsPurgeRemovesUnregisteredOwnedDeclaration
 TestNativeWindowsLifecycleProtectsUnusedRoot
