@@ -1,4 +1,5 @@
-package main
+// Package dnscap is the resolver every Paperboat dial looks names up with.
+package dnscap
 
 import (
 	"context"
@@ -22,13 +23,14 @@ func (c cappedDNSConn) SetDeadline(t time.Time) error {
 	return c.UDPConn.SetDeadline(t)
 }
 
-// Only Go's own resolver dials (Linux); macOS and Windows ask the system.
-func init() {
-	net.DefaultResolver.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+// New is a resolver of its own (see shared/httptransport on joined lookups) with the cap. Only Go's own resolver dials
+// (Linux); macOS and Windows ask the system.
+func New() *net.Resolver {
+	return &net.Resolver{Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 		conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
 		if udp, ok := conn.(*net.UDPConn); ok {
 			return cappedDNSConn{udp}, err
 		}
 		return conn, err
-	}
+	}}
 }

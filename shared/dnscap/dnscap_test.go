@@ -1,4 +1,4 @@
-package main
+package dnscap
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func TestADeadNameserverIsGivenUpAfterTheCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer silent.Close()
-	conn, err := net.DefaultResolver.Dial(context.Background(), "udp", silent.LocalAddr().String())
+	conn, err := New().Dial(context.Background(), "udp", silent.LocalAddr().String())
 	if err != nil {
 		t.Fatal(err)
 	}

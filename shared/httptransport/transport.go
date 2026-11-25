@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/capver"
+	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -231,7 +232,7 @@ func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Tr
 			// A resolver of its own per dial: Go's resolver joins a lookup of the same name already in flight, so after
 			// an outage every new request waited for a query sent while the network was down (its 5 s timeout) instead
 			// of asking again. Tailscale's control client does not go through that path either (net/dnscache).
-			resolver := &net.Resolver{}
+			resolver := dnscap.New()
 			if template != nil {
 				resolver = &net.Resolver{PreferGo: template.PreferGo, StrictErrors: template.StrictErrors, Dial: template.Dial}
 			}

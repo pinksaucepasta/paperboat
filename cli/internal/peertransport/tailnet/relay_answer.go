@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
 	"tailscale.com/net/stun"
 )
@@ -68,7 +69,7 @@ func (a *Authority) awaitRelayAnswer(ctx context.Context) bool {
 			}
 			// A resolver of its own: the shared one would join a lookup sent into the outage.
 			lookup, cancel := context.WithTimeout(ctx, time.Second)
-			ips, err := (&net.Resolver{}).LookupNetIP(lookup, "ip", n.EndpointHost)
+			ips, err := dnscap.New().LookupNetIP(lookup, "ip", n.EndpointHost)
 			cancel()
 			if err == nil && len(ips) > 0 {
 				_, _ = socket.WriteToUDP(stun.Request(stun.NewTxID()), &net.UDPAddr{IP: ips[0].AsSlice(), Port: int(n.EndpointTCPPort)})

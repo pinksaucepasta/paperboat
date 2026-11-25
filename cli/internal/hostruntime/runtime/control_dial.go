@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 )
 
 // controlDialer resolves the control host with a bounded retry and remembers
@@ -29,7 +30,7 @@ type controlDialer struct {
 // freshLookup asks with a resolver of its own: the shared one joins a lookup of the same name already in flight, so
 // after an outage every dial waited for a query sent while the network was down (its 5 s timeout, F21-49).
 func freshLookup(ctx context.Context, host string) ([]net.IPAddr, error) {
-	return (&net.Resolver{}).LookupIPAddr(ctx, host)
+	return dnscap.New().LookupIPAddr(ctx, host)
 }
 
 func newControlDialer(stateRoot string) *controlDialer {

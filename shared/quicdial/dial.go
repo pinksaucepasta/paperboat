@@ -12,6 +12,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	"github.com/quic-go/quic-go"
 )
 
@@ -69,7 +70,7 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 // lookup is the system resolver, a fresh one per call: the shared one joins a lookup of the same name already in
 // flight, so a relay redial after an outage waited for a query sent while the network was down. Tests replace it.
 var lookup = func(ctx context.Context, host string) ([]net.IPAddr, error) {
-	return (&net.Resolver{}).LookupIPAddr(ctx, host)
+	return dnscap.New().LookupIPAddr(ctx, host)
 }
 
 // resolve returns the first address of host that a UDP socket can be connected to (a route exists), else the first.
