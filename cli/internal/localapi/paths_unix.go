@@ -19,6 +19,19 @@ type Paths struct {
 	LockPath    string
 }
 
+// DNSFile is where pb and the daemon keep verified addresses ("" without a home); it creates nothing.
+func DNSFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	root, err := userStateRoot(os.Getenv, home)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(root, "dns.json")
+}
+
 func CurrentPaths(uid int) (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

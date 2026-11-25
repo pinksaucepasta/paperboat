@@ -30,6 +30,7 @@ func defaultHTTPClient() *http.Client {
 func newProcessHTTPTransport() http.RoundTripper {
 	config := httptransport.DevelopmentConfig()
 	config.UserAgent = "paperboat/" + buildinfo.Version
+	config.CacheDNS = true
 	config.TLSHandshakeTimeout = defaultTLSHandshakeTimeout
 	transport, err := httptransport.New(config)
 	if err != nil {

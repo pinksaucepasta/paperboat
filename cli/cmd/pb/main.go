@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/daemoncmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/dnsfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	filetransfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
@@ -63,6 +64,7 @@ func mainExit() (exitCode int) {
 		cancel()
 		<-signalDone
 	}()
+	dnsfile.Open(localapi.DNSFile())
 	reporter := errorreport.FromEnvironment()
 	restoreReporter := errorreport.Install(reporter)
 	defer restoreReporter()

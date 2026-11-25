@@ -31,6 +31,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/bandwidth"
 	clientconfig "github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/dnsfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/availability"
@@ -993,7 +994,10 @@ func productionTransport(caPath string, environ func(string) string) (http.Round
 	transportConfig := httptransport.DevelopmentConfig()
 	transportConfig.UserAgent = "paperboat/" + buildinfo.Version
 	transportConfig.TLSConfig = tlsConfig
-	transportConfig.DialContext = newControlDialer(environ("PAPERBOAT_RUNTIME_STATE_ROOT")).DialContext
+	transportConfig.CacheDNS = true
+	if stateRoot := environ("PAPERBOAT_RUNTIME_STATE_ROOT"); filepath.IsAbs(stateRoot) {
+		dnsfile.Open(filepath.Join(stateRoot, "runtime", "control-addresses.json"))
+	}
 	administrator := httptransport.ProxySnapshot{
 		HTTPProxy:  strings.TrimSpace(environ("PAPERBOAT_HTTP_PROXY")),
 		HTTPSProxy: strings.TrimSpace(environ("PAPERBOAT_HTTPS_PROXY")),

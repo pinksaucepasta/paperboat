@@ -3,6 +3,7 @@ package tailnet
 import (
 	"context"
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
@@ -71,6 +72,9 @@ func (a *Authority) awaitRelayAnswer(ctx context.Context) bool {
 			lookup, cancel := context.WithTimeout(ctx, time.Second)
 			ips, err := dnscap.New().LookupNetIP(lookup, "ip", n.EndpointHost)
 			cancel()
+			if kept, _ := dnscap.Cached(n.EndpointHost); err != nil && kept.IsValid() {
+				ips, err = []netip.Addr{kept}, nil
+			}
 			if err == nil && len(ips) > 0 {
 				_, _ = socket.WriteToUDP(stun.Request(stun.NewTxID()), &net.UDPAddr{IP: ips[0].AsSlice(), Port: int(n.EndpointTCPPort)})
 			}

@@ -96,6 +96,8 @@ type Config struct {
 	// until its TCP retransmission timer gives up minutes later.
 	HealthCheckInterval time.Duration
 	HealthCheckTimeout  time.Duration
+	// CacheDNS keeps the verified address of each directly dialed https host (shared/dnscap): the control plane's clients.
+	CacheDNS bool
 	// UserAgent is sent on a request that has none, so the server's request log counts every machine process's
 	// calls under the build's own agent instead of Go's default (PR-03: the worker's calls were unattributable).
 	UserAgent string
@@ -239,7 +241,12 @@ func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Tr
 			return (&net.Dialer{Timeout: timeout, KeepAlive: keepAlive, Resolver: resolver}).DialContext(ctx, network, address)
 		}
 	}
-	base := &http.Transport{Proxy: proxy, DialContext: dialContext, DialTLSContext: t.config.DialTLSContext, ForceAttemptHTTP2: t.config.ForceAttemptHTTP2, TLSClientConfig: t.config.TLSConfig.Clone(), TLSHandshakeTimeout: t.config.TLSHandshakeTimeout, ResponseHeaderTimeout: t.config.ResponseHeaderTimeout, ExpectContinueTimeout: t.config.ExpectContinueTimeout, IdleConnTimeout: t.config.IdleConnTimeout, MaxIdleConns: t.config.MaxIdleConns, MaxConnsPerHost: t.config.MaxConnsPerHost, MaxIdleConnsPerHost: t.config.MaxIdleConnsPerHost, MaxResponseHeaderBytes: t.config.MaxResponseHeaderBytes,
+	dialTLS := t.config.DialTLSContext
+	if t.config.CacheDNS && dialTLS == nil && t.config.TLSConfig != nil && t.config.Resolver == nil {
+		// net/http uses it only for direct https; proxied and plaintext requests keep dialContext.
+		dialTLS = cachedDialTLS(dialContext, t.config)
+	}
+	base := &http.Transport{Proxy: proxy, DialContext: dialContext, DialTLSContext: dialTLS, ForceAttemptHTTP2: t.config.ForceAttemptHTTP2, TLSClientConfig: t.config.TLSConfig.Clone(), TLSHandshakeTimeout: t.config.TLSHandshakeTimeout, ResponseHeaderTimeout: t.config.ResponseHeaderTimeout, ExpectContinueTimeout: t.config.ExpectContinueTimeout, IdleConnTimeout: t.config.IdleConnTimeout, MaxIdleConns: t.config.MaxIdleConns, MaxConnsPerHost: t.config.MaxConnsPerHost, MaxIdleConnsPerHost: t.config.MaxIdleConnsPerHost, MaxResponseHeaderBytes: t.config.MaxResponseHeaderBytes,
 		HTTP2: &http.HTTP2Config{SendPingTimeout: t.config.HealthCheckInterval, PingTimeout: t.config.HealthCheckTimeout},
 		OnProxyConnectResponse: func(_ context.Context, _ *url.URL, _ *http.Request, response *http.Response) error {
 			if response.StatusCode == http.StatusProxyAuthRequired {

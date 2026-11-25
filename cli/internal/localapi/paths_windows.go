@@ -21,6 +21,15 @@ type Paths struct {
 	LockPath    string
 }
 
+// DNSFile is where pb and the daemon keep verified addresses ("" without a profile); it creates nothing.
+func DNSFile() string {
+	base, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "Paperboat", "state", "dns.json")
+}
+
 func CurrentPaths(uid int) (Paths, error) {
 	if uid < 0 {
 		return Paths{}, ErrInvalidConfig

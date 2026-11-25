@@ -333,6 +333,7 @@ func localDaemonCommand() *cobra.Command {
 				transportConfig.TLSConfig = &tls.Config{}
 			}
 			transportConfig.TLSConfig.MinVersion = tls.VersionTLS13
+			transportConfig.CacheDNS = true
 			peerHTTPTransport, err := httptransport.New(transportConfig)
 			if err != nil {
 				return err

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	"github.com/quic-go/quic-go"
 )
 
@@ -128,5 +129,30 @@ func TestDialRejectsBadAddress(t *testing.T) {
 		if _, err := Dial(context.Background(), address, &tls.Config{}, nil, false); err == nil {
 			t.Errorf("Dial(%q) succeeded", address)
 		}
+	}
+}
+
+// A kept address nobody answers at is expired, the name looked up again and the new address dialed, in one Dial.
+func TestDialLeavesADeadKeptAddress(t *testing.T) {
+	certificate := serverCertificate(t)
+	port := listen(t, "udp4", net.IPv4(127, 0, 0, 1), certificate)
+	defer func(previous func(context.Context, string) ([]net.IPAddr, error)) { lookup = previous }(lookup)
+	lookups := 0
+	lookup = func(context.Context, string) ([]net.IPAddr, error) {
+		lookups++
+		return []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}}, nil
+	}
+	dnscap.Verified("moved.example.test", &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: port})
+	conf := trusting(certificate)
+	conf.ServerName = "localhost"
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	connection, err := Dial(ctx, net.JoinHostPort("moved.example.test", strconv.Itoa(port)), conf, &quic.Config{HandshakeIdleTimeout: 500 * time.Millisecond}, false)
+	if err != nil || lookups != 1 {
+		t.Fatalf("lookups %d: %v", lookups, err)
+	}
+	_ = connection.CloseWithError(0, "")
+	if _, fresh := dnscap.Cached("moved.example.test"); fresh {
+		t.Fatal("the dead address is still fresh")
 	}
 }

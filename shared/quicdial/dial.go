@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"net/netip"
 	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/shared/dnscap"
@@ -31,10 +32,28 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	if err != nil || port < 1 || port > 65535 {
 		return nil, errors.New("quic: invalid port in " + address)
 	}
-	remote, err := resolve(ctx, host, port)
+	tlsConf = tlsConf.Clone()
+	if tlsConf.ServerName == "" {
+		tlsConf.ServerName = host
+	}
+	remote, kept, err := resolve(ctx, host, port)
 	if err != nil {
 		return nil, err
 	}
+	connection, err := dialRemote(ctx, remote, tlsConf, conf, early)
+	if err != nil && kept.IsValid() {
+		dnscap.Expire(host, kept)
+		if again, lookupErr := route(ctx, host, port); lookupErr == nil && !again.IP.Equal(remote.IP) {
+			connection, err = dialRemote(ctx, again, tlsConf, conf, early)
+		}
+	}
+	if err == nil && tlsConf.ServerName == host && len(connection.ConnectionState().TLS.VerifiedChains) > 0 {
+		dnscap.Verified(host, connection.RemoteAddr())
+	}
+	return connection, err
+}
+
+func dialRemote(ctx context.Context, remote *net.UDPAddr, tlsConf *tls.Config, conf *quic.Config, early bool) (*quic.Conn, error) {
 	network, local := "udp6", &net.UDPAddr{IP: net.IPv6unspecified}
 	if remote.IP.To4() != nil {
 		network, local = "udp4", &net.UDPAddr{IP: net.IPv4zero}
@@ -42,10 +61,6 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	socket, err := net.ListenUDP(network, local)
 	if err != nil {
 		return nil, err
-	}
-	tlsConf = tlsConf.Clone()
-	if tlsConf.ServerName == "" {
-		tlsConf.ServerName = host
 	}
 	transport := &quic.Transport{Conn: socket}
 	var connection *quic.Conn
@@ -73,8 +88,25 @@ var lookup = func(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return dnscap.New().LookupIPAddr(ctx, host)
 }
 
-// resolve returns the first address of host that a UDP socket can be connected to (a route exists), else the first.
-func resolve(ctx context.Context, host string, port int) (*net.UDPAddr, error) {
+// resolve returns the address host last verified at (kept is then set), or its route: at once while fresh, else only
+// when the lookup fails.
+func resolve(ctx context.Context, host string, port int) (remote *net.UDPAddr, kept netip.Addr, err error) {
+	kept, fresh := dnscap.Cached(host)
+	if !fresh {
+		lookupCtx, cancel := ctx, func() {}
+		if kept.IsValid() {
+			lookupCtx, cancel = context.WithTimeout(ctx, dnscap.LastGoodWait)
+		}
+		defer cancel()
+		if remote, err = route(lookupCtx, host, port); err == nil || !kept.IsValid() {
+			return remote, netip.Addr{}, err
+		}
+	}
+	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(kept, uint16(port))), kept, nil
+}
+
+// route returns the first address of host that a UDP socket can be connected to (a route exists), else the first.
+func route(ctx context.Context, host string, port int) (*net.UDPAddr, error) {
 	ips, err := lookup(ctx, host)
 	if err != nil {
 		return nil, err
