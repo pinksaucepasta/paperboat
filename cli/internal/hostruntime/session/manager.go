@@ -356,30 +356,22 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	setSessionSupportReference(session, supportref.FromContext(ctx))
-	if m.config.Store != nil {
-		if err := m.config.Store.CreateSession(ctx, store.Session{ID: id, Name: request.Name, CWD: request.Command.CWD, CommandPath: request.Command.Path, CommandArgs: request.Command.Args, CommandEnv: request.Command.Env, Columns: request.Command.Dimensions.Columns, Rows: request.Command.Dimensions.Rows, State: string(Creating), Generation: 0}); err != nil {
-			return Snapshot{}, err
-		}
-	}
 	process, err := m.launch(ctx, request.Command)
 	if err != nil {
 		_ = session.lifecycle.Transition(Closed)
-		if cleanupErr := m.discardFailedCreate(ctx, session, Creating); cleanupErr != nil {
-			observeSessionFailure(session, "lifecycle", cleanupErr)
-		}
 		return Snapshot{}, err
 	}
 	err = session.lifecycle.Transition(Running)
-	if err == nil {
-		err = m.persist(ctx, session)
+	if err == nil && m.config.Store != nil { // one synced record: the answer waits for it, a shell that died with the host needs none
+		err = classifySessionFailure("lifecycle", m.config.Store.CreateSession(ctx, session.storeRecordLocked()))
+		session.persistedState = Running
 	}
 	if err != nil { // the shell runs but has no record: end it (CloseIO alone leaves one that ignores the hangup running)
 		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
 		_, terminateErr := process.Terminate(terminateCtx, 0)
 		cancel()
-		cleanupErr := m.discardFailedCreate(context.Background(), session, Creating)
-		observeSessionFailure(session, "lifecycle", errors.Join(terminateErr, cleanupErr))
-		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", errors.Join(terminateErr, cleanupErr)))
+		observeSessionFailure(session, "lifecycle", terminateErr)
+		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", terminateErr))
 	}
 	_, generation := session.lifecycle.Snapshot()
 	session.inputs = NewBoundedInputJournal(generation, m.config.MaxInputDecisions)

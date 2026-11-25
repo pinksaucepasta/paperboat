@@ -469,3 +469,66 @@ func TestInputDoesNotWaitForTheStore(t *testing.T) {
 		t.Fatalf("key with the store locked: decision=%+v err=%v after %v", decision, err, time.Since(started))
 	}
 }
+
+// Opening a terminal on slow storage waits for one session commit, and a shell whose record is refused is ended.
+func TestCreateCommitsItsSessionOnce(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	state, err := store.Open(t.Context(), store.Config{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = state.Close() })
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(root, "state.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, statement := range []string{
+		`CREATE TABLE test_writes(state TEXT)`,
+		`CREATE TRIGGER test_insert AFTER INSERT ON sessions BEGIN INSERT INTO test_writes VALUES(NEW.state); END`,
+		`CREATE TRIGGER test_update AFTER UPDATE OF state ON sessions BEGIN INSERT INTO test_writes VALUES(NEW.state); END`,
+		`CREATE TRIGGER test_refuse BEFORE INSERT ON sessions WHEN NEW.name='refused' BEGIN SELECT RAISE(ABORT,'injected'); END`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspace := t.TempDir()
+	adapter, err := pty.NewAdapter(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last PTYProcess
+	manager, err := NewManager(ManagerConfig{Store: state, Launch: func(command pty.Command) (PTYProcess, error) {
+		process, err := adapter.Start(command)
+		last = process
+		return process, err
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	command := pty.Command{Path: "/bin/cat", CWD: workspace, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}
+	if _, err := manager.Create(t.Context(), CreateRequest{Name: "kept", Command: command}); err != nil {
+		t.Fatal(err)
+	}
+	var writes int
+	var recorded string
+	if err := db.QueryRow(`SELECT count(*),max(state) FROM test_writes`).Scan(&writes, &recorded); err != nil || writes != 1 || recorded != string(Running) {
+		t.Fatalf("session commits=%d state=%q err=%v", writes, recorded, err)
+	}
+	for range 2 { // the name is free again after a refusal
+		if _, err := manager.Create(t.Context(), CreateRequest{Name: "refused", Command: command}); err == nil || errors.Is(err, ErrSessionExists) {
+			t.Fatalf("create with a refused record: %v", err)
+		}
+		ended, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		_, err := last.Wait(ended)
+		cancel()
+		if err != nil {
+			t.Fatalf("the shell without a record still runs: %v", err)
+		}
+	}
+	if sessions := manager.List(); len(sessions) != 1 {
+		t.Fatalf("sessions=%d", len(sessions))
+	}
+}

@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sort"
 
@@ -128,18 +127,6 @@ func (m *Manager) persist(ctx context.Context, session *managedSession) error {
 		session.persistedState = State(record.State)
 	}
 	return classifySessionFailure("lifecycle", err)
-}
-
-func (m *Manager) discardFailedCreate(ctx context.Context, session *managedSession, expected State) error {
-	if m.config.Store == nil {
-		return nil
-	}
-	record := session.storeRecordLocked()
-	session.opMu.Unlock()
-	updateErr := m.config.Store.UpdateSession(ctx, session.id, string(expected), record)
-	deleteErr := m.config.Store.DeleteSession(ctx, session.id)
-	session.opMu.Lock()
-	return classifySessionFailure("lifecycle", errors.Join(updateErr, deleteErr))
 }
 
 func randomID(random io.Reader) (string, error) {
