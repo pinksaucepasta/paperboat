@@ -346,7 +346,7 @@ func TestInterruptCutsAWriteThatTakesTheLockFirst(t *testing.T) {
 		handled, err = process.Interrupt(0x03, func() {
 			go func() {
 				time.Sleep(100 * time.Millisecond) // Interrupt has cut what it can see and waits for the lock
-				_, writeErr := process.writeInterruptible(paste, time.Now().Add(20*time.Second))
+				_, writeErr := process.writeInterruptible(paste, process.interrupts.Load(), time.Now().Add(20*time.Second))
 				process.writeMu.Unlock()
 				written <- writeErr
 			}()
@@ -358,6 +358,21 @@ func TestInterruptCutsAWriteThatTakesTheLockFirst(t *testing.T) {
 	}
 	if err := <-written; !errors.Is(err, ErrInterrupted) {
 		t.Fatalf("paste write: %v", err)
+	}
+}
+
+// A paste frame that waited for the lock while Interrupt held it was typed into the shell after Ctrl-C.
+func TestWriteThatWaitedBehindAnInterruptIsDiscarded(t *testing.T) {
+	process, _ := startShell(t, `exec sleep 30`)
+	defer process.Terminate(context.Background(), time.Second)
+	process.writeMu.Lock()
+	written := make(chan error, 1)
+	go func() { _, err := process.Write([]byte("pasted\n")); written <- err }()
+	time.Sleep(100 * time.Millisecond) // the write waits for the lock
+	process.interrupts.Add(1)
+	process.writeMu.Unlock()
+	if err := <-written; !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("write: %v, want it discarded", err)
 	}
 }
 

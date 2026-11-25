@@ -146,11 +146,12 @@ func (p *Process) Read(buffer []byte) (int, error) {
 }
 func (p *Process) Write(data []byte) (int, error) { return p.WriteContext(context.Background(), data) }
 func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
+	start := p.interrupts.Load() // before the lock: input that waited behind an interrupt was typed before it and goes with the rest
 	if err := LockInput(ctx, &p.writeMu); err != nil {
 		return 0, err
 	}
 	defer p.writeMu.Unlock()
-	return p.writeInterruptible(data, time.Now().Add(inputTimeout(ctx)))
+	return p.writeInterruptible(data, start, time.Now().Add(inputTimeout(ctx)))
 }
 
 // inputChunk bounds how much of a paste can still land after an interrupt: none, because the queue is flushed after
@@ -159,9 +160,8 @@ const inputChunk = 4096
 
 // writeInterruptible sets its deadline before checking for an interrupt, so an Interrupt that bumps the counter after
 // the check also moves the deadline after this write's own and aborts it.
-func (p *Process) writeInterruptible(data []byte, deadline time.Time) (int, error) {
+func (p *Process) writeInterruptible(data []byte, start uint64, deadline time.Time) (int, error) {
 	defer p.file.SetWriteDeadline(time.Time{})
-	start := p.interrupts.Load()
 	written := 0
 	for written < len(data) {
 		if err := p.file.SetWriteDeadline(deadline); err != nil {

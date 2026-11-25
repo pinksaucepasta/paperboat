@@ -75,6 +75,10 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 			return InputDecision{}, ErrInputConflict
 		}
 	}
+	// Again after the store's write: a Ctrl-C during it discards this frame too.
+	if now := session.interrupt.Load(); now != nil && sameInputCursor(*now, key) && key.InputSequence != 0 && key.InputSequence < now.InputSequence {
+		process = discardedInput{}
+	}
 	decision, err := session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: process})
 	if err != nil {
 		return decision, err

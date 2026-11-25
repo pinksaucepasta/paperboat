@@ -235,3 +235,30 @@ func TestWaitRoomPacesTheOwnerByItsAcknowledgements(t *testing.T) {
 		t.Fatal("the PTY stayed held after an interrupt cut the whole window")
 	}
 }
+
+// A second Ctrl-C whose cut is skipped while the first one's resync is still owed: the screen still comes, once, and output follows it.
+func TestLaggedViewerGetsItsScreenWhenASecondCutIsSkipped(t *testing.T) {
+	f := NewFanout()
+	if err := f.Attach("live", 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	var next uint64
+	publishText(t, f, &next, strings.Repeat("x", interruptDiscardThreshold))
+	f.DiscardPendingOutput(f.PublishedEnd())
+	f.attachments["live"].rate = outputRate{}
+	if resynced := f.DiscardPendingOutput(f.PublishedEnd()); len(resynced) != 0 || !f.Lagged("live") {
+		t.Fatalf("resynced=%v lagged=%v, want a skipped cut with the resync still owed", resynced, f.Lagged("live"))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := f.WaitNext(ctx, "live"); !errors.Is(err, ErrAttachmentLagged) || f.Lagged("live") {
+		t.Fatalf("err=%v lagged=%v, want the owed screen once", err, f.Lagged("live"))
+	}
+	if err := f.SkipTo("live", next); err != nil {
+		t.Fatal(err)
+	}
+	publishText(t, f, &next, "$ ")
+	if event, err := f.WaitNext(ctx, "live"); err != nil || string(event.Data) != "$ " {
+		t.Fatalf("after the screen: %q, %v", event.Data, err)
+	}
+}
