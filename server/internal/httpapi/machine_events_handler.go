@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
@@ -166,6 +167,7 @@ func answerMachineEvents(w http.ResponseWriter, r *http.Request, waiter machineE
 		return
 	}
 	w.Header().Set(MachineEventsAnswerHeader, answer)
+	logMachineEventsAnswer(r, machineID, request.Topics, changed)
 	if len(changed) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -215,4 +217,21 @@ func NewMachineEventsHandler(waiter machineEventWaiter, identities machineReques
 		return nil, errors.New("machine events dependencies are required")
 	}
 	return machineEventsWait(waiter, identities, signing, presence), nil
+}
+
+// machineEventsAnswers counts 200 answers so one in machineEventsAnswerSample is logged.
+var machineEventsAnswers atomic.Uint64
+
+const machineEventsAnswerSample = 20
+
+// logMachineEventsAnswer samples which topic answered a wait and the generation the host sent against the current one,
+// to find answers without a real move. The machine is named by a short hash only.
+func logMachineEventsAnswer(r *http.Request, machineID string, known, changed map[string]int64) {
+	if len(changed) == 0 || machineEventsAnswers.Add(1)%machineEventsAnswerSample != 0 {
+		return
+	}
+	sum := sha256.Sum256([]byte(machineID))
+	for topic, current := range changed {
+		slog.InfoContext(r.Context(), "machine_events_answer", "machine", hex.EncodeToString(sum[:4]), "topic", topic, "known", known[topic], "current", current)
+	}
 }
