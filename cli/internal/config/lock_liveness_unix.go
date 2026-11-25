@@ -14,5 +14,8 @@ func processAlive(pid int) bool {
 		return false
 	}
 	err = process.Signal(syscall.Signal(0))
-	return err == nil || errors.Is(err, os.ErrPermission)
+	if err != nil {
+		return errors.Is(err, os.ErrPermission)
+	}
+	return !processZombie(pid) // kill(pid, 0) also succeeds for an exited process its parent never reaps
 }

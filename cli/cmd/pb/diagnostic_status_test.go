@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 
@@ -47,6 +48,7 @@ func TestDiagnosticCredentialReadFailureIsNotLogout(t *testing.T) {
 	}{
 		{config.ErrNoCredentials, "no saved sign-in found in this user profile"},
 		{fmt.Errorf("read: %w", config.ErrCredentialStoreUnavailable), "saved sign-in unavailable · credential store access failed"},
+		{&config.CredentialLockTimeout{PID: 42, Since: time.Unix(0, 0)}, "saved sign-in unavailable · credential lock timed out, held by pid 42 since 1970-01-01T00:00:00Z"},
 		{errors.New("refresh failure"), "saved sign-in unavailable · credential read or refresh failed"},
 	} {
 		if got := diagnosticCredentialFailure(tc.err); got != tc.want {

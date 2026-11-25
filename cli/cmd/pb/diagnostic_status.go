@@ -9,7 +9,10 @@ import (
 )
 
 func diagnosticCredentialFailure(err error) string {
+	var lockTimeout *config.CredentialLockTimeout
 	switch {
+	case errors.As(err, &lockTimeout):
+		return "saved sign-in unavailable · " + lockTimeout.Error()
 	case errors.Is(err, config.ErrNoCredentials):
 		return "no saved sign-in found in this user profile"
 	case errors.Is(err, config.ErrCredentialStoreUnavailable):

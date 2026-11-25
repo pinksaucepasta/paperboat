@@ -52,3 +52,13 @@ func linuxProcessStart(stat string, boot time.Time) time.Time {
 	}
 	return boot.Add(time.Duration(ticks) * time.Second / linuxUserHZ)
 }
+
+// processZombie reports whether pid has exited and only waits to be reaped. Unknown is false.
+func processZombie(pid int) bool {
+	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
+	return len(fields) > 0 && fields[0] == "Z"
+}

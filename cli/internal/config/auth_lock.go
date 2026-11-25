@@ -1,13 +1,19 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/filelock"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 const sharedLockRemoteStaleAfter = 30 * time.Minute
@@ -37,6 +43,36 @@ type sharedLock struct {
 var sharedLockMu sync.Map
 
 var errSharedLockTimeout = errors.New("timed out waiting for shared credential lock")
+
+// CredentialLockTimeout names the owner a waiter gave up on; its type name is what fault reports keep.
+type CredentialLockTimeout struct {
+	PID   int // 0: the lock has no readable owner
+	Since time.Time
+	cause error
+}
+
+func (e *CredentialLockTimeout) Error() string {
+	if e.PID == 0 {
+		return "credential lock timed out, its owner is unknown"
+	}
+	return fmt.Sprintf("credential lock timed out, held by pid %d since %s", e.PID, e.Since.UTC().Format(time.RFC3339))
+}
+
+func (e *CredentialLockTimeout) Unwrap() []error {
+	if e.cause == nil {
+		return []error{errSharedLockTimeout}
+	}
+	return []error{errSharedLockTimeout, e.cause}
+}
+
+func newCredentialLockTimeout(path string, cause error) *CredentialLockTimeout {
+	timeout := &CredentialLockTimeout{cause: cause}
+	var owner sharedLockOwner
+	if b, err := os.ReadFile(filepath.Join(path, "owner.json")); err == nil && json.Unmarshal(b, &owner) == nil {
+		timeout.PID, timeout.Since = owner.PID, owner.CreatedAt
+	}
+	return timeout
+}
 
 // sharedLockInspectGrace is how long a waiter keeps polling a lock directory it cannot validate: a release races the
 // inspection for milliseconds, a directory with a foreign owner or ACL stays invalid.
@@ -108,29 +144,53 @@ func (l *sharedLock) Lock() error {
 			continue
 		}
 		invalidSince = time.Time{}
-		_, ownerErr := os.Lstat(filepath.Join(l.path, "owner.json"))
 		stale, err := sharedLockIsStale(l.path, hostname)
 		lastOwnerErr = err
 		if err == nil && stale {
-			// Empty-only removal is atomic: if a creator publishes ownership after this check, removal fails
-			// without touching its record. A directory holding only a dead creator's temp file is quarantined.
-			if os.IsNotExist(ownerErr) && cleanupNewSharedLock(l.path) == nil {
+			reclaimed, err := reclaimSharedLock(l.path, hostname, deadline)
+			if reclaimed {
 				continue
 			}
-			if ownerErr == nil || os.IsNotExist(ownerErr) {
-				stalePath := l.path + ".stale-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-				//paperboat:allow-source-policy atomic-replacement owner=runtime-auth reason=stale-lock-quarantine
-				if quarantineSharedLock(l.path, stalePath) == nil {
-					continue
-				}
-			}
+			lastOwnerErr = err
 		}
 		if time.Now().After(deadline) {
-			return errors.Join(errSharedLockTimeout, lastOwnerErr)
+			timeout := newCredentialLockTimeout(l.path, lastOwnerErr)
+			diagnosticlog.TryWarn("credential lock timed out", "owner_pid", timeout.PID, "held_since", timeout.Since)
+			return timeout
 		}
 		//paperboat:allow-source-policy sleep owner=runtime-auth reason=bounded-cross-process-lock-poll
 		time.Sleep(25 * time.Millisecond)
 	}
+}
+
+// reclaimSharedLock removes a stale lock. One waiter at a time judges and removes: between an unserialized waiter's
+// judgement and its removal another waiter could reclaim the lock and own it, and the live owner's directory was removed.
+func reclaimSharedLock(path, hostname string, deadline time.Time) (reclaimed bool, resultErr error) {
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	release, err := filelock.Lock(ctx, strings.TrimSuffix(path, ".d"))
+	if err != nil {
+		return false, safeConfigCause("stale shared credential lock could not be reclaimed", err)
+	}
+	defer func() { resultErr = errors.Join(resultErr, release()) }()
+	stale, err := sharedLockIsStale(path, hostname)
+	if err != nil || !stale {
+		return false, err
+	}
+	_, ownerErr := os.Lstat(filepath.Join(path, "owner.json"))
+	// Empty-only removal is atomic: if a creator publishes ownership after this check, removal fails
+	// without touching its record. A directory holding only a dead creator's temp file is quarantined.
+	if os.IsNotExist(ownerErr) && cleanupNewSharedLock(path) == nil {
+		return true, nil
+	}
+	if ownerErr != nil && !os.IsNotExist(ownerErr) {
+		return false, safeConfigCause("shared credential lock owner could not be inspected", ownerErr)
+	}
+	stalePath := path + ".stale-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	if err := quarantineSharedLock(path, stalePath); err != nil {
+		return false, safeConfigCause("stale shared credential lock could not be reclaimed", err)
+	}
+	return true, nil
 }
 
 func sharedLockIsStale(path, hostname string) (bool, error) {

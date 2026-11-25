@@ -18,3 +18,11 @@ func processStartedAfter(pid int, t time.Time) bool {
 	started := time.Unix(int64(process.Proc.P_starttime.Sec), int64(process.Proc.P_starttime.Usec)*1000)
 	return started.After(t.Add(processStartSlack))
 }
+
+const darwinProcessZombie = 5 // SZOMB
+
+// processZombie reports whether pid has exited and only waits to be reaped. Unknown is false.
+func processZombie(pid int) bool {
+	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	return err == nil && process.Proc.P_stat == darwinProcessZombie
+}
