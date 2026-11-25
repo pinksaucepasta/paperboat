@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
@@ -212,7 +213,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 					timeout = hooks.DrainTimeout + 5*time.Second
 				}
 				var err error
-				abortMaintenance, err = prepareMaintenance(ctx, paths.hostdSocket, paths.hostdToken, *suppliedForce, timeout, "")
+				abortMaintenance, err = prepareInstallMaintenance(ctx, hostd, paths, *suppliedForce, timeout)
 				if err != nil {
 					return err
 				}
@@ -290,6 +291,26 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		return finalizePreparedUpdateLocked(ctx, request.UID)
 	}
 	return nil
+}
+
+// hostdRunning reports whether the installed hostd unit runs.
+var hostdRunning = func(ctx context.Context, hostd *service.Installer) (bool, error) {
+	component, err := hostd.NativeComponent(nil)
+	if err != nil {
+		return false, err
+	}
+	status, err := component.Inspect(ctx)
+	return status.Running, err
+}
+
+// prepareInstallMaintenance asks the serving hostd to admit maintenance. A stopped hostd has no work to protect and
+// no socket to ask on: installing over it is the way to bring the machine back, so it proceeds (as repair and the
+// Windows replacement do).
+func prepareInstallMaintenance(ctx context.Context, hostd *service.Installer, paths installPaths, force bool, timeout time.Duration) (func() error, error) {
+	if running, err := hostdRunning(ctx, hostd); err == nil && !running {
+		return nil, nil
+	}
+	return prepareMaintenance(ctx, paths.hostdSocket, paths.hostdToken, force, timeout, "")
 }
 
 // hostdHandover reports an update to another hostd generation: the candidate

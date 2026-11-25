@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 func TestSuppliedMaintenanceBoundary(t *testing.T) {
@@ -122,5 +123,27 @@ func TestSuppliedMaintenanceWaitTimeoutIsTheBusyOutcome(t *testing.T) {
 	var busy *MaintenanceBusyTimeoutError
 	if !errors.Is(err, hostdproto.ErrMaintenanceBusy) || !errors.As(err, &busy) || time.Since(start) > 3*time.Second {
 		t.Fatalf("running work past the wait bound: err=%v after %s", err, time.Since(start))
+	}
+}
+
+// With hostd stopped, `pb install` of the same build failed with "hostd lifecycle socket connection failed" and could
+// not bring the machine back. A stopped hostd has nothing to admit; a running one is still asked.
+func TestInstallSkipsMaintenanceAdmissionWhenHostdIsStopped(t *testing.T) {
+	restore := hostdRunning
+	t.Cleanup(func() { hostdRunning = restore })
+	paths := installPaths{hostdSocket: filepath.Join(t.TempDir(), "hostd.sock"), hostdToken: filepath.Join(t.TempDir(), "hostd.token")}
+	hostdRunning = func(context.Context, *service.Installer) (bool, error) { return false, nil }
+	if abort, err := prepareInstallMaintenance(context.Background(), nil, paths, false, time.Second); err != nil || abort != nil {
+		t.Fatalf("stopped hostd still required maintenance admission: %v", err)
+	}
+	hostdRunning = func(context.Context, *service.Installer) (bool, error) { return true, nil }
+	if _, err := prepareInstallMaintenance(context.Background(), nil, paths, false, time.Second); err == nil {
+		t.Fatal("a running hostd was not asked for maintenance admission")
+	}
+	hostdRunning = func(context.Context, *service.Installer) (bool, error) {
+		return false, errors.New("service manager did not answer")
+	}
+	if _, err := prepareInstallMaintenance(context.Background(), nil, paths, false, time.Second); err == nil {
+		t.Fatal("an unknown hostd state skipped maintenance admission")
 	}
 }
