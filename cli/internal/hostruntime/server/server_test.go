@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,9 +11,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/telemetry"
 	"io"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -887,5 +890,87 @@ func TestServeFreesTheOperationSlotBeforeTheResponse(t *testing.T) {
 		if response.Type != "response" {
 			t.Fatalf("sequential request %d: %s %s", i, response.Type, response.Payload)
 		}
+	}
+}
+
+// A slow disk delays the create, whose record must be durable before it runs, but not an attach or a list.
+func TestAttachDoesNotWaitForTheOperationStore(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	durable, err := store.Open(t.Context(), store.Config{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer durable.Close()
+	journal, err := operation.NewPersistentJournal(t.Context(), 8, durable, time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := sql.Open("sqlite", filepath.Join(root, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Close()
+	lock, err := locker.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if _, err := lock.ExecContext(t.Context(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	server := testServer(t, func(context.Context, protocol.Frame) (Authorization, error) {
+		return Authorization{JournalBinding: "user:1"}, nil
+	}, func(context.Context, Authorization, string, json.RawMessage) operation.Outcome {
+		calls.Add(1)
+		return operation.Outcome{Result: json.RawMessage(`{}`)}
+	}, 4)
+	server.config.Journal = journal
+	send := func(action, id string) <-chan protocol.Frame {
+		client, peer := net.Pipe()
+		t.Cleanup(func() { _ = client.Close() })
+		go server.Serve(peer)
+		hello(t, client)
+		if err := protocol.WriteFrame(client, request("req_"+id, "op_"+id, json.RawMessage(`{"action":"`+action+`"}`))); err != nil {
+			t.Fatal(err)
+		}
+		answered := make(chan protocol.Frame, 1)
+		go func() {
+			if response, err := protocol.ReadFrame(client); err == nil {
+				answered <- response
+			}
+		}()
+		return answered
+	}
+	started := time.Now()
+	created := send("create", "00000001")
+	released := make(chan error, 1)
+	timer := time.AfterFunc(1500*time.Millisecond, func() {
+		_, err := lock.ExecContext(context.Background(), "ROLLBACK")
+		released <- err
+	})
+	defer timer.Stop()
+	for _, action := range []string{"attach", "list"} {
+		if response := <-send(action, "0000000"+map[string]string{"attach": "2", "list": "3"}[action]); response.Type != "response" {
+			t.Fatalf("%s response=%#v", action, response)
+		}
+		waited := time.Since(started)
+		t.Logf("%s answered after %s", action, waited)
+		if waited > time.Second {
+			t.Errorf("%s waited for the disk: %s", action, waited)
+		}
+	}
+	if err := <-released; err != nil {
+		t.Fatal(err)
+	}
+	if response := <-created; response.Type != "response" {
+		t.Fatalf("create response=%#v", response)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("calls=%d", calls.Load())
+	}
+	records, err := durable.Operations(t.Context(), time.Now(), 8)
+	if err != nil || len(records) != 1 || records[0].State != "completed" {
+		t.Fatalf("records=%#v err=%v", records, err)
 	}
 }

@@ -110,6 +110,8 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		resuming := authorization.Resume != nil && !authorization.Resume.resumed.Load()
 		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" || frame.Capability == recording.Capability || terminalCleanupRequest(frame) || resuming {
 			outcome = execute(opCtx)
+		} else if repeatableTerminalRequest(frame) {
+			outcome, replay, err = s.repeatable.Execute(opCtx, journalOperationID, journalRequest, execute)
 		} else {
 			outcome, replay, err = s.config.Journal.Execute(opCtx, journalOperationID, journalRequest, execute)
 		}
@@ -185,13 +187,27 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 // transient refusal permanently strands server retries in "closing". Keep the
 // journal for operations whose effects cannot safely be repeated.
 func terminalCleanupRequest(frame protocol.Frame) bool {
-	if frame.Capability != "terminal.v1" {
-		return false
+	action := terminalAction(frame)
+	return action == "close" || action == "delete"
+}
+
+// A read or an attach may run again after a host runtime restart: the attach ends with its connection.
+func repeatableTerminalRequest(frame protocol.Frame) bool {
+	switch terminalAction(frame) {
+	case "list", "get", "snapshot", "cursor", "transfer-destinations", "attach", "replay":
+		return true
 	}
+	return false
+}
+
+func terminalAction(frame protocol.Frame) string {
 	var request struct {
 		Action string `json:"action"`
 	}
-	return json.Unmarshal(frame.Payload, &request) == nil && (request.Action == "close" || request.Action == "delete")
+	if frame.Capability != "terminal.v1" || json.Unmarshal(frame.Payload, &request) != nil {
+		return ""
+	}
+	return request.Action
 }
 
 func requestJournalOperationID(frame protocol.Frame) string {

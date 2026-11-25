@@ -18,6 +18,9 @@ import (
 
 type Server struct {
 	config Config
+	// repeatable deduplicates requests that may run again after a restart; nothing in it waits for the disk.
+	repeatable *operation.Journal
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	sem    chan struct{}
@@ -38,8 +41,12 @@ func New(config Config) (*Server, error) {
 		config.MutationDeadline <= 0 || config.MutationDeadline > 5*time.Minute {
 		return nil, ErrInvalidConfiguration
 	}
+	repeatable, err := operation.NewJournal(config.MaxConcurrent * 32)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{config: config, ctx: ctx, cancel: cancel, sem: make(chan struct{}, config.MaxConcurrent), running: make(map[string]context.CancelFunc), conns: make(map[Connection]struct{})}, nil
+	return &Server{config: config, repeatable: repeatable, ctx: ctx, cancel: cancel, sem: make(chan struct{}, config.MaxConcurrent), running: make(map[string]context.CancelFunc), conns: make(map[Connection]struct{})}, nil
 }
 
 func (s *Server) Start(ctx context.Context) error {
