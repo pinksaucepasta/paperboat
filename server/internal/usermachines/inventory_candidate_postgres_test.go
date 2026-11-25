@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
@@ -210,4 +212,131 @@ WHERE p.team_id=$1`, team, member, m("team_all"), admin)
 	if nonEmpty < 8 {
 		t.Fatalf("fixture too weak: only %d actor/workspace pairs see any machine", nonEmpty)
 	}
+
+	// Differential: the list, capabilities and managed SSH equal the SQL that called the access functions, at every
+	// stage of the team. listInventory is called directly: workspace validation would refuse a suspended team first.
+	exec(`INSERT INTO paperboat.machine_ssh_targets(user_machine_id,machine_generation,os_user,target_port,created_at,updated_at)
+ SELECT id,installation_generation,'pbt',22,now(),now() FROM paperboat.user_machines WHERE id LIKE 'ic_machine_%_'||$1`, s)
+	exec(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports)
+SELECT id,2,false,'role','member','all_machines','','private_access',int4range(22,23) FROM paperboat.workspace_policies WHERE team_id=$1`, team)
+	if inventoryDifferential(t, store, service, users, team, other, s) < 8 {
+		t.Fatal("differential fixture too weak: hardly any team capabilities")
+	}
+	for _, stage := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE paperboat.workspace_policies SET allow_private_access=true WHERE team_id=$1`, []any{team}},
+		{`UPDATE paperboat.workspace_policy_rules SET subject_kind='all',subject_id='' WHERE rule=2 AND policy_id IN (SELECT id FROM paperboat.workspace_policies WHERE team_id=$1)`, []any{team}},
+		{`UPDATE paperboat.team_resource_bindings SET active=false WHERE resource_id=$1`, []any{m("shared")}},
+		{`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, []any{m("team_tagged")}},
+		{`UPDATE paperboat.user_machines SET deleted_at=now() WHERE id=$1`, []any{m("team_picked")}},
+		{`UPDATE paperboat.teams SET sso_required=true,sso_session_seconds=60 WHERE team_id=$1`, []any{team}},
+		{`UPDATE paperboat.teams SET sso_required=false WHERE team_id=$1`, []any{team}},
+		{`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=owner_account WHERE team_id=$1`, []any{team}},
+		{`UPDATE paperboat.teams SET suspended=false,suspended_at=NULL,suspended_by=NULL WHERE team_id=$1`, []any{team}},
+		{`UPDATE paperboat.team_members SET active=false WHERE account_id=$1`, []any{picked}},
+		{`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, []any{team}},
+	} {
+		exec(stage.sql, stage.args...)
+		t.Log(stage.sql)
+		inventoryDifferential(t, store, service, users, team, other, s)
+	}
+}
+
+// inventoryDifferential compares every actor's list in every workspace with the SQL before the access functions were
+// taken apart (2026-11-25), kept here as the oracle. It returns how many team capability arrays were not empty.
+func inventoryDifferential(t *testing.T, store *db.DB, service *Service, users []string, team, other, suffix string) int {
+	t.Helper()
+	ctx, capable := t.Context(), 0
+	const newRule = `(team_machine_bound_for($1,$3,m.id) AND EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE NOT isempty(workspace_policy_rule_ports($1,$3,m.id,cap))))`
+	const oldRule = `EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE team_machine_capability_allowed($1,$3,m.id,cap))`
+	for _, actor := range users {
+		for _, scope := range []*workspace.Scope{nil, {ID: "personal"}, {ID: team, TeamID: team}, {ID: other, TeamID: other}} {
+			listCtx, scoped, teamID := ctx, scope != nil, any(nil)
+			if scope != nil {
+				listCtx = workspace.WithContext(ctx, *scope)
+				if scope.TeamID != "" {
+					teamID = scope.TeamID
+				}
+			}
+			for _, opts := range []InventoryOptions{{Limit: 200}, {Limit: 1}, {Limit: 2, Offset: 1}, {Limit: 1, Offset: 100}, {Limit: 5, After: &InventoryPosition{Key: "shared", ID: ""}}, {Limit: 9, Q: "team"}, {Limit: 9, Owner: "shared"}} {
+				with, predicate, args := inventoryFilter(listCtx, actor, opts)
+				if strings.Count(predicate, newRule) != 1 {
+					t.Fatal("the team rule changed: update the differential")
+				}
+				var want []string
+				wantTotal := 0
+				rows, err := store.SQL().QueryContext(ctx, with+`SELECT m.id,lower(m.alias)`+strings.Replace(predicate, newRule, oldRule, 1)+` ORDER BY lower(m.alias),m.id`, args...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for rows.Next() {
+					var id, key string
+					if err := rows.Scan(&id, &key); err != nil {
+						t.Fatal(err)
+					}
+					wantTotal++
+					if opts.After == nil || key > opts.After.Key || key == opts.After.Key && id > opts.After.ID {
+						want = append(want, id)
+					}
+				}
+				if err := rows.Err(); err != nil {
+					t.Fatal(err)
+				}
+				want = want[min(opts.Offset, len(want)):]
+				want = want[:min(opts.Limit+1, len(want))]
+				items, total, err := service.listInventory(listCtx, actor, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got []string
+				for _, item := range items {
+					got = append(got, item.ID)
+				}
+				if !slices.Equal(got, want) || total != wantTotal {
+					t.Fatalf("%s in %v %+v: listed %v (total %d), old SQL %v (%d)", actor, scope, opts, got, total, want, wantTotal)
+				}
+			}
+			// Every fixture machine is described, listed or not: the description authorizes on its own.
+			var all []string
+			if err := store.SQL().QueryRowContext(ctx, `SELECT array_agg(id) FROM paperboat.user_machines WHERE id LIKE 'ic_machine_%_'||$1`, suffix).Scan(pgtype.NewMap().SQLScanner(&all)); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range all {
+				var manage, ssh bool
+				var raw []byte
+				if err := store.SQL().QueryRowContext(ctx, `SELECT
+ CASE WHEN NOT $3::boolean THEN machine_management_allowed($1,m.id) WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL
+      ELSE coalesce(m.owner_team_id=$4 AND machine_management_allowed($1,m.id),false) END,
+ coalesce((SELECT json_agg(capability) FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage','private_access']) capability WHERE
+   CASE WHEN NOT $3::boolean THEN (m.owner_team_id IS NULL AND m.user_id=$1 AND m.revoked_at IS NULL AND m.deleted_at IS NULL) OR machine_capability_allowed($1,m.id,capability)
+        WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+        ELSE team_machine_capability_allowed($1,$4,m.id,capability) END),'[]'::json),
+ m.state NOT IN ('revoked','disconnected','deleted') AND ((m.owner_team_id IS NULL AND m.user_id=$1 AND m.revoked_at IS NULL AND m.deleted_at IS NULL)
+  OR machine_capability_allowed($1,m.id,'managed_ssh') OR machine_management_allowed($1,m.id))
+ FROM user_machines m WHERE m.id=$2`, actor, id, scoped, teamID).Scan(&manage, &raw, &ssh); err != nil {
+					t.Fatal(err)
+				}
+				var permissions []string
+				if err := json.Unmarshal(raw, &permissions); err != nil {
+					t.Fatal(err)
+				}
+				item := &UserMachine{ID: id}
+				if err := service.describeMachineAccess(listCtx, actor, item); err != nil {
+					t.Fatal(err)
+				}
+				if err := service.describeManagedSSH(listCtx, actor, item); err != nil {
+					t.Fatal(err)
+				}
+				if item.CanManage != manage || !slices.Equal(item.Permissions, permissions) || (item.SSH != nil) != ssh {
+					t.Fatalf("%s in %v: %s is %v %v ssh=%v, old SQL %v %v %v", actor, scope, id, item.CanManage, item.Permissions, item.SSH != nil, manage, permissions, ssh)
+				}
+				if teamID != nil && len(permissions) > 0 {
+					capable++
+				}
+			}
+		}
+	}
+	return capable
 }

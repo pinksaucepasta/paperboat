@@ -33,7 +33,8 @@ type HostKeyConflict struct {
 // describeManagedSSH fills MachineSSH with one lock-free query. The authority predicate is the
 // one GET /ssh-target and /ssh-host-keys apply (ResolveMachineSSHUseAuthorityForUpdate); the
 // caller's own live personal machines are answered first, as the access functions' first branch
-// does, so they cost no function calls.
+// does, so they cost no function calls; management is next (cheap), then machine_capability_allowed's team
+// branch without the nested functions (see inventoryFilter).
 func (s *Service) describeManagedSSH(ctx context.Context, account string, machines ...*UserMachine) error {
 	if len(machines) == 0 {
 		return nil
@@ -54,7 +55,9 @@ func (s *Service) describeManagedSSH(ctx context.Context, account string, machin
  LEFT JOIN user_machines o ON o.id=c.other_machine_id
  WHERE m.id=ANY($2::text[]) AND m.state NOT IN ('revoked','disconnected','deleted')
  AND ((m.owner_team_id IS NULL AND m.user_id=$1 AND m.revoked_at IS NULL AND m.deleted_at IS NULL)
-  OR machine_capability_allowed($1,m.id,'managed_ssh') OR machine_management_allowed($1,m.id))`, account, ids)
+  OR machine_management_allowed($1,m.id)
+  OR EXISTS(SELECT 1 FROM team_resource_bindings b WHERE b.resource_kind='machine' AND b.resource_id=m.id
+   AND NOT isempty(workspace_policy_rule_ports($1,b.team_id,m.id,'managed_ssh')) AND team_machine_bound_for($1,b.team_id,m.id)))`, account, ids)
 	if err != nil {
 		return err
 	}

@@ -46,6 +46,8 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 	if scoped && scope.TeamID != "" {
 		teamID = scope.TeamID
 	}
+	// A selected team evaluates team_machine_capability_allowed's body (see inventoryFilter): the binding once per
+	// machine instead of seven times, and the policy without a function in between that planned it on every call.
 	// The viewer's own local address lease is read here, never allocated by this query (allocating inside the list
 	// took a table lock per list: 29 s for a 100-machine account).
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT m.id,
@@ -53,10 +55,12 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
       WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL
       ELSE coalesce(m.owner_team_id=$4 AND machine_management_allowed($1,m.id),false) END,
  EXISTS(SELECT 1 FROM team_resource_bindings b WHERE b.resource_kind='machine' AND b.resource_id=m.id AND b.active AND (NOT $3::boolean OR $4::text IS NULL OR b.team_id=$4)),
- coalesce((SELECT json_agg(capability) FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage','private_access']) capability WHERE
+ coalesce(CASE WHEN $3::boolean AND $4::text IS NOT NULL THEN
+   CASE WHEN team_machine_bound_for($1,$4,m.id) THEN (SELECT json_agg(capability) FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage','private_access']) capability WHERE
+    NOT isempty(CASE WHEN capability='private_access' THEN workspace_policy_ports($1,$4,m.id,capability) ELSE workspace_policy_rule_ports($1,$4,m.id,capability) END)) END
+  ELSE (SELECT json_agg(capability) FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage','private_access']) capability WHERE
    CASE WHEN NOT $3::boolean THEN (m.owner_team_id IS NULL AND m.user_id=$1 AND m.revoked_at IS NULL AND m.deleted_at IS NULL) OR machine_capability_allowed($1,m.id,capability)
-        WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL
-        ELSE team_machine_capability_allowed($1,$4,m.id,capability) END),'[]'::json),
+        ELSE m.user_id=$1 AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL END) END,'[]'::json),
  coalesce(l.address_slot, 0), EXISTS(SELECT 1 FROM paperboat.peer_network_identities n JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.revoked_at IS NULL AND c.expires_at>now() WHERE n.machine_id=m.id AND n.machine_generation=m.installation_generation AND n.revoked_at IS NULL)
  FROM user_machines m LEFT JOIN paperboat.control_sync_leases l ON l.account_id=$1 AND l.machine_id=m.id WHERE m.id=ANY($2::text[])`, account, ids, scoped, teamID)
 	if err != nil {
