@@ -473,9 +473,7 @@ func (c *Coordinator) checkGuard(ctx context.Context) {
 	if client == nil {
 		return // no connection to lose: a failed reconcile is already retrying
 	}
-	statusCtx, cancel := context.WithTimeout(ctx, connectTimeout)
-	_, err := client.Status(statusCtx)
-	cancel()
+	_, err := client.Status(ctx) // bounded by the client; a shorter cut would close a connection that only waits its turn
 	if err == nil || ctx.Err() != nil {
 		return
 	}

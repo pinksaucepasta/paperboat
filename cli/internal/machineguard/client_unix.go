@@ -83,7 +83,7 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 	}
 	connection := c.conn
 	started := time.Now()
-	deadline := started.Add(exchangeTimeout(in.Operation))
+	deadline := started.Add(exchangeTimeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}

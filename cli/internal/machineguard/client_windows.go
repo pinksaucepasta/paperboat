@@ -66,7 +66,7 @@ func (c *Client) exchange(ctx context.Context, in request) (response, error) {
 	if err := ctx.Err(); err != nil { // ended while it waited for the request before it: nothing was sent, the connection stays good
 		return response{}, err
 	}
-	deadline := time.Now().Add(exchangeTimeout(in.Operation))
+	deadline := time.Now().Add(exchangeTimeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
