@@ -38,7 +38,9 @@ func TestLocalSenderNativeOmitsKeysAndCancelsKnownBatch(t *testing.T) {
 			knownOnce.Do(func() { close(known) })
 			writeJSONTest(writer, http.StatusOK, Manifest{TransferID: "ft_generated", BatchID: "native_batch", Basename: "data.bin", Size: 4, State: "uploading", ExpiresAt: expires})
 		case request.Method == http.MethodPatch:
-			writer.WriteHeader(http.StatusNoContent)
+			// Hold the upload open until it is canceled: an answer without a commit would end it before the cancel lands.
+			_, _ = io.Copy(io.Discard, request.Body)
+			<-request.Context().Done()
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/complete"):
 			writeJSONTest(writer, http.StatusOK, Manifest{TransferID: "ft_generated", State: "pending"})
 		case request.Method == http.MethodDelete && request.URL.Path == "/v1/local-file-transfers/ft_generated":
