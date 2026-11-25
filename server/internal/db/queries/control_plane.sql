@@ -972,7 +972,7 @@ WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=contro
          AND coalesce(EXCLUDED.carrier_endpoint_host, control_tunnel_nodes.endpoint_host)=control_tunnel_nodes.endpoint_host
          AND coalesce(EXCLUDED.carrier_endpoint_tcp_port, control_tunnel_nodes.endpoint_tcp_port)=control_tunnel_nodes.endpoint_tcp_port
          AND coalesce(EXCLUDED.carrier_endpoint_quic_port, control_tunnel_nodes.endpoint_quic_port)=control_tunnel_nodes.endpoint_quic_port)
-RETURNING *;
+RETURNING id, edge_pool, endpoint_host, carrier_endpoint_host, carrier_endpoint_quic_port, carrier_server_spki_sha256, public_https_port;
 
 -- name: GetControlConnectorGenerationForUpdate :one
 SELECT * FROM control_connector_generations
@@ -1019,7 +1019,7 @@ WHERE control_tunnel_nodes.id = sqlc.arg(id) AND control_tunnel_nodes.process_ep
   AND (NOT EXISTS (SELECT 1 FROM managed_node_authority m WHERE m.node_id=control_tunnel_nodes.id)
     OR EXISTS (SELECT 1 FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id
       WHERE m.node_id=control_tunnel_nodes.id AND m.retired_at IS NULL AND r.enabled))
-RETURNING *;
+RETURNING state, ready, drain_deadline, version;
 
 -- name: GetActiveControlUsageVerificationKey :one
 SELECT public_key FROM control_usage_verification_keys
@@ -1039,15 +1039,8 @@ SELECT * FROM control_usage_verification_keys WHERE key_id = $1;
 UPDATE control_usage_verification_keys SET revoked_at = coalesce(revoked_at, sqlc.arg(revoked_at))
 WHERE key_id = sqlc.arg(key_id) AND revoked_at IS NULL;
 
--- name: DrainControlTunnelNode :one
-UPDATE control_tunnel_nodes
-SET state = 'draining', ready = false, drain_deadline = sqlc.arg(drain_deadline),
-    version = version + 1, updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(id) AND version = sqlc.arg(expected_version) AND state IN ('registered','ready')
-RETURNING *;
-
 -- name: ListStaleControlTunnelNodesForUpdate :many
-SELECT * FROM control_tunnel_nodes
+SELECT id, version FROM control_tunnel_nodes
 WHERE state IN ('registered','ready') AND (last_heartbeat_at IS NULL OR last_heartbeat_at <= sqlc.arg(cutoff))
 ORDER BY coalesce(last_heartbeat_at, created_at), id
 FOR UPDATE SKIP LOCKED LIMIT sqlc.arg(batch_size);

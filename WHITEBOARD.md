@@ -5,7 +5,7 @@ Everything here is after launch unless its group says otherwise (user decision 2
 ## Soon: right after the smoke
 
 ### Drop control_tunnel_nodes.capacity_limit
-No server code names `control_tunnel_nodes.capacity_limit` any more (node load is the sustained CPU: migration 509; the registry check no longer needs it: 510, 511); the column stays NOT NULL DEFAULT 0 for the previous server. The deploy after the one that ships this: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_tunnel_nodes DROP COLUMN capacity_limit;` (`-- contract-after: 510`, forward-only Down), then `make generate` (the sqlc `RETURNING *` lists still name it).
+Until the commit that lists columns explicitly, the generated `RETURNING *` / `SELECT *` queries (edge register, heartbeat, stale list) read `control_tunnel_nodes.capacity_limit`, so dropping it under such a server fails every edge heartbeat. Only one deploy after that commit ships: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_tunnel_nodes DROP COLUMN capacity_limit;` (forward-only Down, `-- contract-after:` the newest migration in that shipped deploy), then `make generate`.
 
 ### Scale: peer-network config fan-out
 Machines get deltas since the signed configuration delta landed (`ConfigurationDelta`). Left: check in production that "peer network configuration

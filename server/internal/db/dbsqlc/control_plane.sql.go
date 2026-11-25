@@ -1273,78 +1273,6 @@ func (q *Queries) DisconnectOwnedControlConfigRepository(ctx context.Context, ar
 	return i, err
 }
 
-const drainControlTunnelNode = `-- name: DrainControlTunnelNode :one
-UPDATE control_tunnel_nodes
-SET state = 'draining', ready = false, drain_deadline = $1,
-    version = version + 1, updated_at = $2
-WHERE id = $3 AND version = $4 AND state IN ('registered','ready')
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision
-`
-
-type DrainControlTunnelNodeParams struct {
-	DrainDeadline   sql.NullTime
-	Now             time.Time
-	ID              string
-	ExpectedVersion int64
-}
-
-func (q *Queries) DrainControlTunnelNode(ctx context.Context, arg DrainControlTunnelNodeParams) (ControlTunnelNode, error) {
-	row := q.db.QueryRow(ctx, drainControlTunnelNode,
-		arg.DrainDeadline,
-		arg.Now,
-		arg.ID,
-		arg.ExpectedVersion,
-	)
-	var i ControlTunnelNode
-	err := row.Scan(
-		&i.ID,
-		&i.EdgePool,
-		&i.ProtocolVersion,
-		&i.ProcessEpoch,
-		&i.EndpointHost,
-		&i.EndpointTcpPort,
-		&i.EndpointQuicPort,
-		&i.State,
-		&i.Ready,
-		&i.Capacity,
-		&i.Observation,
-		&i.LastHeartbeatAt,
-		&i.DrainDeadline,
-		&i.Version,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CarrierEndpointHost,
-		&i.CarrierEndpointTcpPort,
-		&i.CarrierEndpointQuicPort,
-		&i.CarrierServerSpkiSha256,
-		&i.CarrierServerCertificateChainPem,
-		&i.NodeGeneration,
-		&i.Region,
-		&i.FailureDomain,
-		&i.Roles,
-		&i.Transports,
-		&i.CapacityLimit,
-		&i.CapacityUsed,
-		&i.CapacityObservedAt,
-		&i.RegistryExpiresAt,
-		&i.AllowedAccountIds,
-		&i.PeerRelayWireguardPublicKey,
-		&i.PeerRelayDiscoPublicKey,
-		&i.PeerRelayVirtualAddress,
-		&i.PublicIngressIpv4,
-		&i.PublicIngressIpv6,
-		&i.PublicIngressVerifiedAt,
-		&i.TlsSpkiSha256,
-		&i.EndpointsEpoch,
-		&i.TunnelEndpointsEpoch,
-		&i.TunnelSnapshotAt,
-		&i.Site,
-		&i.PublicHttpsPort,
-		&i.OperatorRevision,
-	)
-	return i, err
-}
-
 const ensureControlConfigLeaseAuthority = `-- name: EnsureControlConfigLeaseAuthority :one
 INSERT INTO control_config_repository_lease_authority (repository_id)
 VALUES ($1)
@@ -2870,7 +2798,7 @@ WHERE control_tunnel_nodes.id = $5 AND control_tunnel_nodes.process_epoch = $6 A
   AND (NOT EXISTS (SELECT 1 FROM managed_node_authority m WHERE m.node_id=control_tunnel_nodes.id)
     OR EXISTS (SELECT 1 FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id
       WHERE m.node_id=control_tunnel_nodes.id AND m.retired_at IS NULL AND r.enabled))
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision
+RETURNING state, ready, drain_deadline, version
 `
 
 type HeartbeatControlTunnelNodeParams struct {
@@ -2882,7 +2810,14 @@ type HeartbeatControlTunnelNodeParams struct {
 	ProcessEpoch string
 }
 
-func (q *Queries) HeartbeatControlTunnelNode(ctx context.Context, arg HeartbeatControlTunnelNodeParams) (ControlTunnelNode, error) {
+type HeartbeatControlTunnelNodeRow struct {
+	State         string
+	Ready         bool
+	DrainDeadline sql.NullTime
+	Version       int64
+}
+
+func (q *Queries) HeartbeatControlTunnelNode(ctx context.Context, arg HeartbeatControlTunnelNodeParams) (HeartbeatControlTunnelNodeRow, error) {
 	row := q.db.QueryRow(ctx, heartbeatControlTunnelNode,
 		arg.Draining,
 		arg.Ready,
@@ -2891,52 +2826,12 @@ func (q *Queries) HeartbeatControlTunnelNode(ctx context.Context, arg HeartbeatC
 		arg.ID,
 		arg.ProcessEpoch,
 	)
-	var i ControlTunnelNode
+	var i HeartbeatControlTunnelNodeRow
 	err := row.Scan(
-		&i.ID,
-		&i.EdgePool,
-		&i.ProtocolVersion,
-		&i.ProcessEpoch,
-		&i.EndpointHost,
-		&i.EndpointTcpPort,
-		&i.EndpointQuicPort,
 		&i.State,
 		&i.Ready,
-		&i.Capacity,
-		&i.Observation,
-		&i.LastHeartbeatAt,
 		&i.DrainDeadline,
 		&i.Version,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CarrierEndpointHost,
-		&i.CarrierEndpointTcpPort,
-		&i.CarrierEndpointQuicPort,
-		&i.CarrierServerSpkiSha256,
-		&i.CarrierServerCertificateChainPem,
-		&i.NodeGeneration,
-		&i.Region,
-		&i.FailureDomain,
-		&i.Roles,
-		&i.Transports,
-		&i.CapacityLimit,
-		&i.CapacityUsed,
-		&i.CapacityObservedAt,
-		&i.RegistryExpiresAt,
-		&i.AllowedAccountIds,
-		&i.PeerRelayWireguardPublicKey,
-		&i.PeerRelayDiscoPublicKey,
-		&i.PeerRelayVirtualAddress,
-		&i.PublicIngressIpv4,
-		&i.PublicIngressIpv6,
-		&i.PublicIngressVerifiedAt,
-		&i.TlsSpkiSha256,
-		&i.EndpointsEpoch,
-		&i.TunnelEndpointsEpoch,
-		&i.TunnelSnapshotAt,
-		&i.Site,
-		&i.PublicHttpsPort,
-		&i.OperatorRevision,
 	)
 	return i, err
 }
@@ -3673,7 +3568,7 @@ func (q *Queries) ListRevokedControlSigningKeyIDs(ctx context.Context) ([]string
 }
 
 const listStaleControlTunnelNodesForUpdate = `-- name: ListStaleControlTunnelNodesForUpdate :many
-SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision FROM control_tunnel_nodes
+SELECT id, version FROM control_tunnel_nodes
 WHERE state IN ('registered','ready') AND (last_heartbeat_at IS NULL OR last_heartbeat_at <= $1)
 ORDER BY coalesce(last_heartbeat_at, created_at), id
 FOR UPDATE SKIP LOCKED LIMIT $2
@@ -3684,61 +3579,21 @@ type ListStaleControlTunnelNodesForUpdateParams struct {
 	BatchSize int32
 }
 
-func (q *Queries) ListStaleControlTunnelNodesForUpdate(ctx context.Context, arg ListStaleControlTunnelNodesForUpdateParams) ([]ControlTunnelNode, error) {
+type ListStaleControlTunnelNodesForUpdateRow struct {
+	ID      string
+	Version int64
+}
+
+func (q *Queries) ListStaleControlTunnelNodesForUpdate(ctx context.Context, arg ListStaleControlTunnelNodesForUpdateParams) ([]ListStaleControlTunnelNodesForUpdateRow, error) {
 	rows, err := q.db.Query(ctx, listStaleControlTunnelNodesForUpdate, arg.Cutoff, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ControlTunnelNode
+	var items []ListStaleControlTunnelNodesForUpdateRow
 	for rows.Next() {
-		var i ControlTunnelNode
-		if err := rows.Scan(
-			&i.ID,
-			&i.EdgePool,
-			&i.ProtocolVersion,
-			&i.ProcessEpoch,
-			&i.EndpointHost,
-			&i.EndpointTcpPort,
-			&i.EndpointQuicPort,
-			&i.State,
-			&i.Ready,
-			&i.Capacity,
-			&i.Observation,
-			&i.LastHeartbeatAt,
-			&i.DrainDeadline,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.CarrierEndpointHost,
-			&i.CarrierEndpointTcpPort,
-			&i.CarrierEndpointQuicPort,
-			&i.CarrierServerSpkiSha256,
-			&i.CarrierServerCertificateChainPem,
-			&i.NodeGeneration,
-			&i.Region,
-			&i.FailureDomain,
-			&i.Roles,
-			&i.Transports,
-			&i.CapacityLimit,
-			&i.CapacityUsed,
-			&i.CapacityObservedAt,
-			&i.RegistryExpiresAt,
-			&i.AllowedAccountIds,
-			&i.PeerRelayWireguardPublicKey,
-			&i.PeerRelayDiscoPublicKey,
-			&i.PeerRelayVirtualAddress,
-			&i.PublicIngressIpv4,
-			&i.PublicIngressIpv6,
-			&i.PublicIngressVerifiedAt,
-			&i.TlsSpkiSha256,
-			&i.EndpointsEpoch,
-			&i.TunnelEndpointsEpoch,
-			&i.TunnelSnapshotAt,
-			&i.Site,
-			&i.PublicHttpsPort,
-			&i.OperatorRevision,
-		); err != nil {
+		var i ListStaleControlTunnelNodesForUpdateRow
+		if err := rows.Scan(&i.ID, &i.Version); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -4453,7 +4308,7 @@ WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=contro
          AND coalesce(EXCLUDED.carrier_endpoint_host, control_tunnel_nodes.endpoint_host)=control_tunnel_nodes.endpoint_host
          AND coalesce(EXCLUDED.carrier_endpoint_tcp_port, control_tunnel_nodes.endpoint_tcp_port)=control_tunnel_nodes.endpoint_tcp_port
          AND coalesce(EXCLUDED.carrier_endpoint_quic_port, control_tunnel_nodes.endpoint_quic_port)=control_tunnel_nodes.endpoint_quic_port)
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision
+RETURNING id, edge_pool, endpoint_host, carrier_endpoint_host, carrier_endpoint_quic_port, carrier_server_spki_sha256, public_https_port
 `
 
 type RegisterControlTunnelNodeParams struct {
@@ -4474,8 +4329,18 @@ type RegisterControlTunnelNodeParams struct {
 	Now                              sql.NullTime
 }
 
+type RegisterControlTunnelNodeRow struct {
+	ID                      string
+	EdgePool                string
+	EndpointHost            sql.NullString
+	CarrierEndpointHost     sql.NullString
+	CarrierEndpointQuicPort sql.NullInt32
+	CarrierServerSpkiSha256 sql.NullString
+	PublicHttpsPort         sql.NullInt32
+}
+
 // Carrier fields are optional: an edge that sends none keeps the carrier identity it registered before.
-func (q *Queries) RegisterControlTunnelNode(ctx context.Context, arg RegisterControlTunnelNodeParams) (ControlTunnelNode, error) {
+func (q *Queries) RegisterControlTunnelNode(ctx context.Context, arg RegisterControlTunnelNodeParams) (RegisterControlTunnelNodeRow, error) {
 	row := q.db.QueryRow(ctx, registerControlTunnelNode,
 		arg.ID,
 		arg.EdgePool,
@@ -4493,52 +4358,15 @@ func (q *Queries) RegisterControlTunnelNode(ctx context.Context, arg RegisterCon
 		arg.Capacity,
 		arg.Now,
 	)
-	var i ControlTunnelNode
+	var i RegisterControlTunnelNodeRow
 	err := row.Scan(
 		&i.ID,
 		&i.EdgePool,
-		&i.ProtocolVersion,
-		&i.ProcessEpoch,
 		&i.EndpointHost,
-		&i.EndpointTcpPort,
-		&i.EndpointQuicPort,
-		&i.State,
-		&i.Ready,
-		&i.Capacity,
-		&i.Observation,
-		&i.LastHeartbeatAt,
-		&i.DrainDeadline,
-		&i.Version,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.CarrierEndpointHost,
-		&i.CarrierEndpointTcpPort,
 		&i.CarrierEndpointQuicPort,
 		&i.CarrierServerSpkiSha256,
-		&i.CarrierServerCertificateChainPem,
-		&i.NodeGeneration,
-		&i.Region,
-		&i.FailureDomain,
-		&i.Roles,
-		&i.Transports,
-		&i.CapacityLimit,
-		&i.CapacityUsed,
-		&i.CapacityObservedAt,
-		&i.RegistryExpiresAt,
-		&i.AllowedAccountIds,
-		&i.PeerRelayWireguardPublicKey,
-		&i.PeerRelayDiscoPublicKey,
-		&i.PeerRelayVirtualAddress,
-		&i.PublicIngressIpv4,
-		&i.PublicIngressIpv6,
-		&i.PublicIngressVerifiedAt,
-		&i.TlsSpkiSha256,
-		&i.EndpointsEpoch,
-		&i.TunnelEndpointsEpoch,
-		&i.TunnelSnapshotAt,
-		&i.Site,
 		&i.PublicHttpsPort,
-		&i.OperatorRevision,
 	)
 	return i, err
 }
