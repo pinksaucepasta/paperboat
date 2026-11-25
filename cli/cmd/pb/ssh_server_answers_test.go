@@ -33,3 +33,16 @@ func TestStatusDoesNotClaimSSHReadyWhileServerIsStopped(t *testing.T) {
 	offline := localapi.MachineStatus{SSHReadiness: "degraded"}
 	refreshSSHReadiness(&offline, func(string) error { t.Fatal("asked a machine that is not ready"); return nil })
 }
+
+// Doctor passed ssh_readiness from the stored state beside the ssh_server warning of a machine whose sshd had stopped.
+func TestDoctorLeavesAReadyMachinesSSHToTheServerProbe(t *testing.T) {
+	for readiness, want := range map[string]bool{"ready": false, "degraded": true, "unavailable": true} {
+		found := false
+		for _, probe := range doctorMachineProbes(localapi.MachineStatus{ID: "m1", Alias: "box", SSHReadiness: readiness}) {
+			found = found || probe.Code == "ssh_readiness"
+		}
+		if found != want {
+			t.Errorf("%s: ssh_readiness check present = %v, want %v", readiness, found, want)
+		}
+	}
+}

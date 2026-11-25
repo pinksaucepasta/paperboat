@@ -561,7 +561,7 @@ func finishDoctorUDP(ctx context.Context, packet io.Closer, code, family string)
 }
 
 func doctorMachineProbes(machine localapi.MachineStatus) []doctorpkg.Probe {
-	return []doctorpkg.Probe{
+	probes := []doctorpkg.Probe{
 		{Code: "machine_runtime", Run: func(context.Context) doctorpkg.Check {
 			if machine.Eligible && machine.RuntimeState == "ready" {
 				return doctorpkg.Check{Category: "machine", Code: "machine_runtime", Status: doctorpkg.StatusPass, Summary: "The selected machine runtime is ready."}
@@ -593,17 +593,17 @@ func doctorMachineProbes(machine localapi.MachineStatus) []doctorpkg.Probe {
 		{Code: "router_mapping", Run: func(context.Context) doctorpkg.Check { return doctorRouterMappingCheck(machine.RouterMapping) }},
 		{Code: "mapping_lifetime", Run: func(context.Context) doctorpkg.Check { return doctorMappingLifetimeCheck(machine.MappingLifetime) }},
 		{Code: "update_health", Run: func(context.Context) doctorpkg.Check { return doctorUpdateHealthCheck(machine.UpdateHealth) }},
-		{Code: "ssh_readiness", Run: func(context.Context) doctorpkg.Check {
-			switch machine.SSHReadiness {
-			case "ready":
-				return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusPass, Summary: "Managed SSH is set up."}
-			case "degraded":
-				return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusWarning, Summary: "Managed SSH requires attention.", Recovery: "Run pb ssh doctor for the selected machine."}
-			default:
-				return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusUnavailable, Summary: "Managed SSH readiness is unavailable."}
-			}
-		}},
 	}
+	// A ready machine's answer is ssh_server, which asks its sshd: the stored readiness stays when sshd stops.
+	if machine.SSHReadiness != "ready" {
+		probes = append(probes, doctorpkg.Probe{Code: "ssh_readiness", Run: func(context.Context) doctorpkg.Check {
+			if machine.SSHReadiness == "degraded" {
+				return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusWarning, Summary: "Managed SSH requires attention.", Recovery: "Run pb ssh doctor for the selected machine."}
+			}
+			return doctorpkg.Check{Category: "ssh", Code: "ssh_readiness", Status: doctorpkg.StatusUnavailable, Summary: "Managed SSH readiness is unavailable."}
+		}})
+	}
+	return probes
 }
 
 func doctorRouterProtocolCheck(value string) doctorpkg.Check {
