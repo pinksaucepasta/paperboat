@@ -5,6 +5,7 @@ package hostruntimecmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -150,8 +151,9 @@ func TestRunHostdKeepsStableObservationAliveAfterWorkerActivation(t *testing.T) 
 	cancel()
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+		// A serving hostd that a signal stops must not exit 0: the service manager would keep it down.
+		if !errors.Is(err, errHostdStoppedServing) {
+			t.Fatalf("stopped while serving = %v, want errHostdStoppedServing", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runHostd did not shut down")

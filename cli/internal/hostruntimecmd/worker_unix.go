@@ -53,6 +53,11 @@ func runHostd(ctx context.Context, args []string, output io.Writer) error {
 	)
 }
 
+// errHostdStoppedServing ends a hostd that a signal stopped while it was the serving generation. The exit is not
+// clean on purpose: launchd (KeepAlive SuccessfulExit false) and systemd (Restart=on-failure) keep a generation that
+// exits 0 down, which is right only for one that handed over; a plain `kill` left the machine offline for good.
+var errHostdStoppedServing = errors.New("hostd stopped by a signal")
+
 func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactory, startWorker hostdWorkerFactory) (resultErr error) {
 	if newHost == nil || startWorker == nil {
 		return errors.New("hostd requires lifecycle factories")
@@ -196,12 +201,12 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		select {
 		case serverErr := <-serverDone:
 			if ctx.Err() != nil && serverErr == nil {
-				return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
+				return runtimeFailure("hostd was stopped while it served this machine", errHostdStoppedServing, runtimeShutdownCause(ctx), notifier.Draining())
 			}
 			return runtimeFailure("hostd lifecycle listener stopped", serverErr)
 		case err := <-handedOver:
 			if ctx.Err() != nil {
-				return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
+				return runtimeFailure("hostd was stopped while it served this machine", errHostdStoppedServing, runtimeShutdownCause(ctx), notifier.Draining())
 			}
 			if err != nil {
 				return runtimeFailure("hostd handover listener stopped", err)
@@ -217,7 +222,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 			// hostd and a fresh worker back instead of waiting for an updater.
 			return errors.Join(lost, notifier.Degraded("runtime worker exited"))
 		case <-ctx.Done():
-			return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
+			return runtimeFailure("hostd was stopped while it served this machine", errHostdStoppedServing, runtimeShutdownCause(ctx), notifier.Draining())
 		case <-livenessTicker.C:
 			// The tick's own timestamp can predate a freeze; the gap check needs the time the checker really ran.
 			if liveness.silent(server.Status(), time.Now()) {
