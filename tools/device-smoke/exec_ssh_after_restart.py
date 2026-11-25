@@ -8,7 +8,8 @@ failures are reported together: the Windows exec-to-self wedge and the Mac readi
 passing first command, and only the first leg of one restart is ever cold.
 
 Limits: exec 5 s, ssh 10 s. Measured cold after a restart (p50/max, d0b4dc735): Linux 3.3/3.7 s, Windows 3.8/4.0 s, Mac
-6.6/7.2 s; warm 1.4-2.1 s. ssh adds the key exchange and a login shell, so 5 s fits no OS for ssh and 10 s does."""
+6.6/7.2 s; warm 1.4-2.1 s. ssh adds the key exchange and a login shell, so 5 s fits no OS for ssh and 10 s does.
+Pool Macs share the image's SSH host keys: regenerate them before installing, or ssh legs fail on a host-key mismatch."""
 import argparse
 import json
 import random
@@ -59,7 +60,7 @@ def attempt(binary, command, target, argv, expected, started, now=time.monotonic
             ok, reason = verdict(now() - started, result.returncode, result.stdout.decode(errors='replace'), expected, deadline)
             if ok:
                 return
-            reason += ': ' + result.stderr.decode(errors='replace').strip()[-120:]
+            reason += ': ' + result.stderr.decode(errors='replace').strip()  # the whole stderr: a clipped tail hid why ssh failed
         except subprocess.TimeoutExpired:
             reason = 'no answer within %.0fs' % remaining
         time.sleep(0.25)
