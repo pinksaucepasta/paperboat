@@ -312,3 +312,8 @@ ac1095ce while both go.mod files pin 2d32e5f0.
 ### From the final launch batch (26 Nov)
 
 - Mac first open right after a daemon restart: handshake_lease takes 0.9–1.4 s and no other dial holds the token, so the cause is still unknown. Next step: trace inside acquireHandshake and the warm channel, and check that the step timer measures what it says. Other costs: application_authenticate ~0.7 s, 3 stream_authorize/admission calls in series ~0.5 s, resolve ~0.4 s. Evidence: fixwr/first-open-steps.md §7.
+- **Machine-event fan-out (2026-11-26):** `private_routes` and `machine_services` are account-wide topics, so one
+  machine's route or service change wakes every machine of the account. On the 72-machine smoke account that was ≈41
+  moves/min (private_routes 16, machine_services 12, peer_network 8, inventory 5) and ≈35–38 wait answers/min per host
+  process. Publish those two topics only to machines that can use the route or service (migrations 217/448, ~10× fewer
+  answers); 800 ms coalescing alone saves ~1.4×, so it was not done.
