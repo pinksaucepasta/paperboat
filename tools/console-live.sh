@@ -5,6 +5,7 @@
 # (.next-a / .next-b, chosen by the unit's EnvironmentFile), then points the unit at the new slot and
 # restarts it. A failed build or a new slot that does not answer leaves the previous build running.
 # Usage: tools/console-live.sh   (any worktree; touches only ~/paperboat and the paperboat-console unit)
+# On oracle the go wrapper refuses builds: run it as `PB_GO_OK=1 ~/bin/oracle-slot.sh sh tools/console-live.sh` (the terminal WASM is built here).
 set -eu
 # One deploy at a time: two worktrees running this together once deleted the slot the other had just
 # pointed the server at (it crash-looped, one run rolled back). The lock waits up to 30 minutes.
