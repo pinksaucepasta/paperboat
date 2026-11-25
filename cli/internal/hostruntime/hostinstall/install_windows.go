@@ -2620,7 +2620,7 @@ func terminatePaperboatProcesses(ctx context.Context) error {
 	// process while it is performing the replacement purge, or the dashboard
 	// command exits before the new enrollment can complete.
 	script := fmt.Sprintf(`$self=%d; Get-CimInstance Win32_Process -Filter "Name = 'pb.exe'" | Where-Object { $_.ProcessId -ne $self } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }`, os.Getpid())
-	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	command := exec.CommandContext(ctx, processlaunch.SystemTool("powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
 	processlaunch.ConfigureBackground(command)
 	if err := command.Run(); err != nil {
 		return hostInstallFailure("terminating Paperboat runtime processes failed", err, ctx.Err(), context.Cause(ctx))
@@ -2639,7 +2639,7 @@ func terminateStaleWindowsRuntimeProcesses(ctx context.Context, binary, pattern 
 	// is a pb.exe bootstrap process and must remain alive while the elevated
 	// commit rotates the installed slot.
 	script := `$ErrorActionPreference = 'Stop'; $image='` + binary + `'; Get-CimInstance Win32_Process -Filter "Name = 'pb.exe'" | Where-Object { $_.ExecutablePath -ieq $image -and $_.CommandLine -match '` + pattern + `' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }`
-	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	command := exec.CommandContext(ctx, processlaunch.SystemTool("powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
 	processlaunch.ConfigureBackground(command)
 	if err := command.Run(); err != nil {
 		return hostInstallFailure("terminating Paperboat runtime processes failed", err, ctx.Err(), context.Cause(ctx))

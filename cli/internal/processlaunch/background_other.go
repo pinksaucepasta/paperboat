@@ -9,3 +9,5 @@ import "os/exec"
 // ConfigureBackground is intentionally a no-op outside Windows. Unix service
 // managers already detach their child processes without creating UI.
 func ConfigureBackground(_ *exec.Cmd) {}
+
+func SystemTool(name string) string { return name }

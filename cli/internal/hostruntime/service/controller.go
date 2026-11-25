@@ -33,7 +33,7 @@ func (runner ExecRunner) Run(ctx context.Context, name string, arguments ...stri
 
 func (runner ExecRunner) Output(ctx context.Context, name string, arguments ...string) (string, error) {
 	output := &boundedCommandOutput{limit: 8 << 10}
-	command := exec.CommandContext(ctx, name, arguments...)
+	command := exec.CommandContext(ctx, processlaunch.SystemTool(name), arguments...)
 	command.Env = runner.Environment
 	if command.Env == nil {
 		command.Env = withoutServiceManagerProtocol(os.Environ())

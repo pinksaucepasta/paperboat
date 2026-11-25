@@ -9,7 +9,7 @@ import (
 
 func TestInventoryImportsSecurityModuleBySystemPath(t *testing.T) {
 	script := inventoryPowerShell(Config{InstallRoot: `C:\\Program Files\\OpenSSH`})
-	for _, required := range []string{"$env:WINDIR", "Microsoft.PowerShell.Security.psd1", "Import-Module -Name $m -ErrorAction Stop", "Get-AuthenticodeSignature"} {
+	for _, required := range []string{"[Environment]::SystemDirectory", "Microsoft.PowerShell.Security.psd1", "Import-Module -Name $m -ErrorAction Stop", "Get-AuthenticodeSignature"} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("inventory script missing %q: %s", required, script)
 		}

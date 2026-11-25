@@ -60,7 +60,7 @@ func inventoryPowerShell(config Config) string {
 		// Windows 11 guest, 2026-11-10); that counts as absent.
 		"$cap=$null;try{$cap=Get-WindowsCapability -Online -Name 'OpenSSH.Server*' -ErrorAction SilentlyContinue|Where-Object {$_.State -eq 'Installed'}|Select-Object -First 1}catch{$cap=$null}",
 		"$root=" + installRoot,
-		"[pscustomobject]@{winget_registered=$false;winget_version='';capability_present=($null -ne $cap);system_sshd=(B (Join-Path $env:WINDIR 'System32\\OpenSSH\\sshd.exe'));program_files_sshd=(B (Join-Path $root 'sshd.exe'));system_service=(S 'sshd');paperboat_service=(S " + serviceName + ")}|ConvertTo-Json -Compress -Depth 4",
+		"[pscustomobject]@{winget_registered=$false;winget_version='';capability_present=($null -ne $cap);system_sshd=(B (Join-Path ([Environment]::SystemDirectory) 'OpenSSH\\sshd.exe'));program_files_sshd=(B (Join-Path $root 'sshd.exe'));system_service=(S 'sshd');paperboat_service=(S " + serviceName + ")}|ConvertTo-Json -Compress -Depth 4",
 	}, ";")
 }
 

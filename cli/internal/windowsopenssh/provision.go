@@ -19,7 +19,8 @@ import (
 const (
 	MinimumWingetVersion = "1.7.0"
 	ServiceName          = "PaperboatSshd"
-	securityModuleImport = "$m=Join-Path $env:WINDIR 'System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1';Import-Module -Name $m -ErrorAction Stop;"
+	// [Environment]::SystemDirectory asks Windows; $env:WINDIR can be set by the user who elevates.
+	securityModuleImport = "$m=Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1';Import-Module -Name $m -ErrorAction Stop;"
 )
 
 var (
@@ -56,7 +57,7 @@ type Runner interface {
 type CommandRunner struct{}
 
 func (CommandRunner) Run(ctx context.Context, name string, arguments ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, name, arguments...)
+	command := exec.CommandContext(ctx, processlaunch.SystemTool(name), arguments...)
 	processlaunch.ConfigureBackground(command)
 	// Keep stdout and stderr on distinct OS handles. Windows OpenSSH and
 	// PowerShell attach stream semantics to those handles; merging them at the

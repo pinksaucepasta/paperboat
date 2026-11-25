@@ -19,6 +19,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/processlaunch"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
+	"golang.org/x/sys/windows"
 )
 
 const windowsGuardTask = `\Paperboat\MachineGuard`
@@ -177,11 +178,11 @@ func installGuard(ctx context.Context, executable, browserDomain string, _ map[s
 }
 
 func ownedScheduledTask(ctx context.Context, installed string) (bool, error) {
-	systemRoot := os.Getenv("SystemRoot")
-	if systemRoot == "" {
-		return false, errors.New("SystemRoot is unavailable")
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return false, err
 	}
-	if _, err := os.Stat(filepath.Join(systemRoot, "System32", "Tasks", "Paperboat", "MachineGuard")); err != nil {
+	if _, err := os.Stat(filepath.Join(system, "Tasks", "Paperboat", "MachineGuard")); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
@@ -286,7 +287,7 @@ func warmGuardImage(path string) {
 // schtasksCommand builds a schtasks.exe call that never shows a console window (it runs from background install,
 // update and repair paths).
 func schtasksCommand(ctx context.Context, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, "schtasks.exe", args...)
+	command := exec.CommandContext(ctx, processlaunch.SystemTool("schtasks.exe"), args...)
 	processlaunch.ConfigureBackground(command)
 	return command
 }

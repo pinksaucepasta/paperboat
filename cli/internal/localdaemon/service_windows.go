@@ -858,19 +858,16 @@ func defaultWindowsTaskCommand(ctx context.Context, arguments ...string) error {
 	if ctx == nil {
 		return ErrInvalidInventoryConfig
 	}
-	executable := filepath.Join(os.Getenv("SystemRoot"), "System32", "schtasks.exe")
-	if !validWindowsSystemExecutable(executable) {
-		var err error
-		executable, err = exec.LookPath("schtasks.exe")
-		if err != nil {
-			return err
-		}
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return err
 	}
+	executable := filepath.Join(system, "schtasks.exe")
 	command := exec.CommandContext(ctx, executable, arguments...)
 	processlaunch.ConfigureBackground(command)
 	var output boundedWindowsTaskOutput
 	command.Stdout, command.Stderr = &output, &output
-	err := command.Run()
+	err = command.Run()
 	if err != nil {
 		return &windowsTaskCommandError{err: err, kind: classifyWindowsTaskCommandOutput(output.Bytes())}
 	}
@@ -881,14 +878,11 @@ func defaultListWindowsTaskNames(ctx context.Context) ([]string, error) {
 	if ctx == nil {
 		return nil, ErrInvalidInventoryConfig
 	}
-	executable := filepath.Join(os.Getenv("SystemRoot"), "System32", "schtasks.exe")
-	if !validWindowsSystemExecutable(executable) {
-		var err error
-		executable, err = exec.LookPath("schtasks.exe")
-		if err != nil {
-			return nil, err
-		}
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return nil, err
 	}
+	executable := filepath.Join(system, "schtasks.exe")
 	command := exec.CommandContext(ctx, executable, "/Query", "/FO", "CSV", "/NH")
 	processlaunch.ConfigureBackground(command)
 	output, err := command.CombinedOutput()
@@ -910,18 +904,6 @@ func defaultListWindowsTaskNames(ctx context.Context) ([]string, error) {
 			names = append(names, record[0])
 		}
 	}
-}
-
-func validWindowsSystemExecutable(path string) bool {
-	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(path), ".exe") {
-		return false
-	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return false
-	}
-	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
-	return err == nil && attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
 }
 
 type windowsTaskErrorKind uint8

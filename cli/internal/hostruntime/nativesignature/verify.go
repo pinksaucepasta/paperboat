@@ -31,7 +31,7 @@ type Runner interface {
 type CommandRunner struct{}
 
 func (CommandRunner) Run(ctx context.Context, name string, arguments ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, name, arguments...)
+	command := exec.CommandContext(ctx, processlaunch.SystemTool(name), arguments...)
 	processlaunch.ConfigureBackground(command)
 	return command.CombinedOutput()
 }
@@ -86,7 +86,7 @@ func (v Verifier) verifyAuthenticode(ctx context.Context, path, publisher string
 		return fmt.Errorf("%w: no Windows publisher is configured", ErrInvalid)
 	}
 	script := "$ErrorActionPreference='Stop';" +
-		"Import-Module -Name (Join-Path $env:WINDIR 'System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1');" +
+		"Import-Module -Name (Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1');" +
 		"$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + base64.StdEncoding.EncodeToString([]byte(path)) + "'));" +
 		"$s=Get-AuthenticodeSignature -LiteralPath $p;$n='';if($null -ne $s.SignerCertificate){$n=$s.SignerCertificate.GetNameInfo('SimpleName',$false)};" +
 		"[pscustomobject]@{status=[string]$s.Status;publisher=[string]$n}|ConvertTo-Json -Compress"
