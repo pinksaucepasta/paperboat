@@ -14,17 +14,14 @@ func TestExecRunnerChildrenDoNotInheritTheServiceManagerNotificationEnvironment(
 	t.Setenv("WATCHDOG_USEC", "300000000")
 	t.Setenv("WATCHDOG_PID", "1")
 	t.Setenv("PAPERBOAT_TEST_KEEP", "kept")
-	output, err := ExecRunner{}.Output(t.Context(), "env")
+	// Output keeps 8 KiB, less than a developer's or CI runner's whole environment: ask for the four values only.
+	t.Setenv("PAPERBOAT_TEST_LONG", strings.Repeat("x", 16<<10))
+	output, err := ExecRunner{}.Output(t.Context(), "sh", "-c", `echo "keep=$PAPERBOAT_TEST_KEEP notify=${NOTIFY_SOCKET-} usec=${WATCHDOG_USEC-} pid=${WATCHDOG_PID-}"`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"NOTIFY_SOCKET=", "WATCHDOG_USEC=", "WATCHDOG_PID="} {
-		if strings.Contains(output, name) {
-			t.Fatalf("child inherited %s", name)
-		}
-	}
-	if !strings.Contains(output, "PAPERBOAT_TEST_KEEP=kept") {
-		t.Fatalf("child lost its ordinary environment: %q", output)
+	if strings.TrimSpace(output) != "keep=kept notify= usec= pid=" {
+		t.Fatalf("child environment: %q, want the ordinary value kept and no service manager notification values", output)
 	}
 	explicit, err := ExecRunner{Environment: []string{"A=1"}}.Output(t.Context(), "env")
 	if err != nil || strings.TrimSpace(explicit) != "A=1" {
