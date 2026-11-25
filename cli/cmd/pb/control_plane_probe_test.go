@@ -84,3 +84,10 @@ func TestControlPlaneProbeTakesTheDaemonOutageReportAtOnce(t *testing.T) {
 		t.Fatal("daemon outage not taken as the verdict")
 	}
 }
+
+// A dead first DNS server costs 5 s before the next one answers: 8 of 13 opens with Paperboat up went offline.
+func TestControlPlaneProbeOutlastsADeadFirstResolver(t *testing.T) {
+	if resolverTimeout := 5 * time.Second; controlPlaneProbeTimeout < resolverTimeout+2*time.Second {
+		t.Fatalf("the probe gives up after %s; a dead first resolver alone takes %s", controlPlaneProbeTimeout, resolverTimeout)
+	}
+}

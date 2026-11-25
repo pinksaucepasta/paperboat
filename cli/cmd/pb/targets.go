@@ -389,7 +389,8 @@ func warmUserMachine(ctx context.Context, requested string, anyState bool) (api.
 }
 
 // controlPlaneProbeTimeout bounds the health request that decides whether a new terminal asks Paperboat at all.
-const controlPlaneProbeTimeout = 5 * time.Second
+// It outlasts the 5 s a resolver waits for a dead first DNS server; a network that drops packets silently waits as long.
+const controlPlaneProbeTimeout = 8 * time.Second
 
 // daemonReportsControlPlaneUnavailable is the daemon's own health: its last refresh could not reach Paperboat.
 func daemonReportsControlPlaneUnavailable(ctx context.Context) bool {
