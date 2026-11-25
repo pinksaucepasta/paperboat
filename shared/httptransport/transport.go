@@ -242,8 +242,8 @@ func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Tr
 		}
 	}
 	dialTLS := t.config.DialTLSContext
-	if t.config.CacheDNS && dialTLS == nil && t.config.TLSConfig != nil && t.config.Resolver == nil {
-		// net/http uses it only for direct https; proxied and plaintext requests keep dialContext.
+	// Only with no proxy of any kind: net/http dials an https proxy itself through DialTLSContext.
+	if t.config.CacheDNS && dialTLS == nil && t.config.TLSConfig != nil && t.config.Resolver == nil && snapshot.HTTPProxy == "" && snapshot.HTTPSProxy == "" && !snapshot.PACOnly {
 		dialTLS = cachedDialTLS(dialContext, t.config)
 	}
 	base := &http.Transport{Proxy: proxy, DialContext: dialContext, DialTLSContext: dialTLS, ForceAttemptHTTP2: t.config.ForceAttemptHTTP2, TLSClientConfig: t.config.TLSConfig.Clone(), TLSHandshakeTimeout: t.config.TLSHandshakeTimeout, ResponseHeaderTimeout: t.config.ResponseHeaderTimeout, ExpectContinueTimeout: t.config.ExpectContinueTimeout, IdleConnTimeout: t.config.IdleConnTimeout, MaxIdleConns: t.config.MaxIdleConns, MaxConnsPerHost: t.config.MaxConnsPerHost, MaxIdleConnsPerHost: t.config.MaxIdleConnsPerHost, MaxResponseHeaderBytes: t.config.MaxResponseHeaderBytes,

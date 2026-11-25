@@ -22,7 +22,7 @@ func TestUserStateRemovalLeavesWhatPaperboatDidNotCreate(t *testing.T) {
 	owned := []string{
 		"config.json", ".config.json123456", "config.json.local-access.lock.d/owner.json", "config.json.workspaces/x.json",
 		"config.json.confirmation.json.ABC234", "config.preferences.json", "config.preferences.json.lock", "telemetry.jsonl", "telemetry.jsonl.4",
-		"credentials-location.json", "config-sync.jsonc", "env-hook.json", "recipe-key.json", "recipe-apply.json", "daemon.lock.owner.json.new", "runtime/carrier-0-offline-audit.json", "runtime/hostd/fence.json", "replaces-machine.json", ".paperboat-" + h32,
+		"credentials-location.json", "config-sync.jsonc", "env-hook.json", "recipe-key.json", "recipe-apply.json", "daemon.lock.owner.json.new", "runtime/carrier-0-offline-audit.json", "runtime/hostd/fence.json", "replaces-machine.json", "dns.json", ".paperboat-" + h32,
 		"credentials/profiles/" + h32 + ".json", "credentials/profiles/" + h32 + ".json.lock.d/owner.json", "credentials/profiles/" + h32 + ".json.refresh.json",
 		"credentials/transactions/" + h32 + ".json", "credentials/pending-revocations/" + h32 + "-" + h32 + ".json", "credentials/secrets/profile-x.secret",
 		"credentials/" + h32 + h32 + ".dpapi", "credentials/" + h32 + h32 + ".dpapi.lock", "credentials/network-fingerprint-secret.lock.d/owner.json",

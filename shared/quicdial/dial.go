@@ -10,9 +10,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
-	"net/netip"
 	"strconv"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	"github.com/quic-go/quic-go"
@@ -33,46 +31,10 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	if err != nil || port < 1 || port > 65535 {
 		return nil, errors.New("quic: invalid port in " + address)
 	}
-	tlsConf = tlsConf.Clone()
-	if tlsConf.ServerName == "" {
-		tlsConf.ServerName = host
-	}
-	if kept := dnscap.Cached(host); kept.IsValid() {
-		wait := dnscap.KeptDialWait
-		if deadline, ok := ctx.Deadline(); ok {
-			wait = min(wait, time.Until(deadline)/2) // the rest is for the looked-up address
-		}
-		keptCtx, cancel := context.WithTimeout(ctx, wait)
-		defer cancel()
-		connection, err := dialRemote(keptCtx, net.UDPAddrFromAddrPort(netip.AddrPortFrom(kept, uint16(port))), tlsConf, conf, early)
-		if err == nil {
-			dnscap.Refresh(host, func(ctx context.Context) {
-				if found, err := dialName(ctx, host, port, tlsConf, conf, false); err == nil {
-					_ = found.CloseWithError(0, "")
-				}
-			})
-		}
-		if err == nil || ctx.Err() != nil {
-			return connection, err
-		}
-	}
-	return dialName(ctx, host, port, tlsConf, conf, early)
-}
-
-// dialName looks host up, dials it and keeps the address if the handshake verified it.
-func dialName(ctx context.Context, host string, port int, tlsConf *tls.Config, conf *quic.Config, early bool) (*quic.Conn, error) {
 	remote, err := resolve(ctx, host, port)
 	if err != nil {
 		return nil, err
 	}
-	connection, err := dialRemote(ctx, remote, tlsConf, conf, early)
-	if err == nil && tlsConf.ServerName == host && len(connection.ConnectionState().TLS.VerifiedChains) > 0 {
-		dnscap.Verified(host, connection.RemoteAddr())
-	}
-	return connection, err
-}
-
-func dialRemote(ctx context.Context, remote *net.UDPAddr, tlsConf *tls.Config, conf *quic.Config, early bool) (*quic.Conn, error) {
 	network, local := "udp6", &net.UDPAddr{IP: net.IPv6unspecified}
 	if remote.IP.To4() != nil {
 		network, local = "udp4", &net.UDPAddr{IP: net.IPv4zero}
@@ -80,6 +42,10 @@ func dialRemote(ctx context.Context, remote *net.UDPAddr, tlsConf *tls.Config, c
 	socket, err := net.ListenUDP(network, local)
 	if err != nil {
 		return nil, err
+	}
+	tlsConf = tlsConf.Clone()
+	if tlsConf.ServerName == "" {
+		tlsConf.ServerName = host
 	}
 	transport := &quic.Transport{Conn: socket}
 	var connection *quic.Conn

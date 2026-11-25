@@ -253,3 +253,28 @@ func impostorCertificate(t *testing.T) tls.Certificate {
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
+
+type httpsProxy struct{}
+
+func (httpsProxy) Snapshot(context.Context) (ProxySnapshot, error) {
+	return ProxySnapshot{HTTPSProxy: "https://proxy.example.test:3128", Generation: 1}, nil
+}
+
+// net/http dials an https proxy through DialTLSContext: with any proxy, nothing is cached or dialed from the cache.
+func TestAProxiedTransportKeepsNoAddresses(t *testing.T) {
+	config := DevelopmentConfig()
+	config.ProxySource, config.CacheDNS, config.TLSConfig = httpsProxy{}, true, &tls.Config{MinVersion: tls.VersionTLS12}
+	transport, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := config.ProxySource.Snapshot(context.Background())
+	base, _, err := transport.transport(snapshot)
+	if err != nil || base.DialTLSContext != nil {
+		t.Fatalf("proxied transport has a cached TLS dial (%v)", err)
+	}
+	base, _, _ = transport.transport(ProxySnapshot{Generation: 2})
+	if base.DialTLSContext == nil {
+		t.Fatal("a direct transport has no cached TLS dial")
+	}
+}

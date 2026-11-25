@@ -78,6 +78,10 @@ func TestConcurrentUseIsBounded(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	Verified("newest.example.test", tcp("203.0.113.2"))
+	if !Cached("newest.example.test").IsValid() {
+		t.Fatal("a full cache refused a new host")
+	}
 	if len(hosts) > maxHosts {
 		t.Fatalf("%d hosts kept", len(hosts))
 	}

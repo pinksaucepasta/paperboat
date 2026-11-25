@@ -74,9 +74,18 @@ func Verified(host string, remote net.Addr) {
 	}
 	mu.Lock()
 	old, known := hosts[host]
-	if !known && len(hosts) >= maxHosts || old.Address == address && time.Since(old.Verified) < time.Minute {
+	if old.Address == address && time.Since(old.Verified) < time.Minute {
 		mu.Unlock()
 		return
+	}
+	if !known && len(hosts) >= maxHosts { // full: the oldest goes
+		oldest := ""
+		for name, e := range hosts {
+			if oldest == "" || e.Verified.Before(hosts[oldest].Verified) {
+				oldest = name
+			}
+		}
+		delete(hosts, oldest)
 	}
 	hosts[host] = entry{Address: address, Verified: time.Now()}
 	mu.Unlock()
