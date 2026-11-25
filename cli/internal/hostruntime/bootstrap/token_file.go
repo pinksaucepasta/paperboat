@@ -16,14 +16,14 @@ func ReadEnrollmentTokenFile(path string) (string, error) {
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return "", TokenFileError("it cannot be opened (" + err.Error() + ")")
+		return "", TokenFileError("it does not exist or cannot be opened")
 	}
 	if reason := insecureEnrollmentTokenFile(path, info); reason != "" {
 		return "", TokenFileError(reason)
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return "", TokenFileError("it cannot be read (" + err.Error() + ")")
+		return "", TokenFileError("it cannot be read")
 	}
 	defer clearBytes(body)
 	token := strings.TrimSpace(string(body))
