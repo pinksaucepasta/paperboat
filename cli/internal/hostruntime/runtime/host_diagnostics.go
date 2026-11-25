@@ -44,6 +44,8 @@ type HostWorkloadCounts struct {
 	Processes   uint64 `json:"processes"`
 	Attachments uint64 `json:"attachments"`
 	Uploads     uint64 `json:"uploads"`
+	// UnsavedOutputs counts running terminals whose latest output the store has refused.
+	UnsavedOutputs uint64 `json:"unsaved_outputs"`
 }
 
 func hostWorkloadCounts(sessions session.Service, transfers *filetransfer.Service) HostWorkloadCounts {
@@ -52,6 +54,7 @@ func hostWorkloadCounts(sessions session.Service, transfers *filetransfer.Servic
 	if sessions != nil {
 		resources := sessions.ResourceCounts()
 		counts.Sessions, counts.Processes, counts.Attachments = resources["sessions"], resources["processes"], resources["attachments"]
+		counts.UnsavedOutputs = resources["unsaved_outputs"]
 	}
 	return counts
 }

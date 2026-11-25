@@ -1051,6 +1051,16 @@ func inspectLocalRuntimeHealth(parent context.Context, report *localDoctorReport
 	report.ActiveProcesses = diagnostics.Workloads.Processes
 	report.ActiveAttachments = diagnostics.Workloads.Attachments
 	report.ActiveUploads = diagnostics.Workloads.Uploads
+	if unsaved := diagnostics.Workloads.UnsavedOutputs; unsaved > 0 {
+		report.hostSteps = append(report.hostSteps, unsavedOutputStep(unsaved))
+	}
+}
+
+// unsavedOutputStep names terminals whose output the host cannot store, for as long as it cannot.
+func unsavedOutputStep(terminals uint64) typedhealth.Alert {
+	return typedhealth.Alert{Dimension: typedhealth.DimensionService, Status: typedhealth.StatusDegraded, Code: "terminal_output_unsaved",
+		Summary:      fmt.Sprintf("the output of %d running terminal(s) cannot be saved, so a restart would lose it.", terminals),
+		RepairAction: "Check free disk space and disk errors on this machine. Paperboat retries on its own."}
 }
 
 // failingHostSteps lists the host's degraded or down health dimensions, the steps pb doctor must name.

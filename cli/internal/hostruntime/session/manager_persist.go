@@ -59,6 +59,7 @@ func (m *Manager) startOutputPersistence(session *managedSession) {
 	session.persistMu.Lock()
 	session.persisting, session.persistedLatest, session.persistErr = true, latest, nil
 	session.persistCursorLost, session.persistFailures, session.persistRetryAt = false, 0, time.Time{}
+	session.stopRetryLocked()
 	session.persistMu.Unlock()
 	if err != nil {
 		m.writer().failed(session, err)
@@ -97,6 +98,7 @@ func (m *Manager) stopOutputPersistenceContext(ctx context.Context, session *man
 	err := m.writer().flush(wait, session)
 	session.persistMu.Lock()
 	session.persisting = false
+	session.stopRetryLocked()
 	persistErr := session.persistErr
 	session.persistMu.Unlock()
 	if err != nil && ctx.Err() != nil {
@@ -250,6 +252,14 @@ func (w *outputWriter) commit() {
 	w.mu.Unlock()
 }
 
+// stopRetryLocked drops a pending retry, whose timer would keep the session reachable. Caller holds persistMu.
+func (s *managedSession) stopRetryLocked() {
+	if s.persistRetry != nil {
+		s.persistRetry.Stop()
+		s.persistRetry = nil
+	}
+}
+
 // failed schedules the session's next write after a backoff and reports the first failure of a spell.
 // A closed store or a deleted session can never take the output: that session stops persisting.
 func (w *outputWriter) failed(session *managedSession, err error) {
@@ -263,10 +273,11 @@ func (w *outputWriter) failed(session *managedSession, err error) {
 		session.persisting = false
 	}
 	retry := session.persisting
-	session.persistMu.Unlock()
+	session.stopRetryLocked()
 	if retry {
-		time.AfterFunc(wait, func() { w.mark(session) })
+		session.persistRetry = time.AfterFunc(wait, func() { w.mark(session) })
 	}
+	session.persistMu.Unlock()
 	if !first {
 		return
 	}
@@ -332,6 +343,9 @@ func (w *outputWriter) collect(session *managedSession, budget int) (pendingOutp
 	}
 	item := pendingOutput{session: session, batch: store.OutputBatch{SessionID: session.id, AdvanceTo: cursor}}
 	if cursor < earliest {
+		// The store gives up its older output only in the transaction that adds the whole newer ring: the ring
+		// and the store keep the same HistoryBytes, so nothing the bound would have kept is dropped.
+		budget = int(w.manager.config.HistoryBytes)
 		item.batch.Advance, item.batch.AdvanceFrom, item.batch.AdvanceTo = true, cursor, earliest
 		cursor = earliest
 		if w.manager.config.Metrics != nil {

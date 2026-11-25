@@ -77,3 +77,10 @@ func TestDoctorHostStepsWarnsForADegradedComponentAndFailsWhenDown(t *testing.T)
 		t.Fatalf("a down dimension must fail local_state: %+v", check)
 	}
 }
+
+func TestDoctorNamesUnsavedTerminalOutput(t *testing.T) {
+	check, failing := doctorHostStepsCheck([]typedhealth.Alert{unsavedOutputStep(2)})
+	if !failing || check.Status != doctorpkg.StatusWarning || !strings.Contains(check.Summary, "2 running terminal(s) cannot be saved") || !strings.Contains(check.Recovery, "disk space") {
+		t.Fatalf("unsaved terminal output: %+v", check)
+	}
+}

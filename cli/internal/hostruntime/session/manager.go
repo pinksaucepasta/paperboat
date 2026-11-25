@@ -124,6 +124,7 @@ type managedSession struct {
 	persistErr        error
 	persistFailures   int // failed writes since the last success
 	persistRetryAt    time.Time
+	persistRetry      *time.Timer
 	modes             terminalModeTracker
 	identification    identificationTracker
 	screen            *xterm.Terminal
@@ -197,6 +198,11 @@ func (m *Manager) ResourceCounts() map[string]uint64 {
 		counts["attachments"] += uint64(session.fanout.Count())
 		if session.process != nil {
 			counts["processes"]++
+			session.persistMu.Lock()
+			if session.persistFailures > 0 {
+				counts["unsaved_outputs"]++
+			}
+			session.persistMu.Unlock()
 		}
 		session.opMu.Unlock()
 	}

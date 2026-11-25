@@ -187,7 +187,7 @@ func mustJSON(t *testing.T, value any) []byte {
 
 func TestHostDiagnosticsWorkloadsWithoutTelemetry(t *testing.T) {
 	mux := http.NewServeMux()
-	counts := HostWorkloadCounts{Sessions: 2, Processes: 1, Attachments: 3, Uploads: 4}
+	counts := HostWorkloadCounts{Sessions: 2, Processes: 1, Attachments: 3, Uploads: 4, UnsavedOutputs: 5}
 	registerHostLivenessAndDiagnostics(mux, nil, nil, nil, nil, func() HostWorkloadCounts { return counts })
 	for _, want := range []HostWorkloadCounts{counts, {}} {
 		counts = want

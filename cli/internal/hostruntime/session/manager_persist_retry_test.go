@@ -5,7 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -161,3 +164,139 @@ func TestOutputPersistenceStopsOnAClosedStore(t *testing.T) {
 		t.Fatal("close hid the cause")
 	}
 }
+
+// The ring moved past the stored position while writes failed. The store keeps the 100 stored chunks until the
+// transaction that adds the whole newer ring, then holds what the ring holds (both are bounded by HistoryBytes);
+// a reader behind it gets the replay gap, also after a restart.
+func TestOutputPersistenceReplacesStoredOutputAtomicallyAfterOverflow(t *testing.T) {
+	const bound = 4096
+	var failing atomic.Bool
+	state, manager, session, _ := retrySession(t, store.Config{Root: filepath.Join(t.TempDir(), "state"), FailureHook: func(point string) error {
+		if failing.Load() && point == "append_before_commit" {
+			return errors.New("disk full")
+		}
+		return nil
+	}})
+	ring, err := history.New(bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.config.HistoryBytes = bound
+	session.history = ring
+	put := func(prefix string, count int) {
+		for i := range count {
+			if _, err := ring.Append(1, []byte(fmt.Sprintf("%s-%03d\n", prefix, i))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	writer := newOutputWriter(manager)
+	manager.writerOnce.Do(func() { manager.output = writer }) // commits below run by hand
+	manager.startOutputPersistence(session)
+	put("old", 100) // 800 bytes
+	writer.mark(session)
+	writer.commit()
+	failing.Store(true)
+	put("new", 1000) // 8000 bytes: the ring has moved past every stored chunk
+	writer.mark(session)
+	writer.commit()
+	stored := func() (text string, earliest uint64) {
+		_, latestRow, err := state.OutputBounds(t.Context(), session.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		earliest, _, _ = state.OutputBounds(t.Context(), session.id)
+		events, _, _, err := state.Replay(t.Context(), session.id, earliest, latestRow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			text += string(event.Data)
+		}
+		return text, earliest
+	}
+	if text, _ := stored(); len(text) != 800 || !strings.HasPrefix(text, "old-000") {
+		t.Fatalf("a failing store lost stored output: %d bytes", len(text))
+	}
+	failing.Store(false)
+	session.persistMu.Lock()
+	session.persistRetryAt = time.Time{}
+	session.persistMu.Unlock()
+	item, ok := writer.collect(session, 16) // the group commit's budget is almost spent
+	if !ok {
+		t.Fatal("nothing to write after recovery")
+	}
+	if err := state.AppendOutputBatch(t.Context(), []store.OutputBatch{item.batch}, bound); err != nil {
+		t.Fatal(err)
+	}
+	item.replay.Release()
+	live, err := ring.Replay(item.batch.AdvanceTo, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ""
+	for _, event := range live.Events {
+		want += string(event.Data)
+	}
+	text, earliest := stored()
+	if text != want || len(text) < bound-8 || len(text) > bound {
+		t.Fatalf("one transaction left %d stored bytes, the ring holds %d", len(text), len(want))
+	}
+	restarted, err := NewManager(ManagerConfig{Store: state, HistoryBytes: bound, AttachmentBytes: 1 << 20, PreserveStoppedHistory: true, Launch: func(pty.Command) (PTYProcess, error) { return nil, errors.New("no launch") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gap *history.GapError
+	if _, err := restarted.Attach(session.id, "att_behind", 800); !errors.As(err, &gap) || gap.EarliestSequence != earliest {
+		t.Fatalf("a reader behind the lost span got %v, want the replay gap", err)
+	}
+	attached, err := restarted.Attach(session.id, "att_rejoin", earliest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed := ""
+	for _, event := range attached.Replay.Events {
+		replayed += string(event.Data)
+	}
+	if replayed != want {
+		t.Fatalf("replay after restart has %d bytes, want %d", len(replayed), len(want))
+	}
+}
+
+// A refused write stays visible in the counts doctor reads for as long as it lasts, and a stopped session
+// leaves no retry timer behind.
+func TestUnsavedOutputStaysCountedAndCloseDropsTheRetry(t *testing.T) {
+	var failing atomic.Bool
+	failing.Store(true)
+	_, manager, session, print := retrySession(t, store.Config{Root: filepath.Join(t.TempDir(), "state"), FailureHook: func(point string) error {
+		if failing.Load() && point == "append_before_commit" {
+			return errors.New("disk full")
+		}
+		return nil
+	}})
+	session.process, session.fanout = &heldProcess{}, NewFanout()
+	manager.sessions = map[string]*managedSession{session.id: session}
+	manager.startOutputPersistence(session)
+	print("text")
+	waitPersist(t, session, "the failure did not last", func() bool { return session.persistFailures >= 3 })
+	if got := manager.ResourceCounts()["unsaved_outputs"]; got != 1 {
+		t.Fatalf("unsaved_outputs=%d while writes fail", got)
+	}
+	failing.Store(false)
+	waitPersist(t, session, "not recovered", func() bool { return session.persistErr == nil })
+	if got := manager.ResourceCounts()["unsaved_outputs"]; got != 0 {
+		t.Fatalf("unsaved_outputs=%d after recovery", got)
+	}
+	failing.Store(true)
+	print("more")
+	if err := manager.stopOutputPersistence(session); err == nil {
+		t.Fatal("close hid the failed write")
+	}
+	session.persistMu.Lock()
+	defer session.persistMu.Unlock()
+	if session.persistRetry != nil {
+		t.Fatal("a retry timer outlived the close")
+	}
+}
+
+type heldProcess struct{ PTYProcess }
