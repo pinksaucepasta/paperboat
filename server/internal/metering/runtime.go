@@ -25,7 +25,7 @@ type RuntimeRepository struct {
 	presenceMu      sync.Mutex
 	presencePending map[string]struct{}
 	// writePresence is the one statement a flush runs; replaced in tests.
-	writePresence func(context.Context, []string) error
+	writePresence func(context.Context, []string) (skipped []string, err error)
 }
 
 // NewRuntimeRepository records machine heartbeats. presenceRefresh is how stale last_seen_at may become
@@ -67,7 +67,8 @@ func (r *RuntimeRepository) TouchMachinePresence(_ context.Context, machineID st
 	return nil
 }
 
-// FlushPresence writes every queued touch in one statement. On failure the machines stay queued for the next flush.
+// FlushPresence writes every queued touch in one statement. On failure the machines stay queued for the next flush, and
+// so do those whose row another transaction held.
 func (r *RuntimeRepository) FlushPresence(ctx context.Context) error {
 	r.presenceMu.Lock()
 	ids := make([]string, 0, len(r.presencePending))
@@ -81,23 +82,20 @@ func (r *RuntimeRepository) FlushPresence(ctx context.Context) error {
 	}
 	write := r.writePresence
 	if write == nil {
-		write = func(ctx context.Context, ids []string) error {
-			_, err := r.db.Queries().TouchUserMachinesPresence(ctx, dbsqlc.TouchUserMachinesPresenceParams{Ids: ids, GateSeconds: machineWaitPresenceGate.Seconds()})
-			return err
+		write = func(ctx context.Context, ids []string) ([]string, error) {
+			return r.db.Queries().TouchUserMachinesPresence(ctx, dbsqlc.TouchUserMachinesPresenceParams{Ids: ids, GateSeconds: machineWaitPresenceGate.Seconds()})
 		}
 	}
-	if err := write(ctx, ids); err != nil {
-		r.presenceMu.Lock()
-		defer r.presenceMu.Unlock()
-		if r.presencePending == nil {
-			r.presencePending = map[string]struct{}{}
-		}
-		for _, id := range ids {
-			r.presencePending[id] = struct{}{}
-		}
-		return err
+	again, err := write(ctx, ids)
+	if err != nil {
+		again = ids
 	}
-	return nil
+	r.presenceMu.Lock()
+	defer r.presenceMu.Unlock()
+	for _, id := range again {
+		r.presencePending[id] = struct{}{}
+	}
+	return err
 }
 
 type RuntimeObservation struct {

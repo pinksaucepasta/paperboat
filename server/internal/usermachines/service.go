@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
@@ -24,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -383,8 +385,7 @@ func (s *Service) Worker(interval time.Duration) func(context.Context) error {
 				workers.IterationFailure(ctx, "terminal_session_operation", "terminal_operation_failed", s.processDueTerminalSessionOperations(ctx))
 				workers.IterationFailure(ctx, "terminal_session_cleanup", "terminal_cleanup_failed", s.expireClosedTerminalSessions(ctx))
 				workers.IterationFailure(ctx, "terminal_session_orphans", "terminal_orphan_reconcile_failed", s.reconcileTerminalSessions(ctx))
-				_, progressErr := s.db.Queries().MarkStaleUserMachinesOffline(ctx, sql.NullTime{Time: s.now().UTC().Add(-s.policy.OfflineAfter), Valid: true})
-				workers.IterationFailure(ctx, "stale_machine_offline", "machine_offline_reconcile_failed", progressErr)
+				workers.IterationFailure(ctx, "stale_machine_offline", "machine_offline_reconcile_failed", s.sweepStaleMachines(ctx))
 				workers.IterationFailure(ctx, "access_session_retention", "access_session_retention_failed", s.retireExpiredAccessSessions(ctx))
 				workers.IterationFailure(ctx, "account_topic_fold", "account_topic_fold_failed", s.foldAccountTopicBumps(ctx))
 
@@ -965,4 +966,23 @@ func (s *Service) authenticatedMachineInstallationForPairingLock(ctx context.Con
 		return UserMachine{}, dbsqlc.UserMachinePairing{}, ErrMachineInstallationOperationConflict
 	}
 	return machine, pairing, nil
+}
+
+// sweepStaleMachines marks machines not seen for OfflineAfter offline. Only an observation brings a machine back (it
+// also restores the capabilities), and a running machine sends none until its 4 min heartbeat, so each swept machine's
+// config topic moves with the write: one that is still there (its wait is held, or its next one carries the older
+// generation) observes at once. One move per online to offline transition; a machine that is gone is not woken.
+func (s *Service) sweepStaleMachines(ctx context.Context) error {
+	var swept []string
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
+		swept, err = tx.Queries().MarkStaleUserMachinesOffline(ctx, sql.NullTime{Time: s.now().UTC().Add(-s.policy.OfflineAfter), Valid: true})
+		if err != nil || len(swept) == 0 {
+			return err
+		}
+		return machineevents.Publish(ctx, tx, swept, machineevents.TopicConfig)
+	})
+	if err == nil && len(swept) > 0 {
+		slog.InfoContext(ctx, "machines swept offline", "count", len(swept), "machine_ids", swept[:min(len(swept), 20)])
+	}
+	return err
 }

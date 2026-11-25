@@ -26,14 +26,14 @@ func TestPresenceTouchesCoalesceIntoOneWriteAndSurviveAFailure(t *testing.T) {
 	var mu sync.Mutex
 	var writes [][]string
 	fail := true
-	repo := &RuntimeRepository{writePresence: func(_ context.Context, ids []string) error {
+	repo := &RuntimeRepository{writePresence: func(_ context.Context, ids []string) ([]string, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		writes = append(writes, ids)
 		if fail {
-			return context.DeadlineExceeded
+			return nil, context.DeadlineExceeded
 		}
-		return nil
+		return nil, nil
 	}}
 	for i := 0; i < 300; i++ {
 		_ = repo.TouchMachinePresence(context.Background(), []string{"m1", "m2", "m3"}[i%3])

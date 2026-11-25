@@ -4815,18 +4815,36 @@ func (q *Queries) MarkPairingInstallationReady(ctx context.Context, userMachineI
 	return result.RowsAffected(), nil
 }
 
-const markStaleUserMachinesOffline = `-- name: MarkStaleUserMachinesOffline :execrows
+const markStaleUserMachinesOffline = `-- name: MarkStaleUserMachinesOffline :many
 UPDATE user_machines
 SET state = 'offline', online = false, observed_capabilities = '{}'::text[], updated_at = now(), version = version + 1
-WHERE state = 'online' AND online = true AND last_seen_at < $1
+WHERE user_machines.state = 'online' AND user_machines.online = true AND user_machines.last_seen_at < $1 AND user_machines.id IN (
+  SELECT stale.id FROM user_machines stale
+  WHERE stale.state = 'online' AND stale.online = true AND stale.last_seen_at < $1
+  ORDER BY stale.id LIMIT 1000)
+RETURNING id
 `
 
-func (q *Queries) MarkStaleUserMachinesOffline(ctx context.Context, cutoff sql.NullTime) (int64, error) {
-	result, err := q.db.Exec(ctx, markStaleUserMachinesOffline, cutoff)
+// At most 1,000 machines per statement, so a fleet swept at once (a write stall) neither holds its rows together nor is
+// woken in one instant; the next tick takes the rest.
+func (q *Queries) MarkStaleUserMachinesOffline(ctx context.Context, cutoff sql.NullTime) ([]string, error) {
+	rows, err := q.db.Query(ctx, markStaleUserMachinesOffline, cutoff)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markUserMachineAccessSessionsRevoked = `-- name: MarkUserMachineAccessSessionsRevoked :execrows
@@ -6056,13 +6074,17 @@ func (q *Queries) SetUserTransferDestinationDefault(ctx context.Context, arg Set
 	return i, err
 }
 
-const touchUserMachinesPresence = `-- name: TouchUserMachinesPresence :execrows
+const touchUserMachinesPresence = `-- name: TouchUserMachinesPresence :many
 WITH due AS (
   SELECT id FROM user_machines
   WHERE id = ANY($1::text[]) AND state = 'online' AND online AND deleted_at IS NULL
     AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::float8))
-  ORDER BY id FOR UPDATE SKIP LOCKED)
-UPDATE user_machines SET last_seen_at = now() FROM due WHERE user_machines.id = due.id
+  ORDER BY id FOR UPDATE SKIP LOCKED), touched AS (
+  UPDATE user_machines SET last_seen_at = now() FROM due WHERE user_machines.id = due.id RETURNING user_machines.id)
+SELECT m.id FROM user_machines m
+WHERE m.id = ANY($1::text[]) AND m.state = 'online' AND m.online AND m.deleted_at IS NULL
+  AND (m.last_seen_at IS NULL OR m.last_seen_at < now() - make_interval(secs => $2::float8))
+  AND m.id NOT IN (SELECT touched.id FROM touched)
 `
 
 type TouchUserMachinesPresenceParams struct {
@@ -6074,14 +6096,27 @@ type TouchUserMachinesPresenceParams struct {
 // are already online once their row is older than gate_seconds, and writes nothing else (no version, no capabilities).
 // It never brings an offline machine online: that takes an observation, which also restores its capabilities. One
 // statement for every wait of the last flush interval (metering.PresenceFlushEvery).
-// Rows are locked in id order and a row another transaction holds is skipped (an observation sets last_seen_at itself,
-// the offline sweep ends the machine's presence anyway), so two statements touching many machines cannot deadlock.
-func (q *Queries) TouchUserMachinesPresence(ctx context.Context, arg TouchUserMachinesPresenceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, touchUserMachinesPresence, arg.Ids, arg.GateSeconds)
+// Rows are locked in id order and a row another transaction holds is skipped, so two statements touching many machines
+// cannot deadlock. It returns the skipped ones: the next flush touches them again, because the machine's next wait can
+// start after the offline cutoff.
+func (q *Queries) TouchUserMachinesPresence(ctx context.Context, arg TouchUserMachinesPresenceParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, touchUserMachinesPresence, arg.Ids, arg.GateSeconds)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateUserMachineEntitlementState = `-- name: UpdateUserMachineEntitlementState :execrows

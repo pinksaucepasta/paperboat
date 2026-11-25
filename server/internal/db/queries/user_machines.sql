@@ -641,19 +641,24 @@ WITH present AS (
 )
 SELECT EXISTS(SELECT 1 FROM present)::boolean AS eligible;
 
--- name: TouchUserMachinesPresence :execrows
+-- name: TouchUserMachinesPresence :many
 -- The held machine-events wait is an idle machine's presence signal: it refreshes last_seen_at of the machines that
 -- are already online once their row is older than gate_seconds, and writes nothing else (no version, no capabilities).
 -- It never brings an offline machine online: that takes an observation, which also restores its capabilities. One
 -- statement for every wait of the last flush interval (metering.PresenceFlushEvery).
--- Rows are locked in id order and a row another transaction holds is skipped (an observation sets last_seen_at itself,
--- the offline sweep ends the machine's presence anyway), so two statements touching many machines cannot deadlock.
+-- Rows are locked in id order and a row another transaction holds is skipped, so two statements touching many machines
+-- cannot deadlock. It returns the skipped ones: the next flush touches them again, because the machine's next wait can
+-- start after the offline cutoff.
 WITH due AS (
   SELECT id FROM user_machines
   WHERE id = ANY(sqlc.arg(ids)::text[]) AND state = 'online' AND online AND deleted_at IS NULL
     AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => sqlc.arg(gate_seconds)::float8))
-  ORDER BY id FOR UPDATE SKIP LOCKED)
-UPDATE user_machines SET last_seen_at = now() FROM due WHERE user_machines.id = due.id;
+  ORDER BY id FOR UPDATE SKIP LOCKED), touched AS (
+  UPDATE user_machines SET last_seen_at = now() FROM due WHERE user_machines.id = due.id RETURNING user_machines.id)
+SELECT m.id FROM user_machines m
+WHERE m.id = ANY(sqlc.arg(ids)::text[]) AND m.state = 'online' AND m.online AND m.deleted_at IS NULL
+  AND (m.last_seen_at IS NULL OR m.last_seen_at < now() - make_interval(secs => sqlc.arg(gate_seconds)::float8))
+  AND m.id NOT IN (SELECT touched.id FROM touched);
 
 -- name: GetUserMachineRuntimeInstanceForUpdate :one
 SELECT online, last_seen_at, os_boot_id, worker_generation
@@ -662,10 +667,16 @@ WHERE id = sqlc.arg(id) AND environment_id = sqlc.arg(environment_id)
   AND seat_state = 'occupied' AND deleted_at IS NULL
 FOR UPDATE;
 
--- name: MarkStaleUserMachinesOffline :execrows
+-- name: MarkStaleUserMachinesOffline :many
+-- At most 1,000 machines per statement, so a fleet swept at once (a write stall) neither holds its rows together nor is
+-- woken in one instant; the next tick takes the rest.
 UPDATE user_machines
 SET state = 'offline', online = false, observed_capabilities = '{}'::text[], updated_at = now(), version = version + 1
-WHERE state = 'online' AND online = true AND last_seen_at < sqlc.arg(cutoff);
+WHERE user_machines.state = 'online' AND user_machines.online = true AND user_machines.last_seen_at < sqlc.arg(cutoff) AND user_machines.id IN (
+  SELECT stale.id FROM user_machines stale
+  WHERE stale.state = 'online' AND stale.online = true AND stale.last_seen_at < sqlc.arg(cutoff)
+  ORDER BY stale.id LIMIT 1000)
+RETURNING id;
 
 -- name: MarkPairingInstallationReady :execrows
 UPDATE user_machine_pairings
