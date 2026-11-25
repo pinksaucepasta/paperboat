@@ -251,7 +251,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		select {
 		case <-c.Context.Done():
 			return errors.Join(c.Context.Err(), err)
-		case <-time.After(time.Duration(d.cfg.Connect.DialRetrySeconds) * time.Second):
+		case <-time.After(initialRetryDelay(attempt, d.cfg.Connect.DialRetrySeconds)):
 		}
 		target, resolvedMachine, err = resolveEnvironmentTargetWithMachine(c.Context, backend, machineRef)
 	}
@@ -433,12 +433,12 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			bar.SetConnection("reconnecting")
 			bar.Loading("Retrying connection")
 		} else {
-			fmt.Fprintf(os.Stderr, "Connection attempt %d failed; refreshing the descriptor in %ds...\n", attempt+1, d.cfg.Connect.DialRetrySeconds)
+			fmt.Fprintf(os.Stderr, "Connection attempt %d failed; refreshing the descriptor...\n", attempt+1)
 		}
 		select {
 		case <-ctx.Done():
 			return errors.Join(ctx.Err(), err)
-		case <-time.After(time.Duration(d.cfg.Connect.DialRetrySeconds) * time.Second):
+		case <-time.After(initialRetryDelay(attempt+1, d.cfg.Connect.DialRetrySeconds)):
 		}
 	}
 	if err != nil {
@@ -859,6 +859,15 @@ func applyMachineTransportPath(snapshot localapi.Snapshot, machineID string, bar
 			return
 		}
 	}
+}
+
+// initialRetryDelay is the wait before retry n (1 is the first) of an open: the first is quick, because most single failures
+// (a lost DNS answer, a peer that just restarted) are over at once and a fixed wait was most of such an open.
+func initialRetryDelay(retry, seconds int) time.Duration {
+	if retry <= 1 {
+		return min(200*time.Millisecond, time.Duration(seconds)*time.Second)
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // preparedTransfer is one attempt to make file transfer ready for a terminal.
