@@ -826,9 +826,10 @@ TLIST=($DEVICES)
         is_windows = patch.object(e.windows_target, 'is_windows', lambda binary, target: target == 'me')
         with is_windows:
             e.windows_legs(FakePb, 'me', 'peer')
-        self.assertEqual([l['label'] for l in sent['legs']], ['exec self', 'ssh self', 'exec peer', 'ssh peer'])
+        self.assertEqual([l['label'] for l in sent['legs']], ['exec self', 'exec peer', 'ssh self', 'ssh peer'])
         self.assertEqual((sent['pb'], sent['deadline']), ('C:\\pb.exe', e.DEADLINE))  # the 5 s limit is kept, timed in the device script
-        self.assertIn('service', sent['script'])  # restart and legs in one device script: no ssh start-up before the first leg
+        script = sent['script']
+        self.assertLess(script.index('foreach'), script.index("'service','restart'"))  # a restart inside the loop: every leg is cold, in the device script
         FakeDevice.results[1] = dict(leg, leg='ssh self', ok=False, seconds=5.0, why='exit -1')
         with is_windows, self.assertRaisesRegex(RuntimeError, 'ssh self: exit -1 after 5.0s'):
             e.windows_legs(FakePb, 'me', 'peer')
@@ -836,6 +837,13 @@ TLIST=($DEVICES)
                 patch.object(e.winhost, 'pb_path', lambda: 'pb'), patch.object(sys, 'argv', ['x', 'peer', '--self', 'me']):
             e.main()  # a Unix or Mac client keeps the old flow
         windows.assert_not_called()
+        calls = []
+        with is_windows, patch.object(e, 'restart_local', lambda b: calls.append('restart')), \
+                patch.object(e, 'attempt', lambda b, c, t, a, x, started: calls.append(c + ' ' + t)), \
+                patch.object(e, 'run_all', lambda *steps: [f() for _, f in steps]), patch.object(e.winhost, 'pb_path', lambda: 'pb'), \
+                patch.object(sys, 'argv', ['x', 'peer', '--self', 'me']):
+            e.main()
+        self.assertEqual(calls, ['restart', 'exec me', 'restart', 'exec peer', 'restart', 'ssh me', 'restart', 'ssh peer'])  # one cold restart per leg
 
     def test_not_run_rows_are_their_own_status_and_never_fail_the_run(self):
         text = (HERE / 'smoke.sh').read_text()
