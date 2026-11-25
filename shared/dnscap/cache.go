@@ -69,25 +69,33 @@ func Refresh(host string, dial func(context.Context)) {
 func Verified(host string, remote net.Addr) {
 	endpoint, err := netip.ParseAddrPort(remote.String())
 	address, host := endpoint.Addr().Unmap(), strings.ToLower(host)
-	if err != nil || !cacheable(host, address) {
+	if err != nil {
 		return
 	}
 	mu.Lock()
 	old, known := hosts[host]
-	if old.Address == address && time.Since(old.Verified) < time.Minute {
+	switch {
+	case !cacheable(host, address): // the name now answers privately: the kept public address must not win over it
+		if !known {
+			mu.Unlock()
+			return
+		}
+		delete(hosts, host)
+	case old.Address == address && time.Since(old.Verified) < time.Minute:
 		mu.Unlock()
 		return
-	}
-	if !known && len(hosts) >= maxHosts { // full: the oldest goes
-		oldest := ""
-		for name, e := range hosts {
-			if oldest == "" || e.Verified.Before(hosts[oldest].Verified) {
-				oldest = name
+	default:
+		if !known && len(hosts) >= maxHosts { // full: the oldest goes
+			oldest := ""
+			for name, e := range hosts {
+				if oldest == "" || e.Verified.Before(hosts[oldest].Verified) {
+					oldest = name
+				}
 			}
+			delete(hosts, oldest)
 		}
-		delete(hosts, oldest)
+		hosts[host] = entry{Address: address, Verified: time.Now()}
 	}
-	hosts[host] = entry{Address: address, Verified: time.Now()}
 	mu.Unlock()
 	saving.Lock()
 	defer saving.Unlock()

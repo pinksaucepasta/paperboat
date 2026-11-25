@@ -65,6 +65,15 @@ func TestPrivateAddressesAndLiteralsAreNotKept(t *testing.T) {
 	}
 }
 
+func TestAPrivateAnswerDropsTheKeptPublicAddress(t *testing.T) {
+	reset(t)
+	Verified("split.example.test", tcp("203.0.113.1"))
+	Verified("split.example.test", tcp("10.0.0.1"))
+	if Cached("split.example.test").IsValid() {
+		t.Fatal("the public address is still kept after the name answered privately")
+	}
+}
+
 func TestConcurrentUseIsBounded(t *testing.T) {
 	reset(t)
 	Persist(nil, func([]byte) {})
