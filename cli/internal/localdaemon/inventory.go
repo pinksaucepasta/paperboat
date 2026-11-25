@@ -643,6 +643,8 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			status.Health = []localapi.HealthItem{{Code: "machine_unavailable", Severity: "error", Title: "Machine is unavailable", Recovery: "Set up the machine again", ETag: "machine_unavailable"}}
 		} else if !machine.Online && generation > 0 {
 			status.Health = []localapi.HealthItem{{Code: "runtime_offline", Severity: "warning", Title: "Machine runtime is offline", Recovery: "Check the Paperboat service on the machine", ETag: "runtime_offline"}}
+		} else if generation > 0 && machine.ManagedSSHOff() {
+			status.Health = []localapi.HealthItem{{Code: "ssh_turned_off", Severity: "info", Title: "Managed SSH is turned off for this machine", Recovery: "Turn it on with pb machine capabilities " + machine.Alias + " --managed-ssh=true", ETag: "ssh_turned_off"}}
 		} else if generation > 0 && !machine.SSHLocalReady && machine.SSHLocalCode != "" {
 			// Without a code this computer's managed SSH is still starting: nothing to report or refuse yet.
 			code := machine.SSHLocalCode
@@ -745,7 +747,7 @@ func startingServicesHealth(status localapi.MachineStatus) (localapi.HealthItem,
 }
 
 func sshReadiness(machine api.UserMachine, generation uint64) string {
-	if generation == 0 || machine.State == "revoked" || machine.State == "deleted" || machine.SSHAuthority.TargetGeneration == 0 {
+	if generation == 0 || machine.State == "revoked" || machine.State == "deleted" || machine.SSHAuthority.TargetGeneration == 0 || machine.ManagedSSHOff() {
 		return "unavailable"
 	}
 	if !machine.Online || !machine.SSHLocalReady || machine.SSHAuthority.Unreachable || machine.SSHAuthority.TargetGeneration != generation || machine.SSHAuthority.HostKeyGeneration != generation {

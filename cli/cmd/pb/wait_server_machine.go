@@ -46,7 +46,7 @@ func waitForServerMachineWith(ctx context.Context, workspace string, snapshot lo
 	path := "none"
 	for {
 		ssh, sshReady := machine.CurrentSSH()
-		sshReady = sshReady && !ssh.Unreachable
+		sshReady = sshReady && !ssh.Unreachable && !machine.ManagedSSHOff()
 		ready := machine.Online && machine.InstallationGeneration > 0 && (condition != "ssh" || sshReady)
 		if ready && condition != "runtime" {
 			info := resolver.ConnectInfo{Workspace: workspace, TargetKind: "machine", MachineID: machine.ID, Machine: machine.Alias, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}

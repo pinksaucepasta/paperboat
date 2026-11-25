@@ -387,6 +387,12 @@ func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4, Unreachable: true}
 			return value
 		}(), readiness: "degraded", health: "sshd_unreachable"},
+		{name: "managed ssh turned off", machine: func() api.UserMachine {
+			value := base
+			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}
+			value.MachineCapabilities = api.MachineCapabilityPolicy{Schema: "paperboat.machine-capabilities.v1", Desired: api.MachineCapabilitySelection{Terminal: true}}
+			return value
+		}(), readiness: "unavailable", health: "ssh_turned_off"},
 		{name: "local integration starting", machine: func() api.UserMachine {
 			value := base
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}

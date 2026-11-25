@@ -79,6 +79,11 @@ type HostKeyConflict struct {
 	MachineName string `json:"machine_name,omitempty"`
 }
 
+// ManagedSSHOff reports that managed SSH is turned off for this machine. A listing without the policy says nothing.
+func (m UserMachine) ManagedSSHOff() bool {
+	return m.MachineCapabilities.Schema != "" && !m.MachineCapabilities.Desired.ManagedSSH
+}
+
 // CurrentSSH returns the listed SSH target when it is complete and belongs to the machine's
 // current installation.
 func (m UserMachine) CurrentSSH() (MachineSSH, bool) {
