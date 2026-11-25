@@ -300,3 +300,70 @@ func TestUnsavedOutputStaysCountedAndCloseDropsTheRetry(t *testing.T) {
 }
 
 type heldProcess struct{ PTYProcess }
+
+// An ambiguous commit stored only the first part of one ring chunk (a chunk larger than a group commit), so the
+// position read back lies inside that chunk. The retry continues from there: no byte twice, none missing.
+func TestOutputPersistenceResumesInsideAChunk(t *testing.T) {
+	var landed atomic.Bool
+	state, manager, session, print := retrySession(t, store.Config{Root: filepath.Join(t.TempDir(), "state"), FailureHook: func(point string) error {
+		if point == "append_after_commit" && landed.CompareAndSwap(false, true) {
+			return errors.New("commit reported a failure")
+		}
+		return nil
+	}})
+	chunk := make([]byte, outputCommitBytes+50_000)
+	for i := range chunk {
+		chunk[i] = byte('a' + i%23)
+	}
+	want := string(chunk) + "tail"
+	manager.startOutputPersistence(session)
+	print(string(chunk))
+	waitPersist(t, session, "the rest of the chunk was not written", func() bool {
+		return session.persistErr == nil && session.persistedLatest == uint64(len(chunk))
+	})
+	if !landed.Load() {
+		t.Fatal("no commit was made ambiguous")
+	}
+	print("tail")
+	if err := manager.stopOutputPersistence(session); err != nil {
+		t.Fatal(err)
+	}
+	manager.stopWriter()
+	restarted, err := NewManager(ManagerConfig{Store: state, HistoryBytes: 1 << 20, AttachmentBytes: 1 << 20, PreserveStoppedHistory: true, Launch: func(pty.Command) (PTYProcess, error) { return nil, errors.New("no launch") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := restarted.get(session.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, from := range []uint64{0, outputCommitBytes} { // outputCommitBytes is where the partial commit ended
+		stored, _, _, err := state.Replay(t.Context(), session.id, from, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var durable, next = "", from
+		for _, event := range stored {
+			if event.StartSequence != next {
+				t.Fatalf("stored output from %d jumps from %d to %d", from, next, event.StartSequence)
+			}
+			durable, next = durable+string(event.Data), event.EndSequence
+		}
+		if durable != want[from:] {
+			t.Fatalf("stored output from %d: %d bytes, want %d", from, len(durable), len(want)-int(from))
+		}
+		for name, ring := range map[string]*history.History{"live": session.history, "restarted": recovered.history} {
+			replay, err := ring.Replay(from, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := ""
+			for _, event := range replay.Events {
+				got += string(event.Data)
+			}
+			if got != want[from:] {
+				t.Fatalf("%s replay from %d: %d bytes, want %d", name, from, len(got), len(want)-int(from))
+			}
+		}
+	}
+}
