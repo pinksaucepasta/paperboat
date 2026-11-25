@@ -89,6 +89,23 @@ VALUES('control_plane_signed',$1||'_access',$2,$1,$1||'_env',$3,'https://invalid
 	step("machine back online", `UPDATE paperboat.user_machines SET state='online',online=true WHERE user_id=$1`)
 	step("CLI certificate superseded", `UPDATE paperboat.peer_endpoint_certificates SET revoked_at=now(),revocation_reason='certificate_superseded' WHERE user_id=$1 AND role='cli'`, cli)
 	step("CLI key rotated", `UPDATE paperboat.peer_network_identities SET wireguard_public_key=sha256(convert_to('rotated'||endpoint_id,'UTF8')),key_generation=2 WHERE user_id=$1 AND role='cli'`, cli)
+	// A transfer or operation its own client reports finished is no revocation (migration 520): each `pb send` cut every
+	// relayed path of both machines. One revoked in the same statement still fences both ends.
+	session := func(id string) {
+		exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,
+helper_terminal_session_id,expires_at,capabilities,operation_id)
+VALUES('control_plane_signed',$1||$4,$2,$1,$1||'_env',$3,'https://invalid.test','jti_'||$1||$4,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1||$4)`, user, machine, cli, id)
+	}
+	session("_sent")
+	session("_ran")
+	session("_ran2")
+	session("_cut")
+	session("_longer")
+	step("transfer finished", `UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='transfer_finished' WHERE id=$1||'_sent'`)
+	step("operation ended", `UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='operation_ended' WHERE id=$1||'_ran'`)
+	step("one finished, one revoked", `UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),
+revocation_reason=CASE WHEN id=$1||'_cut' THEN 'machine_permission_revoked' ELSE 'operation_ended' END WHERE id IN ($1||'_cut',$1||'_ran2')`, cli, machine)
+	step("expiry changed", `UPDATE paperboat.user_machine_access_sessions SET expires_at=expires_at+interval '1 minute' WHERE id=$1||'_longer'`, cli, machine)
 	// Revoking an account E2EE key fences only the endpoint it belongs to (migration 302): it fenced every endpoint
 	// of the account, and the fleet's same-account peers were refused at the relay (2026-11-12 20:39Z).
 	exec(`INSERT INTO paperboat.account_e2ee_keys(key_id,user_id,public_key,fingerprint,cli_client_session_id) VALUES('aek_'||md5($1),$1,sha256(convert_to('pk'||$1,'UTF8')),sha256(convert_to('fp'||$1,'UTF8')),$2)`, user, cli)
