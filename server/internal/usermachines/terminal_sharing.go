@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 const terminalRecentOutputWarning = "Attaching includes up to 64 KiB of recent output, which may contain secrets regardless of ENV permissions."
@@ -273,28 +274,81 @@ const terminalInventoryObservationConcurrency = 4
 // The page rows are already authorized: describe them as they are instead of looking each one up again
 // (that per-row catalog query made a 50-row page cost ~550 queries).
 func (s *Service) describeTerminalPage(ctx context.Context, account string, items []SharedTerminalSession) []*SharedTerminalSession {
-	ids := make([]string, len(items))
-	byID := make(map[string]SharedTerminalSession, len(items))
-	for index, item := range items {
-		ids[index] = item.ID
-		byID[item.ID] = item
-	}
+	out := make([]*SharedTerminalSession, len(items))
 	page, err := s.loadTerminalPage(ctx, items)
 	if err != nil {
-		return make([]*SharedTerminalSession, len(items)) // the listed rows, without live detail
+		return out // the listed rows, without live detail
 	}
-	return boundedTerminalInventoryObservations(ctx, ids, func(ctx context.Context, id string) (SharedTerminalSession, error) {
-		return s.describeTerminalSession(ctx, account, byID[id], page)
-	})
+	groups := page.groups(items)
+	for _, described := range boundedTerminalInventoryObservations(ctx, groups, func(ctx context.Context, group []int) (map[int]*SharedTerminalSession, error) {
+		return s.describeTerminalGroup(ctx, account, items, group, page), nil
+	}) {
+		if described != nil {
+			for index, item := range *described {
+				out[index] = item
+			}
+		}
+	}
+	return out
+}
+
+// groups are the rows one host request can answer: sessions of one machine, owner and launch workspace, which one
+// credential covers. Every other row is its own group.
+func (p terminalPage) groups(items []SharedTerminalSession) [][]int {
+	var out [][]int
+	open := map[string]int{}
+	for index, item := range items {
+		key := item.Target.MachineID + "\x00" + item.OwnerAccount + "\x00" + p.launch[item.ID]
+		at, found := open[key]
+		batch := !item.BrowserOnly && p.ingress[item.Target.EnvironmentID] != "" && p.launch[item.ID] != ""
+		if batch && found && len(out[at]) < terminalprotocol.MaxSnapshotSessions {
+			out[at] = append(out[at], index)
+			continue
+		}
+		if batch {
+			open[key] = len(out)
+		}
+		out = append(out, []int{index})
+	}
+	return out
+}
+
+func (s *Service) describeTerminalGroup(ctx context.Context, account string, items []SharedTerminalSession, group []int, page terminalPage) map[int]*SharedTerminalSession {
+	if len(group) > 1 {
+		ids := make([]string, len(group))
+		for at, index := range group {
+			ids[at] = items[index].ID
+		}
+		first := items[group[0]]
+		token, err := s.terminalSnapshotCredential(ctx, first, page, terminalprotocol.SnapshotsHash(ids))
+		if err == nil { // without an answer each row asks for itself below, and keeps its grants either way
+			page.live, _ = s.controlRuntime.TerminalSnapshots(ctx, page.ingress[first.Target.EnvironmentID], token, ids, newID("operation"))
+		}
+	}
+	out := make(map[int]*SharedTerminalSession, len(group))
+	for _, index := range group {
+		if described, err := s.describeTerminalSession(ctx, account, items[index], page); err == nil || described.ID != "" { // a row whose live state was not stored keeps its grants
+			out[index] = &described
+		}
+	}
+	return out
+}
+
+// terminalSnapshotCredential is the control plane's operator credential for item's session and, with a request
+// hash, for the sessions that hash names.
+func (s *Service) terminalSnapshotCredential(ctx context.Context, item SharedTerminalSession, page terminalPage, requestHash string) (string, error) {
+	now := s.now().UTC()
+	return s.signTerminalCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: item.OwnerAccount, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: item.Target.EnvironmentID, MachineID: item.Target.MachineID, UserID: item.OwnerAccount, CLIClientSessionID: "control-plane", SessionID: item.ID, RequestHash: requestHash}, page.launch[item.ID], page.validate(ctx, s))
 }
 
 // terminalPage is what describing a page of terminals reads from the database, once for the page: the sharing
 // grants of every session and the runtime ingress of every machine environment. Read per row it was the
 // catalog's N+1 (about 9 queries a session, 104 for the perf solo account's page; S3).
 type terminalPage struct {
-	grants  map[string][]SharedTerminalGrant // session -> grants of its sharing team, by audience and account
-	ingress map[string]string                // environment -> runtime ingress URL; absent: unavailable
-	launch  map[string]string                // session -> launch workspace (personal or team)
+	grants  map[string][]SharedTerminalGrant        // session -> grants of its sharing team, by audience and account
+	ingress map[string]string                       // environment -> runtime ingress URL; absent: unavailable
+	launch  map[string]string                       // session -> launch workspace (personal or team)
+	live    map[string]helperruntime.SnapshotResult // session -> the host's batched answer
 	// validated memoizes the team membership checks of the page's credentials (owner|team -> result).
 	validated *sync.Map
 }
@@ -412,8 +466,8 @@ func (s *Service) terminalInventoryObservations(ctx context.Context, account str
 	}
 	return out
 }
-func boundedTerminalInventoryObservations(ctx context.Context, ids []string, observe func(context.Context, string) (SharedTerminalSession, error)) []*SharedTerminalSession {
-	out := make([]*SharedTerminalSession, len(ids))
+func boundedTerminalInventoryObservations[T, R any](ctx context.Context, ids []T, observe func(context.Context, T) (R, error)) []*R {
+	out := make([]*R, len(ids))
 	if len(ids) == 0 {
 		return out
 	}
@@ -472,6 +526,20 @@ func (s *Service) TerminalSessionSharing(ctx context.Context, account, sessionID
 	return s.describeTerminalSession(ctx, account, item, page)
 }
 
+func (s *Service) observeTerminal(ctx context.Context, item SharedTerminalSession, page terminalPage, ingress string) (helperruntime.Snapshot, error) {
+	if answered, found := page.live[item.ID]; found {
+		return answered.Snapshot, answered.Err
+	}
+	if err := ctx.Err(); err != nil { // the page's budget is spent
+		return helperruntime.Snapshot{}, err
+	}
+	token, err := s.terminalSnapshotCredential(ctx, item, page, "")
+	if err != nil {
+		return helperruntime.Snapshot{}, err
+	}
+	return s.controlRuntime.Terminal(ctx, ingress, token, "snapshot", item.ID, newID("operation"))
+}
+
 // describeTerminalSession adds grants and live host metadata to an authorized catalog row.
 func (s *Service) describeTerminalSession(ctx context.Context, account string, item SharedTerminalSession, page terminalPage) (SharedTerminalSession, error) {
 	sessionID := item.ID
@@ -506,16 +574,10 @@ func (s *Service) describeTerminalSession(ctx context.Context, account string, i
 	if !found {
 		return item, nil
 	}
-	now := s.now().UTC()
-	selected, found := page.launch[item.ID]
-	if !found {
+	if _, found := page.launch[item.ID]; !found {
 		return item, nil
 	}
-	token, err := s.signTerminalCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: item.OwnerAccount, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: item.Target.EnvironmentID, MachineID: item.Target.MachineID, UserID: item.OwnerAccount, CLIClientSessionID: "control-plane", SessionID: item.ID}, selected, page.validate(ctx, s))
-	if err != nil {
-		return item, nil
-	}
-	snap, err := s.controlRuntime.Terminal(ctx, httpIngressURL, token, "snapshot", item.ID, newID("operation"))
+	snap, err := s.observeTerminal(ctx, item, page, httpIngressURL)
 	if err != nil {
 		if helperruntime.IsSessionUnknown(err) {
 			if closed, markErr := s.markConfirmedTerminalSessionAbsent(ctx, item.ID); markErr == nil && closed {

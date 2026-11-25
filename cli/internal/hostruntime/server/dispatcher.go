@@ -669,6 +669,8 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 	case "get", "snapshot":
 		value, err := d.config.Sessions.SnapshotAtGeneration(request.SessionID, authorization.TerminalGeneration)
 		return domainResult(value, err)
+	case "snapshots":
+		return d.terminalSnapshots(ctx, authorization, request.SessionIDs)
 	case "cursor":
 		value, err := d.config.Sessions.SnapshotAtGeneration(request.SessionID, authorization.TerminalGeneration)
 		if err != nil {

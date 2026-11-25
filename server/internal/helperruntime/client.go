@@ -141,6 +141,66 @@ func (c Client) Terminal(ctx context.Context, route, credential, action, session
 	return c.terminal(ctx, route, credential, action, sessionID, operationID, map[string]any{"action": action, "session_id": sessionID})
 }
 
+// SnapshotResult is one session's answer of TerminalSnapshots: its snapshot, or the host's error for it.
+type SnapshotResult struct {
+	Snapshot Snapshot
+	Err      error
+}
+
+// TerminalSnapshots reads several sessions of one machine in one request; credential carries
+// terminalprotocol.SnapshotsHash of them. A session the answer had no room for is absent from the result.
+func (c Client) TerminalSnapshots(ctx context.Context, route, credential string, sessions []string, operationID string) (map[string]SnapshotResult, error) {
+	if len(sessions) == 0 || len(sessions) > terminalprotocol.MaxSnapshotSessions {
+		return nil, protocolError("operation_invalid", "invalid helper runtime operation", nil)
+	}
+	endpoint, err := runtimeEndpoint(route)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.terminalRequest(ctx, endpoint, credential, "snapshots", sessions[0], operationID, map[string]any{"action": "snapshots", "session_ids": sessions})
+	if err != nil {
+		return nil, err
+	}
+	var answer struct {
+		Sessions []struct {
+			SessionID string          `json:"session_id"`
+			Snapshot  json.RawMessage `json:"snapshot"`
+			Error     string          `json:"error"`
+		} `json:"sessions"`
+	}
+	if err := decodeResponse(raw, &answer); err != nil {
+		return nil, protocolError("snapshot_encoding_invalid", "helper runtime returned an invalid terminal snapshot encoding", err)
+	}
+	out := make(map[string]SnapshotResult, len(answer.Sessions))
+	for _, entry := range answer.Sessions {
+		if _, twice := out[entry.SessionID]; twice || !contains(sessions, entry.SessionID) {
+			return nil, protocolError("snapshot_id_mismatch", "helper runtime returned the wrong terminal snapshot", nil)
+		}
+		var found SnapshotResult
+		if entry.Error != "" {
+			found.Err = &remoteError{Code: entry.Error}
+		} else {
+			found.Snapshot, found.Err = decodeSnapshot(entry.Snapshot, entry.SessionID)
+		}
+		out[entry.SessionID] = found
+	}
+	return out, nil
+}
+
+func decodeSnapshot(raw json.RawMessage, sessionID string) (Snapshot, error) {
+	var snapshot Snapshot
+	if err := decodeResponse(raw, &snapshot); err != nil {
+		return Snapshot{}, protocolError("snapshot_encoding_invalid", "helper runtime returned an invalid terminal snapshot encoding", err)
+	}
+	if snapshot.ID != sessionID {
+		return Snapshot{}, protocolError("snapshot_id_mismatch", "helper runtime returned the wrong terminal snapshot", nil)
+	}
+	if !validParticipants(snapshot.Participants) {
+		return Snapshot{}, protocolError("participants_invalid", "helper runtime returned invalid terminal participants", nil)
+	}
+	return snapshot, nil
+}
+
 // CreateTerminal starts the exact server-owned session on its enrolled host.
 // The host's create-or-get response makes worker retries safe after a lost ACK.
 func (c Client) CreateTerminal(ctx context.Context, route, credential, sessionID, operationID, name, cwd string) (Snapshot, error) {
@@ -172,8 +232,38 @@ func (e websocketDialFailure) DiagnosticStatus() int {
 }
 
 func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, action, sessionID, operationID string, requestPayload map[string]any) (Snapshot, error) {
+	raw, err := c.terminalRequest(ctx, endpoint, credential, action, sessionID, operationID, requestPayload)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if action == "delete" {
+		var empty struct{}
+		if err := decodeResponse(raw, &empty); err != nil {
+			return Snapshot{}, protocolError("delete_ack_invalid", "helper runtime returned an invalid delete acknowledgement", err)
+		}
+		return Snapshot{ID: sessionID, State: "deleted"}, nil
+	}
+	if action == "create" {
+		var created struct {
+			Snapshot
+			Existing bool `json:"existing"`
+			// The host launched without its pending managed ENV and notes it; the launch succeeded.
+			LaunchWarnings []string `json:"launch_warnings,omitempty"`
+		}
+		if err := decodeResponse(raw, &created); err != nil {
+			return Snapshot{}, protocolError("create_ack_invalid", "helper runtime returned an invalid terminal creation", err)
+		}
+		if created.ID != sessionID || !validParticipants(created.Participants) {
+			return Snapshot{}, protocolError("create_ack_invalid", "helper runtime returned an invalid terminal creation", nil)
+		}
+		return created.Snapshot, nil
+	}
+	return decodeSnapshot(raw, sessionID)
+}
+
+func (c Client) terminalRequest(ctx context.Context, endpoint, credential, action, sessionID, operationID string, requestPayload map[string]any) (json.RawMessage, error) {
 	if endpoint == "" || credential == "" || sessionID == "" || action == "" || operationID == "" {
-		return Snapshot{}, protocolError("operation_invalid", "invalid helper runtime operation", nil)
+		return nil, protocolError("operation_invalid", "invalid helper runtime operation", nil)
 	}
 	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+credential)
@@ -190,17 +280,17 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 				_ = response.Body.Close()
 			}
 		}
-		return Snapshot{}, websocketDialFailure{status: status, cause: err}
+		return nil, websocketDialFailure{status: status, cause: err}
 	}
 	defer connection.Close(websocket.StatusNormalClosure, "complete")
 	connection.SetReadLimit(maxFrameBytes + 4)
 	if connection.Subprotocol() != subprotocol {
-		return Snapshot{}, protocolError("subprotocol_mismatch", "helper runtime did not negotiate required subprotocol", nil)
+		return nil, protocolError("subprotocol_mismatch", "helper runtime did not negotiate required subprotocol", nil)
 	}
 
 	helloID, err := randomID("request")
 	if err != nil {
-		return Snapshot{}, err
+		return nil, err
 	}
 	helloPayload, _ := json.Marshal(map[string]any{
 		"min_version": protocolVersion, "max_version": protocolVersion,
@@ -208,14 +298,14 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 	})
 	requestID, err := randomID("request")
 	if err != nil {
-		return Snapshot{}, err
+		return nil, err
 	}
 	payload, _ := json.Marshal(requestPayload)
 	deadline := uint32(30000)
 	if remaining, ok := ctx.Deadline(); ok {
 		milliseconds := time.Until(remaining).Milliseconds()
 		if milliseconds < 1 {
-			return Snapshot{}, context.DeadlineExceeded
+			return nil, context.DeadlineExceeded
 		}
 		if milliseconds < int64(deadline) {
 			deadline = uint32(milliseconds)
@@ -224,96 +314,64 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 	// Hello and the request leave in one flight: the host answers in order and runs nothing after a hello it refuses,
 	// so waiting for the welcome first only added a round trip through the edge to every terminal operation.
 	if err := writeFrame(ctx, connection, frame{Type: "hello", RequestID: helloID, Version: protocolVersion, Payload: helloPayload}); err != nil {
-		return Snapshot{}, err
+		return nil, err
 	}
 	request := frame{Type: "request", RequestID: requestID, Version: protocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: deadline, Payload: payload}
 	if err := writeFrame(ctx, connection, request); err != nil {
-		return Snapshot{}, err
+		return nil, err
 	}
 	welcome, err := readFrame(ctx, connection)
 	if err != nil {
-		return Snapshot{}, err
+		return nil, err
 	}
 	if welcome.Type != "welcome" || welcome.RequestID != helloID {
-		return Snapshot{}, protocolError("welcome_invalid", "helper runtime returned an invalid welcome", nil)
+		return nil, protocolError("welcome_invalid", "helper runtime returned an invalid welcome", nil)
 	}
 	var negotiated struct {
 		Version      string   `json:"version"`
 		Capabilities []string `json:"capabilities"`
 	}
 	if err := decodeResponse(welcome.Payload, &negotiated); err != nil {
-		return Snapshot{}, protocolError("capabilities_mismatch", "helper runtime did not negotiate required capabilities", err)
+		return nil, protocolError("capabilities_mismatch", "helper runtime did not negotiate required capabilities", err)
 	}
 	if negotiated.Version != protocolVersion || !contains(negotiated.Capabilities, "terminal.v1") || !contains(negotiated.Capabilities, "health.v1") {
-		return Snapshot{}, protocolError("capabilities_mismatch", "helper runtime did not negotiate required capabilities", nil)
+		return nil, protocolError("capabilities_mismatch", "helper runtime did not negotiate required capabilities", nil)
 	}
 	for {
 		response, err := readFrame(ctx, connection)
 		if err != nil {
-			return Snapshot{}, err
+			return nil, err
 		}
 		if response.Type == "heartbeat" {
 			if err := writeFrame(ctx, connection, response); err != nil {
-				return Snapshot{}, err
+				return nil, err
 			}
 			continue
 		}
 		if response.RequestID != requestID {
-			return Snapshot{}, protocolError("response_mismatch", "helper runtime response did not match request", nil)
+			return nil, protocolError("response_mismatch", "helper runtime response did not match request", nil)
 		}
 		if response.Type == "error" {
 			var remote remoteError
 			if err := decodeResponse(response.Payload, &remote); err != nil {
-				return Snapshot{}, protocolError("error_invalid", "helper runtime returned an invalid error", err)
+				return nil, protocolError("error_invalid", "helper runtime returned an invalid error", err)
 			}
 			if remote.Code == "" {
-				return Snapshot{}, protocolError("error_invalid", "helper runtime returned an invalid error", nil)
+				return nil, protocolError("error_invalid", "helper runtime returned an invalid error", nil)
 			}
-			return Snapshot{}, &remote
+			return nil, &remote
 		}
 		if response.Type != "response" {
-			return Snapshot{}, protocolError("response_invalid", "helper runtime returned an invalid response", nil)
+			return nil, protocolError("response_invalid", "helper runtime returned an invalid response", nil)
 		}
 		var envelope struct {
 			Result json.RawMessage `json:"result"`
 			Replay bool            `json:"replay"`
 		}
 		if err := decodeResponse(response.Payload, &envelope); err != nil {
-			return Snapshot{}, protocolError("snapshot_invalid", "helper runtime returned an invalid terminal snapshot", err)
+			return nil, protocolError("snapshot_invalid", "helper runtime returned an invalid terminal snapshot", err)
 		}
-		if action == "delete" {
-			var empty struct{}
-			if err := decodeResponse(envelope.Result, &empty); err != nil {
-				return Snapshot{}, protocolError("delete_ack_invalid", "helper runtime returned an invalid delete acknowledgement", err)
-			}
-			return Snapshot{ID: sessionID, State: "deleted"}, nil
-		}
-		if action == "create" {
-			var created struct {
-				Snapshot
-				Existing bool `json:"existing"`
-				// The host launched without its pending managed ENV and notes it; the launch succeeded.
-				LaunchWarnings []string `json:"launch_warnings,omitempty"`
-			}
-			if err := decodeResponse(envelope.Result, &created); err != nil {
-				return Snapshot{}, protocolError("create_ack_invalid", "helper runtime returned an invalid terminal creation", err)
-			}
-			if created.ID != sessionID || !validParticipants(created.Participants) {
-				return Snapshot{}, protocolError("create_ack_invalid", "helper runtime returned an invalid terminal creation", nil)
-			}
-			return created.Snapshot, nil
-		}
-		var snapshot Snapshot
-		if err := decodeResponse(envelope.Result, &snapshot); err != nil {
-			return Snapshot{}, protocolError("snapshot_encoding_invalid", "helper runtime returned an invalid terminal snapshot encoding", err)
-		}
-		if snapshot.ID != sessionID {
-			return Snapshot{}, protocolError("snapshot_id_mismatch", "helper runtime returned the wrong terminal snapshot", nil)
-		}
-		if !validParticipants(snapshot.Participants) {
-			return Snapshot{}, protocolError("participants_invalid", "helper runtime returned invalid terminal participants", nil)
-		}
-		return snapshot, nil
+		return envelope.Result, nil
 	}
 }
 

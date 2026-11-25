@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 // This signed runtime fixture isolates the real database authorization and
@@ -28,9 +29,46 @@ type terminalIdentificationRuntime struct {
 	calls                                         atomic.Int64
 	unavailable                                   bool
 	unknown                                       bool
+	absent                                        map[string]bool
+	older                                         bool // the host has no batched snapshots
 	slow                                          bool
 	multiple                                      bool
 	dial                                          func(context.Context, string, string) (net.Conn, error)
+}
+
+// snapshotsOf answers a batch with one answer per session, after checking what its credential may read.
+func snapshotsOf(signer *mint.Provider, credential string, sessions []string, one func(string) (helperruntime.Snapshot, error)) (map[string]helperruntime.SnapshotResult, error) {
+	claims, err := signer.VerifyCredential(credential, "https://api.paperboat.test", "terminal_operation", time.Now().UTC())
+	if err != nil || claims.SessionID != sessions[0] || claims.RequestHash != terminalprotocol.SnapshotsHash(sessions) {
+		return nil, errors.New("snapshots fixture received incorrect resource binding")
+	}
+	out := map[string]helperruntime.SnapshotResult{}
+	for _, session := range sessions {
+		snapshot, err := one(session)
+		out[session] = helperruntime.SnapshotResult{Snapshot: snapshot, Err: err}
+	}
+	return out, nil
+}
+
+func (r *terminalIdentificationRuntime) TerminalSnapshots(ctx context.Context, route, credential string, sessions []string, _ string) (map[string]helperruntime.SnapshotResult, error) {
+	r.calls.Add(1)
+	if r.slow {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if r.unavailable || r.older || route != r.route {
+		return nil, errors.New("fixture host unavailable")
+	}
+	return snapshotsOf(r.signer, credential, sessions, func(session string) (helperruntime.Snapshot, error) {
+		if r.unknown || r.absent[session] {
+			return helperruntime.Snapshot{}, hostUnknownSession{}
+		}
+		return identificationSnapshot(session), nil
+	})
+}
+
+func identificationSnapshot(session string) helperruntime.Snapshot {
+	return helperruntime.Snapshot{ID: session, Name: "runtime-launch-name", CWD: "/launch", State: "running", Generation: 1, Title: "  vim\x1b\u202e main.go ", CurrentDirectory: "/live\x00/\u2066api", ForegroundProcess: "vi\t\u200fm"}
 }
 
 func (r *terminalIdentificationRuntime) Terminal(ctx context.Context, route, credential, operation, session, operationID string) (helperruntime.Snapshot, error) {
@@ -53,10 +91,10 @@ func (r *terminalIdentificationRuntime) Terminal(ctx context.Context, route, cre
 	if r.unavailable {
 		return helperruntime.Snapshot{}, errors.New("fixture host unavailable")
 	}
-	if r.unknown {
+	if r.unknown || r.absent[session] {
 		return helperruntime.Snapshot{}, hostUnknownSession{}
 	}
-	return helperruntime.Snapshot{ID: session, Name: "runtime-launch-name", CWD: "/launch", State: "running", Generation: 1, Title: "  vim\x1b\u202e main.go ", CurrentDirectory: "/live\x00/\u2066api", ForegroundProcess: "vi\t\u200fm"}, nil
+	return identificationSnapshot(session), nil
 }
 
 // hostUnknownSession is the host's "no such session" answer (not_found_or_forbidden).
@@ -336,14 +374,14 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 		insert(`INSERT INTO user_machine_terminal_sessions(id,user_machine_id,owner_account,name,launch_cwd,runtime_state) VALUES($1,$2,$3,$4,'/launch','running')`, fmt.Sprintf("slow_%s_%d", suffix, i), machine, owner, fmt.Sprintf("slow%d", i))
 	}
 	for _, global := range []bool{false, true} {
-		// The caller gives up once every observation worker is blocked in the slow runtime (not after a wall-clock
+		// The caller gives up once the page's one host request is blocked in the slow runtime (not after a wall-clock
 		// delay that a loaded host can spend on the database reads before any probe starts).
 		pageCtx, stop := context.WithCancel(ctx)
 		beforeCalls := runtime.calls.Load()
 		gaveUp := make(chan struct{})
 		go func() {
 			defer close(gaveUp)
-			for deadline := time.Now().Add(10 * time.Second); runtime.calls.Load()-beforeCalls < terminalInventoryObservationConcurrency && time.Now().Before(deadline); {
+			for deadline := time.Now().Add(10 * time.Second); runtime.calls.Load()-beforeCalls < 1 && time.Now().Before(deadline); {
 				time.Sleep(time.Millisecond)
 			}
 			stop()
@@ -371,8 +409,8 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 		}
 		stop()
 		<-gaveUp
-		if probes := runtime.calls.Load() - beforeCalls; probes != terminalInventoryObservationConcurrency {
-			t.Fatalf("slow runtime probes=%d, wanted the %d concurrent probes of a bounded page", probes, terminalInventoryObservationConcurrency)
+		if probes := runtime.calls.Load() - beforeCalls; probes != 1 {
+			t.Fatalf("slow runtime probes=%d, wanted one for the machine", probes)
 		}
 	}
 	// Shell completion asks for the stored rows only (live=false): the same sessions, no host probe,

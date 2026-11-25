@@ -278,6 +278,7 @@ type Service struct {
 
 type userMachineHelperRuntime interface {
 	Terminal(context.Context, string, string, string, string, string) (helperruntime.Snapshot, error)
+	TerminalSnapshots(context.Context, string, string, []string, string) (map[string]helperruntime.SnapshotResult, error)
 }
 
 type HelperEnrollmentGrant struct {

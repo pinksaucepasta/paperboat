@@ -1,6 +1,22 @@
 // Package terminalprotocol owns terminal transport negotiation names shared by hosts, clients and edges.
 package terminalprotocol
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+)
+
+// MaxSnapshotSessions bounds one "snapshots" request, so its answer fits a control frame.
+const MaxSnapshotSessions = 32
+
+// SnapshotsHash is the request_hash that binds a terminal credential to the exact sessions of a "snapshots" request.
+func SnapshotsHash(sessions []string) string {
+	list, _ := json.Marshal(sessions) // a list of strings always encodes, and unambiguously
+	sum := sha256.Sum256(append([]byte("terminal-snapshots\x00"), list...))
+	return hex.EncodeToString(sum[:])
+}
+
 const (
 	TerminalSubprotocol = "paperboat.terminal.v1"
 	BrowserSubprotocol  = "paperboat.browser-terminal.e2ee.v1"

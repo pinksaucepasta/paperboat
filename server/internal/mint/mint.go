@@ -693,6 +693,12 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 			return "", errors.New("machine access bindings are required")
 		}
 		claims["machine_id"], claims["user_id"], claims["cli_client_session_id"], claims["session_id"] = input.MachineID, input.UserID, input.CLIClientSessionID, input.SessionID
+		if input.RequestHash != "" {
+			if shared {
+				return "", errors.New("a shared terminal credential names one session")
+			}
+			claims["request_hash"] = input.RequestHash
+		}
 		if shared {
 			claims["account_id"] = input.AccountID
 			claims["expected_generation"] = input.ExpectedGeneration

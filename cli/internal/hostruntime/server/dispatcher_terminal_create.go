@@ -71,12 +71,14 @@ func (d *Dispatcher) createTerminal(ctx context.Context, authorization Authoriza
 }
 
 type terminalRequest struct {
-	Action       string `json:"action"`
-	OperationID  string `json:"operation_id,omitempty"`
-	Name         string `json:"name,omitempty"`
-	CWD          string `json:"cwd,omitempty"`
-	SessionID    string `json:"session_id,omitempty"`
-	AttachmentID string `json:"attachment_id,omitempty"`
+	Action      string `json:"action"`
+	OperationID string `json:"operation_id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	CWD         string `json:"cwd,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	// SessionIDs are the sessions of a "snapshots" request, bound by the credential's request hash.
+	SessionIDs   []string `json:"session_ids,omitempty"`
+	AttachmentID string   `json:"attachment_id,omitempty"`
 	// AttachmentLease names which attach of AttachmentID a detach ends; see attachmentControl.
 	AttachmentLease uint64            `json:"attachment_lease,omitempty"`
 	FromSequence    uint64            `json:"from_sequence,omitempty"`
