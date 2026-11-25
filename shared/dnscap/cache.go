@@ -26,9 +26,10 @@ type entry struct {
 }
 
 var (
-	mu    sync.Mutex
-	hosts = map[string]entry{}
-	save  func([]byte)
+	mu     sync.Mutex
+	saving sync.Mutex // held over a write to disk, which must not hold up a dial that only reads
+	hosts  = map[string]entry{}
+	save   func([]byte)
 )
 
 // Cached is the kept address of host (invalid: none); fresh ones are used without a lookup.
@@ -52,16 +53,21 @@ func Verified(host string, remote net.Addr) {
 		return
 	}
 	mu.Lock()
-	defer mu.Unlock()
 	old, known := hosts[host]
 	if !known && len(hosts) >= maxHosts || known && old.Address == address && !old.failed && time.Since(old.Verified) < time.Minute {
+		mu.Unlock()
 		return
 	}
 	hosts[host] = entry{Address: address, Verified: time.Now()}
-	if save != nil {
-		if body, err := json.Marshal(hosts); err == nil {
-			save(body)
-		}
+	mu.Unlock()
+	saving.Lock()
+	defer saving.Unlock()
+	mu.Lock()
+	body, err := json.Marshal(hosts)
+	write := save
+	mu.Unlock()
+	if err == nil && write != nil {
+		write(body) // shortcut: the last process to write wins, another's newer host is verified and written again
 	}
 }
 
