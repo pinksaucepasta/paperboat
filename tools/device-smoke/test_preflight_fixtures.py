@@ -46,13 +46,13 @@ class Report(unittest.TestCase):
         return code, stderr.getvalue()
 
     def test_all_present_is_silent_success(self):
-        code, text = self.run_main(free_session=None, free_plan=None, fixture_host=None, operator_session=None, config_repo=None, team_admin=None)
+        code, text = self.run_main(free_session=None, free_plan=None, fixture_host=None, operator_session=None, config_repo=None, team_admin=None, team_plan=None)
         self.assertEqual(0, code)
         self.assertNotIn('MISSING', text)
 
     def test_every_missing_fixture_is_named_once_with_its_fix_and_nothing_starts(self):
         code, text = self.run_main(free_session='Free session expired. Fix: sign in', free_plan=None, fixture_host='no docker host', operator_session=None,
-                                   config_repo='repo not connected. Fix: connect it', team_admin=None)
+                                   config_repo='repo not connected. Fix: connect it', team_admin=None, team_plan=None)
         self.assertEqual(2, code)
         self.assertIn('free-plan', text)
         self.assertIn('Free session expired. Fix: sign in', text)
