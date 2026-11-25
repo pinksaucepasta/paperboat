@@ -821,17 +821,18 @@ TLIST=($DEVICES)
 
         class FakePb:  # what winhost.WindowsPb offers: the device and the pb path on it
             device, exe = FakeDevice(), 'C:\\pb.exe'
-        leg = {'leg': 'exec self', 'ok': True, 'seconds': 2.4, 'why': ''}
-        FakeDevice.results = [leg, dict(leg, leg='ssh self', seconds=3.6), dict(leg, leg='exec peer'), dict(leg, leg='ssh peer')]
+        leg = {'leg': 'exec self', 'ok': True, 'seconds': 2.4, 'limit': 5, 'why': ''}
+        FakeDevice.results = [leg, dict(leg, leg='ssh self', seconds=3.6, limit=10), dict(leg, leg='exec peer'), dict(leg, leg='ssh peer', limit=10)]
         is_windows = patch.object(e.windows_target, 'is_windows', lambda binary, target: target == 'me')
         with is_windows:
             e.windows_legs(FakePb, 'me', 'peer')
         self.assertEqual([l['label'] for l in sent['legs']], ['exec self', 'exec peer', 'ssh self', 'ssh peer'])
-        self.assertEqual((sent['pb'], sent['deadline']), ('C:\\pb.exe', e.DEADLINE))  # the 5 s limit is kept, timed in the device script
+        self.assertEqual(sent['pb'], 'C:\\pb.exe')
+        self.assertEqual([l['deadline'] for l in sent['legs']], [5.0, 5.0, 10.0, 10.0])  # exec 5 s, ssh 10 s (measured cold p50/max Mac 6.6/7.2 s), timed in the device script
         script = sent['script']
         self.assertLess(script.index('foreach'), script.index("'service','restart'"))  # a restart inside the loop: every leg is cold, in the device script
-        FakeDevice.results[1] = dict(leg, leg='ssh self', ok=False, seconds=5.0, why='exit -1')
-        with is_windows, self.assertRaisesRegex(RuntimeError, 'ssh self: exit -1 after 5.0s'):
+        FakeDevice.results[2] = dict(leg, leg='ssh self', ok=False, seconds=10.0, limit=10, why='exit -1')
+        with is_windows, self.assertRaisesRegex(RuntimeError, 'ssh self: exit -1 after 10.0s, over its 10s limit'):
             e.windows_legs(FakePb, 'me', 'peer')
         with is_windows, patch.object(e, 'windows_legs') as windows, patch.object(e, 'restart_local'), patch.object(e, 'run_all'), \
                 patch.object(e.winhost, 'pb_path', lambda: 'pb'), patch.object(sys, 'argv', ['x', 'peer', '--self', 'me']):
