@@ -150,6 +150,16 @@ func (s *Service) RecordMachineCapabilitiesObservation(ctx context.Context, mach
 	if machineID == "" || environmentID == "" || in.Schema != MachineCapabilitiesSchemaV1 || in.Version < 1 || in.ObservedAt.IsZero() || !slices.Contains([]string{"applied", "error"}, in.Status) || in.Status == "applied" && in.ErrorCode != "" || in.Status == "error" && !safeAvailabilityCode.MatchString(in.ErrorCode) {
 		return ErrCapabilitiesInvalid
 	}
+	// Every heartbeat repeats the last report: one read answers it, without a transaction or a row lock. A report that
+	// changes something, or a failed read, goes on to the locked decision.
+	var configured []string
+	if err := s.db.Pool().QueryRow(ctx, `SELECT configured_capabilities FROM user_machines WHERE id=$1 AND environment_id=$2 AND deleted_at IS NULL
+ AND state NOT IN ('revoked','deleted') AND capabilities_desired_version=$3 AND capabilities_observed_version=$3
+ AND capabilities_status=$4 AND coalesce(capabilities_error_code,'')=$5 AND capabilities_applied=$6`,
+		machineID, environmentID, in.Version, in.Status, in.ErrorCode, capabilityNames(in.Applied)).Scan(&configured); err == nil &&
+		(in.Status != "applied" || in.Applied == selectionFromNames(configured)) {
+		return nil
+	}
 	// Read committed: the report decides on the machine row it locks (FOR UPDATE reads its newest version) and writes
 	// under that lock, so a heartbeat that queues behind another write to the machine beats a 40001 replay.
 	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {

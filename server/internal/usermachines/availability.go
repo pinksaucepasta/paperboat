@@ -146,6 +146,17 @@ func (s *Service) RecordAvailabilityObservation(ctx context.Context, environment
 	if environmentID == "" || userMachineID == "" || observation.Schema != AvailabilityPolicySchemaV1 || !validAvailabilityMode(observation.Mode) || observation.Version < 0 || observation.UpdateRollbacks < 0 || !validUpdateHealth(observation.UpdateHealth) || !validAvailabilityStatus(observation.Status) || observation.ObservedAt.IsZero() || len(observation.HostServiceVersion) > 128 || observation.HostServiceVersion == "" || observation.HostServiceScope != "system" || (observation.ErrorCode != "" && !safeAvailabilityCode.MatchString(observation.ErrorCode)) || observation.Status == "applied" && observation.ErrorCode != "" || observation.Status != "applied" && observation.ErrorCode == "" {
 		return ErrAvailabilityInvalid
 	}
+	// As in RecordMachineCapabilitiesObservation: a repeated report is answered by one read.
+	var unchanged bool
+	if err := s.db.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_machines WHERE id=$1 AND environment_id=$2 AND deleted_at IS NULL
+ AND availability_desired_version=$3 AND availability_observed_version=$3 AND availability_observed_at<=$4
+ AND coalesce(availability_observed_mode,'')=$5 AND ($6<>'applied' OR availability_mode=$5) AND availability_status=$6
+ AND coalesce(availability_error_code,'')=$7 AND coalesce(host_service_version,'')=$8 AND coalesce(host_service_scope,'')=$9
+ AND host_update_rollbacks=$10 AND update_health=$11)`, userMachineID, environmentID, observation.Version, observation.ObservedAt,
+		observation.Mode, observation.Status, observation.ErrorCode, observation.HostServiceVersion, observation.HostServiceScope,
+		observation.UpdateRollbacks, observation.UpdateHealth).Scan(&unchanged); err == nil && unchanged {
+		return nil
+	}
 	// Read committed: the report decides on the machine row it locks (FOR UPDATE reads its newest version) and writes
 	// under that lock, so a heartbeat that queues behind another write to the machine beats a 40001 replay.
 	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {

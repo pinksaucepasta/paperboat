@@ -124,6 +124,19 @@ func (s *Service) RecordUpdateObservation(ctx context.Context, environmentID, us
 		return ErrUpdateObservationInvalid
 	}
 	payloadHash := hashUpdateObservation(observation)
+	// As in RecordMachineCapabilitiesObservation: a repeated state is answered by one read. The same operation with
+	// another payload is a conflict and is left to the locked decision.
+	var unchanged bool
+	if err := s.db.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_machine_update_observations o JOIN user_machines m ON m.id=o.user_machine_id
+ WHERE m.id=$1 AND m.environment_id=$2 AND o.environment_id=$2 AND m.deleted_at IS NULL AND m.installation_generation=$3 AND o.installation_generation=$3
+ AND o.operation_id<>$4 AND o.schema=$5 AND o.state=$6 AND o.current_version=$7 AND coalesce(o.target_version,'')=$8 AND o.channel=$9
+ AND coalesce(o.error_code,'')=$10 AND o.worker_generation=$11 AND o.os_boot_id=$12 AND o.rollback_count=$13
+ AND o.observed_at<$14 AND o.observed_at>$15)`, userMachineID, environmentID, int64(observation.InstallationGeneration),
+		observation.OperationID, observation.Schema, observation.State, observation.CurrentVersion, observation.TargetVersion, observation.Channel,
+		observation.ErrorCode, int64(observation.WorkerGeneration), observation.OSBootID, int64(observation.RollbackCount),
+		observation.ObservedAt, observation.ObservedAt.Add(-s.policy.OfflineAfter/2)).Scan(&unchanged); err == nil && unchanged {
+		return nil
+	}
 	// Lock the installation before reading its observation, which may not exist yet.
 	// Every reporter for this machine sees the previous report and the current generation.
 	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
