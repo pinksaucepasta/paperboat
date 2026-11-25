@@ -338,8 +338,38 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			d.telemetry.Record(event)
 		}
 	}
-	var transferClient *filetransfer.NativeClient
 	var transferLease *localapi.FileTransferLease
+	prepareTransfer := func(ctx context.Context, info resolver.ConnectInfo) (prepared preparedTransfer) {
+		if info.FileTransfer == nil || d.peerLocal == nil {
+			return prepared
+		}
+		prepared.client, prepared.lease, prepared.err = nativeFileTransferClient(ctx, d.peerLocal, info, newIdempotencyKey())
+		if prepared.err == nil && prepared.client != nil {
+			prepared.err = prepared.client.VerifyPolicy(ctx, descriptorFileTransferPolicy(info.FileTransfer))
+		}
+		if prepared.err != nil && prepared.lease != nil {
+			observeTransferFailure(prepared.lease.Close())
+			prepared.lease = nil
+		}
+		return prepared
+	}
+	var pendingTransfer chan preparedTransfer
+	startTransfer := func(info resolver.ConnectInfo) chan preparedTransfer {
+		if info.Terminal != nil {
+			target := *info.Terminal // the dial writes to its own
+			info.Terminal = &target
+		}
+		pending := make(chan preparedTransfer, 1)
+		go func() { pending <- prepareTransfer(ctx, info) }()
+		return pending
+	}
+	dropTransfer := func(pending chan preparedTransfer) {
+		go func() {
+			if prepared := <-pending; prepared.lease != nil {
+				observeTransferFailure(prepared.lease.Close())
+			}
+		}()
+	}
 	createdSessionID, createdMachineID := "", ""
 	offlineSessionID := "" // an offline session is named only once its dial succeeds, so a retry mints another
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
@@ -378,44 +408,11 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				info.Terminal.Cols, info.Terminal.Rows = remoteSize()
 				info.Terminal.InputOwner = inputOwner
 			}
-			if transferLease != nil {
-				observeTransferFailure(transferLease.Close())
-				transferLease = nil
-			}
-			transferClient = nil
-			if info.FileTransfer != nil && d.peerLocal != nil {
-				var transferErr error
-				transferClient, transferLease, transferErr = nativeFileTransferClient(ctx, d.peerLocal, info, newIdempotencyKey())
-				observeTransferFailure(transferErr)
-			}
-			// The file-transfer policy check runs concurrently with the
-			// transport dial. Paste availability is decided before any input
-			// is accepted, but the health check round trip never delays the
-			// shell becoming interactive.
-			verifyDone := make(chan error, 1)
-			var clientToVerify *filetransfer.Client
-			if transferClient != nil {
-				clientToVerify = transferClient.Client
-			}
-			if clientToVerify != nil {
-				policyToVerify := descriptorFileTransferPolicy(info.FileTransfer)
-				go func() { verifyDone <- clientToVerify.VerifyPolicy(ctx, policyToVerify) }()
-			} else {
-				verifyDone <- nil
-			}
-			conn, err = d.tunnel.Dial(ctx, info)
-			if policyErr := <-verifyDone; policyErr != nil {
-				observeTransferFailure(policyErr)
-				transferClient = nil
-				if transferLease != nil {
-					observeTransferFailure(transferLease.Close())
-					transferLease = nil
-				}
-				if useStatusBar {
-					bar.FailureFor("file_transfer", "File transfer unavailable")
-				} else {
-					fmt.Fprintln(os.Stderr, "File transfer is unavailable for this connection. Terminal access will continue.")
-				}
+			// File transfer is prepared beside the dial and never holds the prompt: its lease costs three server round trips
+			// and its policy check one to the host.
+			pendingTransfer = startTransfer(info)
+			if conn, err = d.tunnel.Dial(ctx, info); err != nil {
+				dropTransfer(pendingTransfer)
 			}
 		}
 		if err == nil {
@@ -534,14 +531,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	defer stopInbox()
 	var transferRefresh terminalInboxWorker
 	defer func() { cancelConnection(); transferRefresh.stop() }()
-	var pasteUploader paste.BatchUploader
-	if transferClient != nil {
-		pasteUploader = transferClient
-	}
-	pastePolicy := paste.NewPolicy(pasteUploader, info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
-	if transferClient != nil {
-		startInbox(transferClient.Client, info.Terminal.SessionID)
-	}
+	pastePolicy := paste.NewPolicy(nil, info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
 	// attached is the latest attach's descriptor: a redial re-attaches under its access session with the daemon's resume
 	// secret, before asking Paperboat for anything.
 	var attached atomic.Pointer[resolver.ConnectInfo]
@@ -585,7 +575,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	}
 	// refreshTransfers renews the file-transfer lease and inbox of an attached terminal. It has its own cancellable
 	// owner and cannot hold the attachment back.
-	refreshTransfers := func(freshInfo resolver.ConnectInfo) func(context.Context) error {
+	refreshTransfers := func(freshInfo resolver.ConnectInfo, pending chan preparedTransfer) func(context.Context) error {
 		return func(refreshCtx context.Context) error {
 			stopInbox()
 			pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
@@ -593,33 +583,33 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				observeTransferFailure(transferLease.Close())
 				transferLease = nil
 			}
-			if freshInfo.FileTransfer == nil || d.peerLocal == nil {
-				return nil
-			}
-			freshTransfer, freshLease, err := nativeFileTransferClient(refreshCtx, d.peerLocal, freshInfo, newIdempotencyKey())
-			defer func() {
-				if freshLease != nil {
-					observeTransferFailure(freshLease.Close())
+			var prepared preparedTransfer
+			if pending == nil {
+				prepared = prepareTransfer(refreshCtx, freshInfo)
+			} else {
+				select {
+				case prepared = <-pending:
+				case <-refreshCtx.Done():
+					dropTransfer(pending)
+					return refreshCtx.Err()
 				}
-			}()
-			if err != nil {
-				return err
 			}
-			if freshTransfer == nil {
-				return nil
+			if prepared.err == nil {
+				prepared.err = refreshCtx.Err()
 			}
-			if err := freshTransfer.VerifyPolicy(refreshCtx, descriptorFileTransferPolicy(freshInfo.FileTransfer)); err != nil {
-				return err
+			if prepared.err != nil || prepared.client == nil {
+				if prepared.lease != nil {
+					observeTransferFailure(prepared.lease.Close())
+				}
+				return prepared.err
 			}
-			if err := refreshCtx.Err(); err != nil {
-				return err
-			}
-			transferLease, freshLease = freshLease, nil
-			pastePolicy.Update(freshTransfer, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
-			startInbox(freshTransfer.Client, freshInfo.Terminal.SessionID)
+			transferLease = prepared.lease
+			pastePolicy.Update(prepared.client, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+			startInbox(prepared.client.Client, freshInfo.Terminal.SessionID)
 			return nil
 		}
 	}
+	transferRefresh.start(ctx, refreshTransfers(info, pendingTransfer), observeTransferFailure)
 	linked := func(freshConn tunnel.Conn) {
 		// The old link may still deliver while this one attaches; replayed output it already showed is dropped.
 		if link, ok := freshConn.(interface{ SkipDelivered(func() int) }); ok {
@@ -669,7 +659,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 						if err != nil {
 							return err
 						}
-						return refreshTransfers(freshInfo)(refreshCtx)
+						return refreshTransfers(freshInfo, nil)(refreshCtx)
 					}, observeTransferFailure)
 					return resumed, nil
 				}
@@ -696,7 +686,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		// Terminal output is ready now. Transfer authorization and inbox setup have their own cancellable owner and
 		// cannot hold this attachment back.
 		pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
-		transferRefresh.start(ctx, refreshTransfers(freshInfo), observeTransferFailure)
+		transferRefresh.start(ctx, refreshTransfers(freshInfo, nil), observeTransferFailure)
 		return freshConn, nil
 	}, d.telemetry, nil, tunnel.TelemetryContext{MachineID: info.MachineID, EnvironmentID: info.Terminal.EnvironmentID}, tunnel.WithReconnectingOutput(
 		d.cfg.Connect.TerminalOutputQueueChunks,
@@ -869,6 +859,13 @@ func applyMachineTransportPath(snapshot localapi.Snapshot, machineID string, bar
 			return
 		}
 	}
+}
+
+// preparedTransfer is one attempt to make file transfer ready for a terminal.
+type preparedTransfer struct {
+	client *filetransfer.NativeClient
+	lease  *localapi.FileTransferLease
+	err    error
 }
 
 func initializeTerminalDisplay(conn tunnel.Conn, target *resolver.TerminalTarget, rows, cols uint16) error {
