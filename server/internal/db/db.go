@@ -99,7 +99,7 @@ func Open(cfg config.Database) (*DB, error) {
 	// Migrations (index builds, table rewrites) run longer than any request; their pool has no time bounds, so the
 	// timeouts that the role defaults or startup parameters set are cleared on every migration connection.
 	migrationConfig := directConfig.Copy()
-	migrationConfig.MaxConns = 2
+	migrationConfig.MaxConns = migrationConns
 	migrationConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		_, err := conn.Exec(ctx, `SET statement_timeout = 0; SET lock_timeout = 0; SET idle_in_transaction_session_timeout = 0`)
 		return err
@@ -107,7 +107,6 @@ func Open(cfg config.Database) (*DB, error) {
 	// shortcut: a failed lookup keeps the configured sizes (behind a proxy that hides the server's limit); upgrade to a hard error if prod ever sits behind one.
 	if usable, err := usableConnections(directConfig.ConnConfig); err == nil {
 		poolConfig.MaxConns, directConfig.MaxConns = fitPoolSizes(poolConfig.MaxConns, directConfig.MaxConns, usable)
-		migrationConfig.MaxConns = min(migrationConfig.MaxConns, directConfig.MaxConns)
 	}
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
@@ -141,7 +140,8 @@ func Open(cfg config.Database) (*DB, error) {
 // draining (deploy/rollout-server.py refuses a forward deploy at two) and a rollback's candidate, which never waits.
 const RolloutInstances = 4
 
-// migrationConns is the migration pool's size (it opens only at start, but counts against the limit while it does).
+// migrationConns is the migration pool's size: Migrate holds one connection for its lock and runs on the other, so one
+// would wait for itself forever (it opens only at start, but counts against the limit while it does).
 const migrationConns = 2
 
 // usableConnections is the server's max_connections minus the ones reserved for superusers.

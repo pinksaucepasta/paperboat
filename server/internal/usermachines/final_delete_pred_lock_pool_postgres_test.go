@@ -121,8 +121,8 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,'fixture-clien
 	if took > 10*time.Second {
 		t.Fatalf("final delete took %v, want under 10 s", took)
 	}
-	// A leak guard, not the pool size: 317-320 SIREAD locks were counted with the pool full (revoke test), so 40 x the per-transaction limit is generous.
-	if bound := int64(40 * perTx); peak.Load() > bound {
+	// A leak guard: the holder alone takes about 66 x the per-transaction limit (661 counted), the delete may add a few batches.
+	if bound := int64(75 * perTx); peak.Load() > bound {
 		t.Fatalf("%d SIREAD locks at peak, want at most %d", peak.Load(), bound)
 	}
 	var machines, sessions, retained int

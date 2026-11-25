@@ -1,20 +1,23 @@
 package usermachines
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// tinyPoolFlags make PostgreSQL's predicate-lock pool smaller than the schema (restart-only settings).
-const tinyPoolFlags = "-c max_pred_locks_per_transaction=10 -c max_connections=10 -c max_wal_senders=0 -c wal_level=minimal -c max_worker_processes=2 -c autovacuum_max_workers=2"
+// tinyPoolFlags make PostgreSQL's predicate-lock pool smaller than the schema plus 500 tables the tests add (restart-only settings).
+// db.Open sizes its pools from max_connections; 60 leaves the test the 6 request connections it needs.
+const tinyPoolFlags = "-c max_pred_locks_per_transaction=10 -c max_connections=60 -c max_wal_senders=0 -c wal_level=minimal -c max_worker_processes=2 -c autovacuum_max_workers=2"
 
 // requireSmallPredicateLockPool skips unless the server's predicate-lock target table is smaller than the number of
 // tables the holder reads, so the holder is certain to hit 53200. PostgreSQL 17 sizes that table as
 // max_pred_locks_per_transaction * (MaxBackends + max_prepared_transactions) (predicate.c NPREDICATELOCKTARGETENTS) with
 // MaxBackends = max_connections + autovacuum_max_workers + 1 + max_worker_processes + max_wal_senders + 2
-// (postinit.c InitializeMaxBackends, NUM_SPECIAL_WORKER_PROCS). Measured on postgres:17: 159 reads before 53200 with
-// tinyPoolFlags (nominal 170), 329 with only the first two flags (nominal 340). It returns max_pred_locks_per_transaction.
+// (postinit.c InitializeMaxBackends, NUM_SPECIAL_WORKER_PROCS). Measured on postgres:17: 329 reads before 53200
+// at nominal 340. It returns max_pred_locks_per_transaction.
 func requireSmallPredicateLockPool(t *testing.T, store *db.DB) int {
 	t.Helper()
 	var perTx, conns, prepared, senders, workers, autovac, tables int
@@ -24,6 +27,16 @@ func requireSmallPredicateLockPool(t *testing.T, store *db.DB) int {
  current_setting('max_worker_processes')::int, current_setting('autovacuum_max_workers')::int,
  (SELECT count(*) FROM pg_tables WHERE schemaname='paperboat')`).Scan(&perTx, &conns, &prepared, &senders, &workers, &autovac, &tables); err != nil {
 		t.Fatal(err)
+	}
+	if perTx == 10 {
+		const create = `DO $$ BEGIN FOR i IN 1..500 LOOP EXECUTE format('%s TABLE %s paperboat.predpool_fill_%%s %s', i); END LOOP; END $$`
+		if _, err := store.SQL().ExecContext(t.Context(), fmt.Sprintf(create, "CREATE", "IF NOT EXISTS", "(x int)")); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = store.SQL().ExecContext(context.Background(), fmt.Sprintf(create, "DROP", "IF EXISTS", ""))
+		})
+		tables += 500
 	}
 	const special = 2 // NUM_SPECIAL_WORKER_PROCS in PostgreSQL 17
 	capacity := perTx * (conns + autovac + 1 + workers + senders + special + prepared)

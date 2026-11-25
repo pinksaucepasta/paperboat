@@ -56,6 +56,11 @@ jobs:
       - run: make check reproducible-builds binary-size-check static-analysis vulnerability-check license-check
       # The PostgreSQL suites (revoke, final delete, retention, reconcile ...) run here, each package on its own fresh
       # database (tools/pg-test-exec.sh). `make check` above runs without a DSN, so they skip there and run once, with -race.
+      # The packaged-helper enrollment tests run a real pbh (as in test.yml).
+      - name: build pbh for the packaged-helper tests
+        run: |
+          (cd ../helper && CGO_ENABLED=0 go build -o "$RUNNER_TEMP/pbh" ./cmd/pbh)
+          echo "PBH_TEST_BINARY=$RUNNER_TEMP/pbh" >> "$GITHUB_ENV"
       - name: go test -race (PostgreSQL suites included)
         env:
           PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/lane_test?sslmode=disable&statement_timeout=600000
@@ -73,8 +78,8 @@ jobs:
           done
 
   # max_pred_locks_per_transaction is restart-only and a service container cannot take server arguments, so this job
-  # starts its own PostgreSQL with a tiny predicate-lock pool (pool = setting x (max_connections + 4 autovacuum + 8 workers
-  # + max_wal_senders), so the 281 tables the test reads only overflow it with max_wal_senders=0: 10 x 22 = 220) (prod's filled in bursts and a revoke ran out, 2026-11-19).
+  # starts its own PostgreSQL with a small predicate-lock pool (tinyPoolFlags in pred_lock_pool_helpers_postgres_test.go;
+  # prod's filled in bursts and a revoke ran out, 2026-11-19).
   server-tiny-pool:
     name: Server tiny predicate-lock pool
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
@@ -98,7 +103,7 @@ jobs:
             go.work.sum
       - run: |
           docker run -d --name pg-tiny -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=lane_test postgres:17 \
-            -c max_pred_locks_per_transaction=10 -c max_connections=10 -c max_wal_senders=0
+            -c max_pred_locks_per_transaction=10 -c max_connections=60 -c max_wal_senders=0 -c wal_level=minimal -c max_worker_processes=2 -c autovacuum_max_workers=2
           for i in $(seq 40); do docker exec pg-tiny pg_isready -U postgres -d lane_test && exit 0; sleep 2; done
           docker logs pg-tiny; exit 1
       - name: tiny predicate-lock pool test
