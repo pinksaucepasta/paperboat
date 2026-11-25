@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"sync"
 	"time"
 
@@ -19,6 +21,8 @@ const (
 	// outputFlushWait bounds how long a close or shutdown waits for its output to be persisted.
 	// Output the disk could not take in time becomes a replay gap; a close never hangs on disk.
 	outputFlushWait = 2 * time.Second
+	// outputRetryMin is the wait after a first failed write; it doubles per failure up to 32 s.
+	outputRetryMin = 250 * time.Millisecond
 )
 
 // outputWriter is the manager's one writer of terminal output to the runtime store. Output waits
@@ -53,8 +57,12 @@ func (m *Manager) startOutputPersistence(session *managedSession) {
 	}
 	_, latest, err := m.config.Store.OutputBounds(context.Background(), session.id)
 	session.persistMu.Lock()
-	session.persisting, session.persistedLatest, session.persistErr = err == nil, latest, err
+	session.persisting, session.persistedLatest, session.persistErr = true, latest, nil
+	session.persistCursorLost, session.persistFailures, session.persistRetryAt = false, 0, time.Time{}
 	session.persistMu.Unlock()
+	if err != nil {
+		m.writer().failed(session, err)
+	}
 }
 
 func (m *Manager) queueOutputPersistence(session *managedSession, _ history.Event) {
@@ -81,7 +89,7 @@ func (m *Manager) stopOutputPersistenceContext(ctx context.Context, session *man
 	persisting, failed := session.persisting, session.persistErr
 	session.persistMu.Unlock()
 	if !persisting {
-		// Stopped already, or stopped by a failed write whose cause the caller must see.
+		// Stopped already, or stopped by a permanent failure whose cause the caller must see.
 		return classifySessionFailure("lifecycle", failed)
 	}
 	wait, cancel := context.WithTimeout(ctx, outputFlushWait)
@@ -124,11 +132,16 @@ func (w *outputWriter) flush(ctx context.Context, session *managedSession) error
 		w.mu.Unlock()
 	}()
 	_, target, _ := session.history.Bounds()
+	session.persistMu.Lock()
+	failures := session.persistFailures // a close retries once past an earlier failure
+	session.persistMu.Unlock()
 	for {
 		session.persistMu.Lock()
-		done, err := session.persistedLatest >= target || !session.persisting, session.persistErr
+		persisting, err := session.persisting, session.persistErr
+		done := session.persistedLatest >= target && !session.persistCursorLost
+		failedNow := session.persistFailures > failures
 		session.persistMu.Unlock()
-		if err != nil {
+		if !persisting || failedNow {
 			return err
 		}
 		if done {
@@ -214,17 +227,16 @@ func (w *outputWriter) commit() {
 		batches = append(batches, item.batch)
 	}
 	results := w.write(pending, batches)
-	failed := false
 	for i, item := range pending {
 		item.replay.Release()
+		if results[i] != nil {
+			w.failed(item.session, results[i])
+			continue
+		}
 		item.session.persistMu.Lock()
-		if results[i] == nil {
-			item.session.persistedLatest = item.latest
-		} else {
-			// A session whose output cannot be written stops persisting with the cause, as the
-			// per-session persister did; close and shutdown report it and may retry.
-			item.session.persistErr, item.session.persisting = results[i], false
-			failed = true
+		item.session.persistedLatest = item.latest
+		if item.session.persisting { // a close that stopped waiting keeps its cause
+			item.session.persistErr, item.session.persistFailures = nil, 0
 		}
 		persisting := item.session.persisting
 		item.session.persistMu.Unlock()
@@ -232,13 +244,36 @@ func (w *outputWriter) commit() {
 			w.mark(item.session)
 		}
 	}
-	if failed && w.manager.config.Metrics != nil {
-		_ = w.manager.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
-	}
 	w.mu.Lock()
 	close(w.committed)
 	w.committed = make(chan struct{})
 	w.mu.Unlock()
+}
+
+// failed schedules the session's next write after a backoff and reports the first failure of a spell.
+// A closed store or a deleted session can never take the output: that session stops persisting.
+func (w *outputWriter) failed(session *managedSession, err error) {
+	session.persistMu.Lock()
+	session.persistErr, session.persistCursorLost = err, true
+	session.persistFailures++
+	first := session.persistFailures == 1
+	wait := outputRetryMin << min(session.persistFailures-1, 7)
+	session.persistRetryAt = time.Now().Add(wait)
+	if errors.Is(err, sql.ErrNoRows) || w.manager.config.Store.Closed() {
+		session.persisting = false
+	}
+	retry := session.persisting
+	session.persistMu.Unlock()
+	if retry {
+		time.AfterFunc(wait, func() { w.mark(session) })
+	}
+	if !first {
+		return
+	}
+	observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", err))
+	if w.manager.config.Metrics != nil {
+		_ = w.manager.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
+	}
 }
 
 // write commits every batch in one transaction. If that fails, each session's batch is retried on
@@ -252,8 +287,10 @@ func (w *outputWriter) write(pending []pendingOutput, batches []store.OutputBatc
 	if err == nil {
 		return results
 	}
-	if len(batches) == 1 {
-		results[0] = err
+	if len(batches) == 1 || store.Busy(err) { // a busy store would cost every session its own busy_timeout
+		for i := range results {
+			results[i] = err
+		}
 		return results
 	}
 	for i, batch := range batches {
@@ -266,10 +303,28 @@ func (w *outputWriter) write(pending []pendingOutput, batches []store.OutputBatc
 // the session's history ring is gone: the batch advances past it and replay reports the gap.
 func (w *outputWriter) collect(session *managedSession, budget int) (pendingOutput, bool) {
 	session.persistMu.Lock()
-	persisting, cursor := session.persisting, session.persistedLatest
+	persisting, cursor, lost := session.persisting, session.persistedLatest, session.persistCursorLost
+	waiting := session.persistFailures > 0 && time.Now().Before(session.persistRetryAt)
 	session.persistMu.Unlock()
-	if !persisting {
+	w.mu.Lock()
+	waiting = waiting && w.urgent[session] == 0
+	w.mu.Unlock()
+	if !persisting || waiting { // the retry timer of failed marks a waiting session again
 		return pendingOutput{}, false
+	}
+	if lost {
+		_, stored, err := w.manager.config.Store.OutputBounds(context.Background(), session.id)
+		if err != nil {
+			w.failed(session, err)
+			return pendingOutput{}, false
+		}
+		cursor = stored
+		session.persistMu.Lock()
+		session.persistedLatest, session.persistCursorLost = stored, false
+		if _, latest, _ := session.history.Bounds(); stored >= latest { // nothing left to write: the failed commit had landed
+			session.persistErr, session.persistFailures = nil, 0
+		}
+		session.persistMu.Unlock()
 	}
 	earliest, latest, _ := session.history.Bounds()
 	if cursor >= latest {

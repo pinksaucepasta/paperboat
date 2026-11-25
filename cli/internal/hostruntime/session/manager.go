@@ -116,17 +116,21 @@ type managedSession struct {
 	sizeGeneration   atomic.Uint64 // generation that requested asynchronous sizing
 	sizeDirty        atomic.Bool   // window state changed since the last application
 	// persisting and persistedLatest are owned by persistMu: whether the group-commit writer
-	// still persists this session's output, and how far the store holds it.
-	persisting      bool
-	persistedLatest uint64
-	persistErr      error
-	modes           terminalModeTracker
-	identification  identificationTracker
-	screen          *xterm.Terminal
-	continuation    screenContinuation
-	participants    map[string]Participant
-	recordings      *recordings.Service
-	resumes         map[string]*attachmentResume // in memory only, guarded by opMu
+	// still persists this session's output, and how far the store holds it. persistCursorLost makes the
+	// next write read that position from the store: after a failure it is unknown what was committed.
+	persisting        bool
+	persistedLatest   uint64
+	persistCursorLost bool
+	persistErr        error
+	persistFailures   int // failed writes since the last success
+	persistRetryAt    time.Time
+	modes             terminalModeTracker
+	identification    identificationTracker
+	screen            *xterm.Terminal
+	continuation      screenContinuation
+	participants      map[string]Participant
+	recordings        *recordings.Service
+	resumes           map[string]*attachmentResume // in memory only, guarded by opMu
 }
 
 // liveProcess is immutable after publication. Terminal v1 input can therefore

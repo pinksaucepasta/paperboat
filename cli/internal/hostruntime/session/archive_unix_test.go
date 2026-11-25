@@ -77,7 +77,7 @@ func TestManagerRetireRetriesPersistenceAndRestoresStoppedHistory(t *testing.T) 
 	workspace := t.TempDir()
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	var appendFailures atomic.Int32
-	var blockFlush atomic.Bool
+	var blockFlush, storeBack atomic.Bool
 	enteredFlush := make(chan struct{}, 1)
 	releaseFlush := make(chan struct{})
 	var releaseOnce sync.Once
@@ -90,7 +90,8 @@ func TestManagerRetireRetriesPersistenceAndRestoresStoppedHistory(t *testing.T) 
 			if point != "append_before_commit" {
 				return nil
 			}
-			if appendFailures.Add(1) == 1 {
+			if !storeBack.Load() { // a failed write is retried until the store recovers
+				appendFailures.Add(1)
 				return injected
 			}
 			if blockFlush.CompareAndSwap(true, false) {
@@ -153,6 +154,7 @@ func TestManagerRetireRetriesPersistenceAndRestoresStoppedHistory(t *testing.T) 
 	}
 
 	blockFlush.Store(true)
+	storeBack.Store(true)
 	retireCtx, cancelRetire := context.WithTimeout(context.Background(), time.Second)
 	retireDone := make(chan error, 1)
 	go func() { retireDone <- manager.Retire(retireCtx) }()

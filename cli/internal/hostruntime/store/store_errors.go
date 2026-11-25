@@ -111,6 +111,9 @@ func sqliteFailureCode(err error) (int, bool) {
 	return 0, false
 }
 
+// Busy reports that another connection held the database past busy_timeout.
+func Busy(err error) bool { return retryableSQLiteFailure(err) }
+
 func retryableSQLiteFailure(err error) bool {
 	code, ok := sqliteFailureCode(err)
 	return ok && (code == 5 || code == 6)

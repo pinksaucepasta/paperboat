@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store/storesqlc"
@@ -37,6 +38,7 @@ type Store struct {
 	db       *sql.DB
 	q        *storesqlc.Queries
 	hook     func(string) error
+	closed   atomic.Bool
 }
 
 type Session struct {
@@ -155,8 +157,12 @@ func sqliteURIPath(path string) string {
 	return path
 }
 
+// Closed reports that Close was called: no later write can succeed.
+func (s *Store) Closed() bool { return s.closed.Load() }
+
 func (s *Store) Close() (resultErr error) {
 	defer protectStoreError(&resultErr)
+	s.closed.Store(true)
 	if s.readOnly {
 		return s.db.Close()
 	}
