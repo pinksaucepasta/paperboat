@@ -298,8 +298,8 @@ func TestTask39TwoUserNativeInstallUpdateRemove(t *testing.T) {
 			t.Fatal("invalid prepared request")
 		}
 		requests = append(requests, request)
-		t.Setenv("SUDO_UID", strconv.Itoa(request.UID))
-		t.Cleanup(func() { // runs before t.Setenv's restore, so SUDO_UID is still this request's
+		t.Setenv("PAPERBOAT_INVOKING_UID", strconv.Itoa(request.UID))
+		t.Cleanup(func() { // runs before t.Setenv's restore, so PAPERBOAT_INVOKING_UID is still this request's
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cleanupCancel()
 			if err := Uninstall(cleanupCtx, request); err != nil {
@@ -456,7 +456,7 @@ func TestTask39TwoUserNativeInstallUpdateRemove(t *testing.T) {
 	clear(afterIdentityB)
 	bAccount, _ := user.Lookup(b.User)
 	child(bAccount, "check", &a)
-	t.Setenv("SUDO_UID", strconv.Itoa(a.UID))
+	t.Setenv("PAPERBOAT_INVOKING_UID", strconv.Itoa(a.UID))
 	if err = Uninstall(ctx, a); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestTask39NativeCleanup(t *testing.T) {
 		if json.Unmarshal(raw, &request) != nil {
 			t.Fatal("invalid task request")
 		}
-		t.Setenv("SUDO_UID", strconv.Itoa(request.UID))
+		t.Setenv("PAPERBOAT_INVOKING_UID", strconv.Itoa(request.UID))
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		hostd, updater, inspectErr := pendingInstallers(request, platformPaths(request.UID))
 		if inspectErr != nil {

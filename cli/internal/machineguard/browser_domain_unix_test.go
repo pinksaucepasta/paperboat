@@ -16,13 +16,13 @@ import (
 )
 
 func TestBrowserDomainCallerRequiresInvokingUID(t *testing.T) {
-	// The invoking user is resolved by InvokingUID; as the unprivileged test process it is this process's uid.
+	// The invoking user is resolved by InvokingUID; an inherited SUDO_UID never changes it.
 	t.Setenv("SUDO_UID", "2000")
 	self, _ := InvokingUID()
 	if err := validateBrowserDomainCaller(strconv.Itoa(self)); err != nil {
 		t.Fatal(err)
 	}
-	// Another user's uid; as root the invoking user is SUDO_UID (2000), so the foreign one is derived from it.
+	// Another user's uid.
 	for _, owner := range []string{strconv.Itoa(self + 1), "0" + strconv.Itoa(self), "-1", "foreign"} {
 		if validateBrowserDomainCaller(owner) == nil {
 			t.Fatalf("accepted owner %s", owner)
