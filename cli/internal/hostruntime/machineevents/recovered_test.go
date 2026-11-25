@@ -87,3 +87,38 @@ func TestRecoveryWakesEveryConsumer(t *testing.T) {
 		t.Fatalf("the stream came back after %d waits and the consumer was not woken", calls.Load())
 	}
 }
+
+// The server holds a wait that names the current generations for up to 55 s; the first wait after a failure must not be
+// held, or a machine whose network is back stays offline on the server meanwhile.
+func TestTheFirstWaitAfterAFailureIsNotHeld(t *testing.T) {
+	var calls, held atomic.Int32
+	wait := func(ctx context.Context, known map[machineevents.Topic]int64) (map[machineevents.Topic]int64, error) {
+		if calls.Add(1) == 2 {
+			return nil, errors.New("dial: no route")
+		}
+		if known[machineevents.TopicConfig] < 7 {
+			return map[machineevents.Topic]int64{machineevents.TopicConfig: 7}, nil
+		}
+		held.Add(1)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	hub, err := machineevents.NewWithWaiter(wait, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub.Subscribe(machineevents.TopicConfig)
+	if err := hub.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = hub.Shutdown(ctx)
+	})
+	select {
+	case <-hub.Recovered():
+	case <-time.After(10 * time.Second): // the loop's first retry is spread over 1-6 s
+		t.Fatalf("the wait that got through was held (%d held after %d waits)", held.Load(), calls.Load())
+	}
+}

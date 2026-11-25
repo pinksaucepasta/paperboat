@@ -240,6 +240,12 @@ func (h *Hub) run(ctx context.Context) {
 			}
 			continue
 		}
+		if failing {
+			// Nothing known: the server answers at once instead of holding the first wait that gets through, up to 55 s.
+			for topic := range topics {
+				topics[topic] = 0
+			}
+		}
 		moved, err := h.wait(ctx, topics)
 		if err != nil {
 			if ctx.Err() != nil {
