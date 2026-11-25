@@ -637,8 +637,11 @@ TLIST=($DEVICES)
         stayed = json.dumps(dict(json.loads(good), disabled_stayed_put=False))
         out, _ = self.run_new_check('test_update_scheduled', {'SMOKE_SCHEDULED_UPDATE': '1'}, stayed)
         self.assertRegex(out, r'update-scheduled:boxa\s+FAIL')
-        out, calls = self.run_new_check('test_update_scheduled', {}, good)
-        self.assertNotIn('update-scheduled', out)
+        out, calls = self.run_new_check('test_update_scheduled', {}, good)  # not asked: its own NOT RUN line, nothing runs, never PASS
+        self.assertRegex(out, r'update-scheduled\s+NOT RUN\s+0s\s+no older official release of the current code')
+        self.assertNotIn('update_scheduled.py', calls)
+        out, _ = self.run_new_check('test_update_scheduled', {'SMOKE_RELEASE_OLD': '2026.11.25.0', 'SMOKE_RELEASE_NEW': '2026.11.25.1'}, good)
+        self.assertRegex(out, r'update-scheduled\s+NOT RUN.*not a paired official install on SMOKE_RELEASE_OLD')  # R1 and R2 given: the fixture is what is missing
 
     def test_operator_login_completes_the_second_factor_with_the_authenticator_key(self):
         import update_floor
@@ -686,8 +689,9 @@ TLIST=($DEVICES)
             self.assertRegex(run(dict(good, floor_cleared=False)), r'update-floor\s+FAIL')
             self.assertRegex(run(dict(good, refused=['machine list'])), r'update-floor\s+FAIL')
             self.assertIn('--floor 2026.10.26.0', (run(good, {'SMOKE_STAGING_FLOOR': '2026.10.26.0'}) and log.read_text()))
-            out, _ = self.run_new_check('test_update_floor', {}, '')
-            self.assertNotIn('update-floor', out)
+            out, _ = self.run_new_check('test_update_floor', {}, '')  # no staging fixture: NOT RUN with the reason, never PASS
+            self.assertRegex(out, r'update-floor\s+NOT RUN\s+0s\s+no older official release of the current code')
+            self.assertIn('--floor 2026.11.25.1', (run(good, {'SMOKE_RELEASE_NEW': '2026.11.25.1'}) and log.read_text()))  # the floor defaults to R2
 
     def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
         # `pb config local-access show --json` carries the domain at the top level, beside local_access
