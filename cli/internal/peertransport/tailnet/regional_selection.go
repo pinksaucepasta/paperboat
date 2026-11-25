@@ -15,6 +15,8 @@ type regionalSelection struct {
 	first, last time.Time
 	samples     uint8
 	offered     string
+	lastSeen    time.Time // the last sweep that measured the selected node
+	misses      int       // sweeps in a row that did not
 }
 
 func (s *regionalSelection) current() string { return s.selected }
@@ -40,7 +42,10 @@ func validRegionalScores(scores []regionalScore) bool {
 	return true
 }
 
-func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regionalScore, string) {
+// choose picks from one sweep. mayMiss says a sweep without the selected node may be a lost probe (still listed, not
+// refused, the same peer): the node is then kept for at least two sweeps and regionalHeardWindow, like Tailscale's
+// preferred DERP (net/netcheck/netcheck.go PreferredDERPFrameTime), and choose returns no score.
+func (s *regionalSelection) choose(now time.Time, scores []regionalScore, mayMiss bool) (regionalScore, string) {
 	s.offered = ""
 	if now.IsZero() || !validRegionalScores(scores) {
 		s.clearCandidate()
@@ -62,13 +67,19 @@ func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regio
 	}
 	if active.node.NodeID == "" {
 		s.clearCandidate()
+		if s.selected != "" && mayMiss {
+			s.misses++
+			if s.misses < 2 || now.Sub(s.lastSeen) < regionalHeardWindow {
+				return regionalScore{}, "selected_node_missed"
+			}
+		}
 		s.offered = best.node.NodeID
 		if s.selected == "" {
 			return best, "initial_common_node"
 		}
 		return best, "selected_node_unreachable"
 	}
-	s.offered = active.node.NodeID
+	s.offered, s.lastSeen, s.misses = active.node.NodeID, now, 0
 	// Within its region the active node is kept while listed and healthy (moving would break the
 	// session); the server's least-loaded-first order applies only when a node is needed.
 	// Hysteresis applies to the region: the active node's region against the best region.
@@ -99,7 +110,7 @@ func (s *regionalSelection) commit(node string, now time.Time) {
 		return
 	}
 	if s.selected != node {
-		s.selected, s.selectedAt = node, now
+		s.selected, s.selectedAt, s.lastSeen, s.misses = node, now, now, 0
 		s.clearCandidate()
 	}
 }

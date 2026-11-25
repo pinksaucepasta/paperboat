@@ -42,6 +42,11 @@ const regionalParkedRecheck = 30 * time.Second
 // regionalStaleRetry is how soon recovery looks again after finding no usable relay.
 const regionalStaleRetry = time.Second
 const regionalDwell = 10 * time.Second
+
+// A selected relay that only missed a sweep is kept this long after it last answered; it is probed again with a shorter
+// timeout meanwhile, so a dead one is left at most 8 s later than at its first miss.
+const regionalHeardWindow = 8 * time.Second
+const regionalMissedProbeTimeout = 2 * time.Second
 const regionalShortlist = 4
 
 type RegionalStatus struct {
@@ -689,6 +694,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		}
 	})()
 	var selection regionalSelection
+	var seenPeer key.NodePublic // the peer the selected relay was last measured with
 	var fence deniedFence
 	cursor := 0
 	backupID := ""
@@ -821,13 +827,18 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		// A relay that refuses authorization only excludes itself: authority is
 		// denied for the generation only when every prepared relay refused.
 		var refused, prepared atomic.Int32
+		var selectedRefused atomic.Bool
+		selected, missed, probeTimeout := selection.current(), selection.misses > 0, regionalProbeTimeout
+		if missed {
+			probeTimeout = regionalMissedProbeTimeout
+		}
 		fail := func(node, stage string) { failureMu.Lock(); failures[node] = stage; failureMu.Unlock() }
 		// Two simultaneous preparations bound work while direct discovery continues
 		// independently in magicsock. There is no serial four-carrier dial chain.
 		slots := make(chan struct{}, 2)
 		var workers sync.WaitGroup
 		for _, n := range shortlist {
-			if retry := retries[n.NodeID]; retry.generation == n.NodeGeneration && retry.epoch == n.ProcessEpoch && time.Now().Before(retry.next) {
+			if retry := retries[n.NodeID]; retry.generation == n.NodeGeneration && retry.epoch == n.ProcessEpoch && time.Now().Before(retry.next) && !(missed && n.NodeID == selected) {
 				fail(n.NodeID, "retry_backoff")
 				continue
 			}
@@ -840,12 +851,13 @@ func (r *regionalRecovery) run(ctx context.Context) {
 					return
 				}
 				defer func() { <-slots }()
-				probe, stop := context.WithTimeout(ctx, regionalProbeTimeout)
+				probe, stop := context.WithTimeout(ctx, probeTimeout)
 				defer stop()
 				if probeErr := r.engine.PrepareRelay(probe, regionalID(n.NodeID)); probeErr != nil {
 					var fatal interface{ Fatal() bool }
 					if errors.As(probeErr, &fatal) && fatal.Fatal() {
 						refused.Add(1)
+						selectedRefused.CompareAndSwap(false, n.NodeID == selected)
 					}
 					fail(n.NodeID, "prepare_failed")
 					return
@@ -914,9 +926,14 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		}
 
 		now := time.Now()
-		chosen, reason := selection.choose(now, scores)
+		_, listed := position[selected]
+		chosen, reason := selection.choose(now, scores, listed && !selectedRefused.Load() && peer == seenPeer)
 		if chosen.node.NodeID == "" {
-			timer.Reset(regionalProbeDelay())
+			if selection.misses > 0 {
+				timer.Reset(backoff.Jitter(regionalStaleRetry))
+			} else {
+				timer.Reset(regionalProbeDelay())
+			}
 			continue
 		}
 		if chosen.node.NodeID != selection.current() {
@@ -975,6 +992,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			}
 			selection.commit(chosen.node.NodeID, time.Now())
 		}
+		seenPeer = peer
 		backup, redundancy := regionalBackup(chosen.node, scores)
 		backupID = backup
 		status := RegionalStatus{NodeID: selection.current(), Region: chosen.node.Region, CombinedRTT: chosen.rtt, BackupNodeID: backup, Redundancy: redundancy, Reason: reason, LocalTransport: r.engine.RelayTransport(regionalID(chosen.node.NodeID)), PeerTransport: chosen.peerTransport}
