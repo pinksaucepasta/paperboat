@@ -11,6 +11,21 @@ Until the commit that lists columns explicitly, the generated `RETURNING *` / `S
 Machines get deltas since the signed configuration delta landed (`ConfigurationDelta`). Left: check in production that "peer network configuration
 slow" builds and predicate-lock pressure on a 100+ machine account are really gone; if not, cap the build cost per account.
 
+### From the final launch batch (26 Nov): recorded, after launch
+Measured during the 22-26 Nov fix batch; none makes first use feel broken, so they wait.
+- **Team revocation** 4.8 s at 1,000 machines (119 ms at 10, 561 ms at 100); branch `fix/revoke-set`.
+- **Parallel opens group commit:** worse on a slow disk (4/20 vs 19/20 at 120 s), parked.
+- **Slow or stalled disk:** daemon syncs ~1/s at idle; cold pair on a slow disk > 100 s to first open; closing a terminal 5-9 s on a stalled disk; a new ssh session waits on its audit write.
+- **exec/ssh right after a daemon restart:** limits 5 s / 10 s; Mac peer exec once missed 5 s.
+- **Managed SSH:** a stopped sshd reaches the machine list after up to ~82 s by design (2 probes 30-35 s apart + 10 s poll); `pb ssh` itself refuses in ~2 s.
+- **Config builds:** cap per account at 4 (p99 114 -> 26 ms measured). Cached peer document up to 9 min stale for another owner's host. Team change notices 22 ms at 1,000 members.
+- **Edge with permanently refused credentials** keeps its 5 s control loop (~45 % CPU for 12 days on a stale staging edge); `edge` control loop has no backoff or exit on 401.
+- **100-session typing run** (lag fix proven at 22 sessions).
+- **Not reproduced, watch for:** `pb ssh` stalled ~115 s with the store locked (Windows not checked); 4 min "offline" after a same-version install.
+- **DNS cache for relay/edge QUIC dials** and the carrier TCP fallback (`connector/data_carrier_endpoint.go:164`).
+- **Unreliable test:** `TestForwardExecInputSwitchesConnectionsAndReplaysTheJournal` fails in a 20x run on main.
+- **Security review (week of 27 Nov):** elevated PowerShell on Windows loads modules via the user's PSModulePath; the machine guard takes its install dir from `%ProgramFiles%`. Proposed: clean the environment once where pb elevates.
+
 ## Before launch: decide
 
 ### DMCA designated agent — after launch (user 2026-11-19)
