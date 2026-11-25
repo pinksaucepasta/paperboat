@@ -9,26 +9,35 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func secureEnrollmentTokenFile(path string, info os.FileInfo) bool {
+// insecureEnrollmentTokenFile returns why the file is refused, or "".
+func insecureEnrollmentTokenFile(path string, info os.FileInfo) string {
 	if info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() == 0 || info.Size() > 512 || !windowsHasSingleLink(path) {
-		return false
+		return tokenFileShape
 	}
 	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		return false
+		return tokenFileShape
 	}
 	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
-		return false
+		return "the account running pb could not be read"
 	}
 	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil || descriptor == nil || !descriptor.IsValid() {
-		return false
+		return "its permissions could not be read"
 	}
 	owner, _, err := descriptor.Owner()
 	if err != nil || owner == nil || !owner.Equals(user.User.Sid) {
-		return false
+		return "the account running pb must own it (icacls FILE /setowner USER)"
 	}
+	if !windowsOwnerOnlyDACL(descriptor, user.User.Sid) {
+		return "only its owner and SYSTEM may have access, both full control and not inherited " +
+			"(icacls FILE /inheritance:r /grant:r USER:F SYSTEM:F, then icacls FILE /remove for every other entry)"
+	}
+	return ""
+}
+
+func windowsOwnerOnlyDACL(descriptor *windows.SECURITY_DESCRIPTOR, user *windows.SID) bool {
 	control, _, err := descriptor.Control()
 	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
 		return false
@@ -40,7 +49,7 @@ func secureEnrollmentTokenFile(path string, info os.FileInfo) bool {
 	// Both allow ACEs grant the same rights and commute. Windows may reorder
 	// them when serializing a descriptor; authorization depends on the exact
 	// principal set, masks and inheritance, never that presentation order.
-	wanted := map[string]bool{"S-1-5-18": false, user.User.Sid.String(): false}
+	wanted := map[string]bool{"S-1-5-18": false, user.String(): false}
 	if int(acl.AceCount) != len(wanted) {
 		return false
 	}

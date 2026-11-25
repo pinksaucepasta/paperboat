@@ -3,8 +3,10 @@
 package bootstrap
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,7 +33,7 @@ func TestEnrollmentTokenFileRejectsBroadPermissions(t *testing.T) {
 	if err := os.WriteFile(path, []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadEnrollmentTokenFile(path); err == nil {
-		t.Fatal("broadly readable token file was accepted")
+	if _, err := ReadEnrollmentTokenFile(path); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "chmod 600") {
+		t.Fatalf("broadly readable token file: %v", err)
 	}
 }

@@ -107,7 +107,7 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		return bootstrap.Material{}, resume, resumeErr
 	}
 	if runtimeCausesOnly(resumeErr, bootstrap.ErrResumeNotFound) && input.TokenFileErr != nil {
-		return bootstrap.Material{}, resume, runtimeFailure("enrollment token file must be an absolute regular owner-only file", input.TokenFileErr)
+		return bootstrap.Material{}, resume, runtimeFailure(input.TokenFileErr.Error(), input.TokenFileErr)
 	}
 	if resume.AuthenticatedSetup {
 		return bootstrap.Material{}, resume, bootstrap.ErrResumeBinding

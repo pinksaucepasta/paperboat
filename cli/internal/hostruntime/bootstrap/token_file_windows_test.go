@@ -3,8 +3,10 @@
 package bootstrap
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -15,6 +17,10 @@ func TestEnrollmentTokenFileWindowsProtectedACL(t *testing.T) {
 	const token = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"
 	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	// A plain new file inherits its folder's permissions: the refusal must say so, not call it "not a regular file".
+	if _, err := ReadEnrollmentTokenFile(path); err == nil || !strings.Contains(err.Error(), "icacls") || !errors.Is(err, ErrInvalid) {
+		t.Fatalf("plain file with inherited permissions: %v", err)
 	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {

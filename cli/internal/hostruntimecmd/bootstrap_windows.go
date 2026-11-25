@@ -150,7 +150,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return resumeErr
 	}
 	if runtimeCausesOnly(resumeErr, bootstrap.ErrResumeNotFound) && tokenFileErr != nil {
-		return runtimeFailure("enrollment token file must be an absolute regular non-reparse file", tokenFileErr)
+		return runtimeFailure(tokenFileErr.Error(), tokenFileErr)
 	}
 	// Reusable means the bound identity can prove a renewal, including after
 	// expiry. Reuse material is always passed through the renewing token source
