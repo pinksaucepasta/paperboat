@@ -59,3 +59,33 @@ func TestResumeSecretLivesWithItsStream(t *testing.T) {
 		t.Fatal("the secret outlived its ended stream")
 	}
 }
+
+// During a network cut the resume dial and then a grant dial fail without reaching the host. The secret is unused, so
+// the first redial after the cut still resumes (it waited 13-28 s for a grant and the host's edge attachment).
+func TestAResumeThatNeverReachedTheHostKeepsItsSecret(t *testing.T) {
+	owners := &inputOwners{entries: make(map[inputOwnerKey]inputOwnerEntry)}
+	previousOwners := terminalInputOwners
+	terminalInputOwners = owners
+	t.Cleanup(func() { terminalInputOwners = previousOwners })
+	now := time.Now()
+	secret := bytes.Repeat([]byte{7}, 32)
+	owners.adopt("owner_1", "machine_1", ownerTarget(secret), now)
+	payload := localapi.PeerTerminalPayload{InputOwner: "owner_1", SessionID: "ses_1"}
+	unsent := &resolver.TerminalTarget{SessionID: "ses_1"}
+	if !applyResume(unsent, "machine_1", payload, now) {
+		t.Fatal("no resume before the cut")
+	}
+	owners.adopt("owner_1", "machine_1", unsent, now)
+	grant := &resolver.TerminalTarget{SessionID: "ses_1", Auth: resolver.AuthTarget{Token: "fresh", ResourceID: "session_new"}}
+	owners.adopt("owner_1", "machine_1", grant, now)
+	next := &resolver.TerminalTarget{SessionID: "ses_1"}
+	if !applyResume(next, "machine_1", payload, now) || !bytes.Equal(next.ResumeSecret, secret) || next.Auth.ResourceID != "session_old" || next.InputAttachmentID != "att_1" {
+		t.Fatalf("redial after the cut = %+v", next)
+	}
+	// Once sent (the attach clears it), nobody else holds it.
+	owners.adopt("owner_1", "machine_1", next, now)
+	next.ResumeSecret = nil
+	if applyResume(&resolver.TerminalTarget{SessionID: "ses_1"}, "machine_1", payload, now) {
+		t.Fatal("a sent secret was used again")
+	}
+}

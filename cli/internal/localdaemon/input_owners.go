@@ -19,6 +19,9 @@ type inputOwnerKey struct{ owner, machineID, sessionID string }
 
 type inputOwnerEntry struct {
 	target *resolver.TerminalTarget
+	// resume is the last target that held a resume secret, while target itself has none: a redial that never reached
+	// the host (the network was down) must not cost the terminal its way back without Paperboat.
+	resume *resolver.TerminalTarget
 	seen   time.Time
 	ended  time.Time // zero while the owner's stream is open
 }
@@ -42,7 +45,12 @@ func (o *inputOwners) adopt(owner, machineID string, target *resolver.TerminalTa
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.expireLocked(now)
+	var resume *resolver.TerminalTarget
 	if previous, ok := o.entries[key]; ok {
+		resume = previous.resume
+		if len(previous.target.ResumeSecret) != 0 {
+			resume = previous.target
+		}
 		if target.InputQueue == nil {
 			target.InputQueue = previous.target.InputQueue
 		}
@@ -56,7 +64,7 @@ func (o *inputOwners) adopt(owner, machineID string, target *resolver.TerminalTa
 	if _, ok := o.entries[key]; !ok && len(o.entries) >= inputOwnerMax {
 		return
 	}
-	o.entries[key] = inputOwnerEntry{target: target, seen: now}
+	o.entries[key] = inputOwnerEntry{target: target, resume: resume, seen: now}
 }
 
 func (o *inputOwners) expireLocked(now time.Time) {
@@ -88,9 +96,16 @@ func (o *inputOwners) takeResume(owner, machineID, sessionID string, now time.Ti
 	defer o.mu.Unlock()
 	o.expireLocked(now)
 	e, found := o.entries[inputOwnerKey{owner, machineID, sessionID}]
-	if !found || len(e.target.ResumeSecret) == 0 || e.target.Auth.ResourceID == "" || e.target.InputAttachmentID == "" {
+	if !found {
 		return nil, "", "", false
 	}
-	secret, e.target.ResumeSecret = e.target.ResumeSecret, nil
-	return secret, e.target.Auth.ResourceID, e.target.InputAttachmentID, true
+	held := e.target
+	if len(held.ResumeSecret) == 0 {
+		held = e.resume
+	}
+	if held == nil || len(held.ResumeSecret) == 0 || held.Auth.ResourceID == "" || held.InputAttachmentID == "" {
+		return nil, "", "", false
+	}
+	secret, held.ResumeSecret = held.ResumeSecret, nil
+	return secret, held.Auth.ResourceID, held.InputAttachmentID, true
 }
