@@ -222,6 +222,7 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 		if time.Now().After(until) {
 			return false, context.DeadlineExceeded
 		}
+		//paperboat:allow-source-policy sleep owner=unix-pty reason=bounded-write-lock-retry
 		time.Sleep(time.Millisecond)
 	}
 	defer p.writeMu.Unlock()

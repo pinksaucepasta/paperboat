@@ -575,6 +575,7 @@ func (o *Owner) Close() error {
 	o.mu.Lock()
 	closingUntil := o.closingUntil
 	o.mu.Unlock()
+	//paperboat:allow-source-policy sleep owner=peertransport-native reason=bounded-close-packet-flush
 	time.Sleep(time.Until(closingUntil))
 	result = errors.Join(result, o.authority.Close())
 	o.workers.Wait()
