@@ -563,10 +563,8 @@ func authorizeServiceOperation(ctx context.Context, executable, operation string
 	if err != nil {
 		return err
 	}
-	// Some sudo configurations strip SUDO_UID when the target is a bundled
-	// executable. Set the caller identity after sudo's environment reset so the
-	// privileged boundary can still bind the request to the account that
-	// launched setup.
+	// The privileged step acts for this explicit caller only (InvokingUID never
+	// reads SUDO_UID); it is set after sudo's environment reset.
 	command := sudoCommand(ctx, "--", "/usr/bin/env",
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), executable, "__runtime-service", operation)
 	command.Stdin = bytes.NewReader(payload)
