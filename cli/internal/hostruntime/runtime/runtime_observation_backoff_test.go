@@ -149,3 +149,36 @@ func TestAFailedFirstObservationIsRetriedAfterTheIntervalNotTheHeartbeat(t *test
 		t.Fatalf("no second observation in 5 s after the first failed (%d sent)", transport.calls.Load())
 	}
 }
+
+type alwaysFailsObservationTransport struct{ calls atomic.Int64 }
+
+func (t *alwaysFailsObservationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	t.calls.Add(1)
+	if request.Body != nil {
+		_ = request.Body.Close()
+	}
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"unavailable"}}`)), Request: request}, nil
+}
+
+// A machine that starts while the server fails retries its first observation with the same backoff as a running one.
+func TestAMachineStartedWhileTheServerFailsBacksOff(t *testing.T) {
+	transport := &alwaysFailsObservationTransport{}
+	sender := &runtimeObservationSender{
+		endpoint: "https://observations.invalid/v1/runtime-observations", tokens: livenessObservationTokenSource{}, proofs: livenessObservationProofSource{},
+		operationID: func() (string, error) { return "op_runtime_observation_start_0001", nil }, environmentID: "env_runtime_observation_start",
+		machineID: "machine_runtime_observation_start", reporterVersion: "test", client: &http.Client{Transport: transport},
+		receiptPath: filepath.Join(t.TempDir(), "runtime", "server-heartbeat.json"), workerGeneration: 1, osBootID: "boot-runtime-observation-start",
+	}
+	service := &runtimeObservationService{sender: sender, interval: 50 * time.Millisecond, heartbeat: time.Hour, timeout: time.Second, servicesWatch: time.Hour}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2500 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = service.Shutdown(ctx)
+	// About 50, 50, 100, 200, 400, 800 ms waits: ~8 sends in 2.5 s; the interval alone would be ~50.
+	if calls := transport.calls.Load(); calls < 2 || calls > 12 {
+		t.Fatalf("%d observations in 2.5 s at a 50 ms interval while the server failed; want a retry and a backoff", calls)
+	}
+}
