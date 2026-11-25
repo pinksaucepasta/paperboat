@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
@@ -104,5 +105,55 @@ func TestResumeAttachesWithTheHeldSecretAndKeepsTheRotatedOne(t *testing.T) {
 	}
 	if !bytes.Equal(redial.ResumeSecret, second) {
 		t.Fatalf("the rotated secret was not kept: %x", redial.ResumeSecret)
+	}
+}
+
+// A resume written into a link the network dropped gets no answer; its secret is kept for the redial after the cut.
+func TestAResumeWithoutAnAnswerKeepsItsSecret(t *testing.T) {
+	asked := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{helperWebSocketSubprotocol}, CompressionMode: websocket.CompressionDisabled})
+		if err != nil {
+			return
+		}
+		defer ws.CloseNow()
+		for {
+			_, data, err := ws.Read(r.Context())
+			if err != nil {
+				return
+			}
+			frame, err := decodeHelperFrame(data)
+			if err != nil {
+				return
+			}
+			if frame.Type == "hello" {
+				writeHelperTestFrame(t, ws, helperFrame{Type: "welcome", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"version":"1.0","capabilities":["health.v1","terminal.v1"]}`)})
+			} else if frame.Type == "request" {
+				select {
+				case asked <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}))
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
+	u.Path = "/v1/runtime"
+	secret := bytes.Repeat([]byte{1}, 32)
+	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer"}, SessionID: "ses_held", Resume: true, ResumeSecret: secret, InputAttachmentID: "att_held"}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if conn, err := dialTestHelperTerminal(ctx, target); err == nil {
+		conn.Close()
+		t.Fatal("a resume nobody answered succeeded")
+	}
+	select {
+	case <-asked:
+	default:
+		t.Fatal("the resume was never sent")
+	}
+	if !bytes.Equal(target.ResumeSecret, secret) {
+		t.Fatalf("the secret is gone: %x", target.ResumeSecret)
 	}
 }
