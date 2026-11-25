@@ -20,6 +20,7 @@ import (
 	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 )
 
 type managedSSHKeyReconciler struct {
@@ -90,20 +91,29 @@ func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
 	s.cancel = cancel
 	s.done = make(chan struct{})
 	s.openKeyWatch(workerCtx)
-	go s.run(workerCtx, s.done)
+	go s.run(workerCtx, s.done, err == nil)
 	return nil
 }
+
+// firstPublishRetries are the retries, about 1, 2 and 4 s apart, of a machine whose host keys the server has never accepted:
+// nobody can pb ssh to it until then.
+const firstPublishRetries = 3
 
 // run re-reads the host keys every interval (a local read) and asks the server when they changed (C066:
 // the server must hold regenerated keys as pending for trust-host), when a key change is published
 // (machine_access), after a failure, every interval while change delivery is down, and otherwise every
 // managedSSHKeyFallback (PR-03).
-func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{}) {
+func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{}, accepted bool) {
 	defer close(done)
-	failed := false
+	failed, early := !accepted, 0
 	last := time.Now()
 	for {
-		timer := time.NewTimer(s.interval)
+		interval := s.interval
+		if !accepted && early < firstPublishRetries {
+			interval = min(interval, backoff.Retry(early+1, time.Second, 4*time.Second))
+			early++
+		}
+		timer := time.NewTimer(interval)
 		published, keysSignalled := false, false
 		select {
 		case <-ctx.Done():
@@ -132,6 +142,7 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 		last = now
 		// An unreachable authority keeps the last verified keys (reconcile); an explicit refusal
 		// removed them.
+		accepted = accepted || err == nil
 		if failed = err != nil; failed {
 			slog.Warn("managed SSH authority refresh failed", "error", err)
 		}

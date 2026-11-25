@@ -10,6 +10,8 @@ import (
 	clientapi "github.com/pinksaucepasta/paperboat/cli/internal/api"
 	clientconfig "github.com/pinksaucepasta/paperboat/cli/internal/config"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents/eventstest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -134,6 +136,30 @@ func TestManagedSSHInitialAuthorityPolicyAndLocalFailure(t *testing.T) {
 		}
 		if service.cancel != nil {
 			t.Fatal("local write/cleanup failure started retry loop")
+		}
+	}
+}
+
+// With change delivery healthy, a machine whose first publish failed asked again only at the 5 min fallback, and nobody
+// could pb ssh to it until then.
+func TestManagedSSHRetriesItsFirstPublishAtOnce(t *testing.T) {
+	_, subscriptions, _ := eventstest.Start(t, time.Hour, machineevents.TopicMachineAccess)
+	for deadline := time.Now().Add(5 * time.Second); !subscriptions[0].Healthy(); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("machine access subscription did not become healthy")
+		}
+	}
+	key := managedSSHTestPublicKey(t)
+	unavailable := &clientapi.APIError{Status: 503}
+	client := &rotatingManagedSSHClient{observeErrors: []error{unavailable, unavailable}, keys: [][]string{{key}}}
+	service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, publicKeys: []string{key}, home: managedSSHRuntimeTestHome(t), ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second, events: subscriptions[0]}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Shutdown(context.Background())
+	for deadline := time.Now().Add(10 * time.Second); !service.ready.Load(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the first publish was not retried")
 		}
 	}
 }
