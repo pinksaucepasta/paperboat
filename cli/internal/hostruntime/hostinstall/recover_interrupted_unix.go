@@ -17,8 +17,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
 
-// interruptedInstallWriterWait bounds how long recovery waits for a writer that may still be running.
-var interruptedInstallWriterWait = 3 * time.Second
+// interruptedInstallWriterWait bounds how long recovery waits for the install lock. A held lock is a live writer
+// (flock ends with its process): an installer holds it for its whole run, metadata checks for milliseconds. The
+// installer itself starts the updater, so every install's updater waited this long before READY: 3 s made each
+// pb pair 3 s slower (ptp-base-5, 2026-11-26).
+var interruptedInstallWriterWait = 500 * time.Millisecond
 
 // RecoverInterrupted undoes an install whose process died (a killed client, a lost session, a power cut). Such an
 // install leaves its journal at an early stage; every reader of that journal (the updater's readiness probe) rejects
