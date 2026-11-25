@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -699,7 +700,8 @@ func (r *regionalRecovery) run(ctx context.Context) {
 	cursor := 0
 	backupID := ""
 	retries := make(map[string]regionalRetry)
-	stale := false // the last look found no usable relay
+	refusedAt := make(map[string]uint64) // relays that refused this machine, by the grant generation they refused
+	stale := false                       // the last look found no usable relay
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -716,6 +718,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		case <-r.wake: // a new network: refused relays get a fresh try now, as Tailscale re-dials DERP on a link change
 			fence.networkChanged()
 			clear(retries)
+			selection.misses = 0 // every carrier is cold on a new network
 			r.authority.NetworkChanged()
 		}
 		// Tailscale's endpoint.heartbeat stops after sessionActiveTimeout
@@ -785,6 +788,16 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				}
 			}
 		}
+		// The engine keeps a carrier's refusal for as long as its region is published: after a newer grant, publish once
+		// without it, as the all-refused case below does for every relay.
+		open := slices.DeleteFunc(slices.Clone(nodes), func(n RegionalNode) bool {
+			at, refused := refusedAt[n.NodeID]
+			return refused && at != leaseGeneration
+		})
+		if len(open) < len(nodes) {
+			_ = r.engine.SetRelayRegions(relayRegionsSelectedFirst(open, selection.current()))
+			maps.DeleteFunc(refusedAt, func(_ string, at uint64) bool { return at != leaseGeneration })
+		}
 		if err = r.engine.SetRelayRegions(relayRegionsSelectedFirst(nodes, selection.current())); err != nil {
 			timer.Reset(regionalProbeDelay())
 			continue
@@ -827,11 +840,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		// A relay that refuses authorization only excludes itself: authority is
 		// denied for the generation only when every prepared relay refused.
 		var refused, prepared atomic.Int32
-		var selectedRefused atomic.Bool
-		selected, missed, probeTimeout := selection.current(), selection.misses > 0, regionalProbeTimeout
-		if missed {
-			probeTimeout = regionalMissedProbeTimeout
-		}
+		selected, missed := selection.current(), selection.misses > 0
 		fail := func(node, stage string) { failureMu.Lock(); failures[node] = stage; failureMu.Unlock() }
 		// Two simultaneous preparations bound work while direct discovery continues
 		// independently in magicsock. There is no serial four-carrier dial chain.
@@ -851,18 +860,27 @@ func (r *regionalRecovery) run(ctx context.Context) {
 					return
 				}
 				defer func() { <-slots }()
-				probe, stop := context.WithTimeout(ctx, probeTimeout)
+				timeout := regionalProbeTimeout
+				if missed && n.NodeID == selected {
+					timeout = regionalMissedProbeTimeout
+				}
+				probe, stop := context.WithTimeout(ctx, timeout)
 				defer stop()
 				if probeErr := r.engine.PrepareRelay(probe, regionalID(n.NodeID)); probeErr != nil {
 					var fatal interface{ Fatal() bool }
 					if errors.As(probeErr, &fatal) && fatal.Fatal() {
 						refused.Add(1)
-						selectedRefused.CompareAndSwap(false, n.NodeID == selected)
+						failureMu.Lock()
+						refusedAt[n.NodeID] = leaseGeneration
+						failureMu.Unlock()
 					}
 					fail(n.NodeID, "prepare_failed")
 					return
 				}
 				prepared.Add(1)
+				failureMu.Lock()
+				delete(refusedAt, n.NodeID)
+				failureMu.Unlock()
 				start := time.Now()
 				var peerTransport string
 				if !peer.IsZero() {
@@ -927,7 +945,8 @@ func (r *regionalRecovery) run(ctx context.Context) {
 
 		now := time.Now()
 		_, listed := position[selected]
-		chosen, reason := selection.choose(now, scores, listed && !selectedRefused.Load() && peer == seenPeer)
+		_, selectedRefused := refusedAt[selected]
+		chosen, reason := selection.choose(now, scores, listed && !selectedRefused && peer == seenPeer)
 		if chosen.node.NodeID == "" {
 			if selection.misses > 0 {
 				timer.Reset(backoff.Jitter(regionalStaleRetry))

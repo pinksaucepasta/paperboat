@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -101,5 +102,92 @@ func TestRelayClosingWithOverloadMovesTheListenerToAnotherRelayAtOnce(t *testing
 			t.Fatal("the listener did not move to the other relay within 5 s of the closing relay refusing it")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// latchedRelay refuses one region until it has been left out of a publication, as the engine keeps a carrier's refusal.
+type latchedRelay struct {
+	regionRecorder
+	latched tailcfg.DERPRegionID
+	cured   bool
+}
+
+func (e *latchedRelay) SetRelayRegions(regions []*tailcfg.DERPRegion) error {
+	_ = e.regionRecorder.SetRelayRegions(regions)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cured = e.cured || len(regions) > 0 && !slices.ContainsFunc(regions, func(r *tailcfg.DERPRegion) bool { return r.RegionID == e.latched })
+	return nil
+}
+
+func (e *latchedRelay) PrepareRelay(ctx context.Context, id tailcfg.DERPRegionID) error {
+	_ = e.regionRecorder.PrepareRelay(ctx, id)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if id == e.latched && !e.cured {
+		return fatalRefusal{}
+	}
+	return nil
+}
+
+// One relay refused this machine while another worked: the next grant must give the refused one a fresh carrier.
+func TestRelayThatRefusedAloneIsTriedAgainWithTheNextGrant(t *testing.T) {
+	a, configuration, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, configuration)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	var nodes []RegionalNode
+	a.relay.mu.Lock()
+	a.relay.grants = map[string]peernetwork.RelayGrant{}
+	for _, id := range []string{"relay_a", "relay_b"} {
+		nodes = append(nodes, RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, Region: "test", FailureDomain: "domain_" + id,
+			Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
+			State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityUsed: 1, CapacityObservedAt: now})
+		a.relay.grants[id] = peernetwork.RelayGrant{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, ExpiresAt: now + 600}
+	}
+	a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 600, Nodes: nodes}
+	engine := &latchedRelay{latched: regionalID("relay_a")}
+	r := &regionalRecovery{
+		authority: a, control: newRegionalControl(a.private, time.Now), engine: engine, wake: make(chan struct{}, 1), grantWake: make(chan struct{}, 1),
+		peerID: configuration.Peers[0].Identity.EndpointID, done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64),
+	}
+	a.relay.recovery = r
+	a.relay.mu.Unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	go r.run(ctx)
+	defer cancel()
+	prepares := func() (count int, cured bool) {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		for _, id := range engine.prepared {
+			if id == engine.latched {
+				count++
+			}
+		}
+		return count, engine.cured
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if count, cured := prepares(); cured {
+			t.Fatal("the refused relay was dropped before a newer grant")
+		} else if count > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the relay was never prepared")
+		}
+	}
+	// The sweep that was refused still runs its pair probe (5 s at most): the grant lands during it.
+	a.mu.Lock()
+	a.current.Generation++
+	a.mu.Unlock()
+	r.grantWake <- struct{}{}
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if count, cured := prepares(); cured && count > 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the refused relay was not given a fresh carrier with the next grant")
+		}
 	}
 }
