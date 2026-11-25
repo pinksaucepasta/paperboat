@@ -30,6 +30,7 @@ func TestUserStateRemovalLeavesWhatPaperboatDidNotCreate(t *testing.T) {
 		"file-index.json", "update-policy/" + h32 + h32 + ".json", "install.lock", "daemon.lock", "daemon.sock.lock", "diagnostics/events-1-00.ndjson",
 		"bugreports/bugreport-s.zip", "elevation/request-x/helper.exe", "machineguard/trusted-ca/a.pem", "paperboatd.log.1",
 		"runtime/state.db-wal", "runtime/carrier-0-bandwidth-usage.json", "runtime/.runtime-identity-renewal.lock", "runtime/authorization/carrier-0-jwks.json", "runtime/peer-network/secrets/x",
+		"runtime/workflows/tunnel-create/" + h32 + h32 + ".json.lock", "state/runtime/workflows/tunnel-create/" + h32 + h32 + ".json",
 		"state/machine-inventory.json", "state/run/local-api.sock",
 	}
 	foreign := []string{"operator.password", "config.json.bak", "notes/todo.txt", "credentials/aws.key", "credentials/profiles/mine.json", "runtime/mine.db", "state/mine.txt", "diagnostics/mine.log", "elevation/mine"}

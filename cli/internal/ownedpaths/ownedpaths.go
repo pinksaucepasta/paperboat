@@ -51,7 +51,7 @@ var hostRuntime = Tree{
 	"authorization": {"jwks.json": nil, "*-jwks.json": nil},
 	"runtime":       nil, "recordings": nil, "file-transfers": nil, "preview": nil, "private-access": nil,
 	"origin-credentials": nil, "config-sync": nil, "environment": nil, "peer-network": nil, "agent": nil,
-	"updates": nil, "session-owners": nil, "hostd": {"fence.json": nil},
+	"updates": nil, "session-owners": nil, "workflows": {"tunnel-create": nil}, "hostd": {"fence.json": nil},
 }
 
 // app is <config|state|cache|data|logs|run>/paperboat. Several of these are one directory on macOS and Windows.
