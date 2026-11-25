@@ -146,16 +146,85 @@ type machinePort struct {
 	port    int32
 }
 
-// grantedPortsTx makes ResolveTx's decision for many machine ports in one round trip: an authority without a
-// team wins, otherwise every authority must name the same team.
+// grantedPortsSQL is machine_service_authorities and ResolveTx's choice between its rows for many (machine, port)
+// pairs of one actor at once: each rule is read once per team, not once per port. It only filters a list; every
+// connection is still decided by ResolveTx. TestListMatchesResolveTxOnPostgres keeps the two equal.
+const grantedPortsSQL = `WITH pair AS (
+ SELECT DISTINCT machine,port FROM unnest($2::text[],$3::int[]) p(machine,port) WHERE port BETWEEN 1 AND 65535
+), host AS MATERIALIZED (
+ SELECT m.id,m.user_id,m.owner_team_id,m.installation_generation,m.personal_auto_enabled
+ FROM paperboat.user_machines m JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
+ WHERE m.id=ANY($2) AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+ AND m.state NOT IN ('pending','revoked','deleted') AND m.seat_state='occupied'
+ AND EXISTS(SELECT 1 FROM paperboat.users u WHERE u.id=$1 AND u.status='active')
+), team AS MATERIALIZED (
+ SELECT t.team_id,CASE WHEN t.owner_account=$1 THEN 'owner' ELSE member.role END AS role,
+  paperboat.team_member_sso_ok(t.team_id,$1) AS sso_ok,p.id AS policy_id
+ FROM paperboat.team_members member JOIN paperboat.teams t ON t.team_id=member.team_id AND t.deleted_at IS NULL
+ LEFT JOIN paperboat.workspace_policies p ON p.team_id=t.team_id AND p.allow_private_access
+ WHERE member.account_id=$1 AND member.active AND paperboat.team_paid_entitled(t.team_id)
+), bound AS MATERIALIZED (
+ SELECT h.id AS machine,team.team_id,team.policy_id FROM team
+ JOIN paperboat.team_resource_bindings b ON b.team_id=team.team_id AND b.resource_kind='machine' AND b.active
+ JOIN host h ON h.id=b.resource_id
+ WHERE team.sso_ok AND ((h.owner_team_id IS NULL AND b.owner_account=h.user_id) OR h.owner_team_id=team.team_id)
+), rule AS MATERIALIZED (
+ SELECT r.policy_id,r.target_kind,r.target_id,r.deny,r.ports
+ FROM team JOIN paperboat.workspace_policy_rules r ON r.policy_id=team.policy_id AND r.action='private_access'
+ WHERE r.subject_kind='all' OR (r.subject_kind='account' AND r.subject_id=$1)
+  OR (r.subject_kind='role' AND (r.subject_id='member' OR r.subject_id=team.role OR (r.subject_id='admin' AND team.role='owner')))
+  OR (r.subject_kind='group' AND EXISTS(SELECT 1 FROM paperboat.workspace_policy_groups g
+   WHERE g.policy_id=r.policy_id AND g.group_name=r.subject_id AND g.account_id=$1))
+), matching AS (
+ SELECT b.machine,b.team_id,r.deny,r.ports FROM bound b JOIN rule r ON r.policy_id=b.policy_id AND r.target_kind='all_machines'
+ UNION ALL
+ SELECT b.machine,b.team_id,r.deny,r.ports FROM bound b JOIN rule r ON r.policy_id=b.policy_id AND r.target_kind='machine' AND r.target_id=b.machine
+ UNION ALL
+ SELECT b.machine,b.team_id,r.deny,r.ports FROM bound b
+ JOIN paperboat.workspace_policy_tags tg ON tg.policy_id=b.policy_id AND tg.machine_id=b.machine
+ JOIN rule r ON r.policy_id=b.policy_id AND r.target_kind='tag' AND r.target_id=tg.tag
+), reach AS MATERIALIZED (
+ SELECT machine,team_id,coalesce(range_agg(ports) FILTER (WHERE NOT deny),'{}'::int4multirange)
+  -coalesce(range_agg(ports) FILTER (WHERE deny),'{}'::int4multirange) AS ports FROM matching GROUP BY 1,2
+), target AS MATERIALIZED (
+ SELECT pair.machine,pair.port,a.address FROM pair, LATERAL (VALUES ('127.0.0.1:'||pair.port),('[::1]:'||pair.port)) a(address)
+), explicit AS MATERIALIZED (
+ SELECT h.id AS machine,x.port,'lazy_policy'::text AS kind,p.id,p.account_id,p.access_mode,NULL::text AS owner_team_id
+ FROM host h JOIN paperboat.lazy_access_policies p ON p.machine_id=h.id
+ JOIN target x ON x.machine=h.id AND x.address=p.target_address
+ WHERE p.authorization_source='explicit' AND p.installation_generation=h.installation_generation AND p.deleted_at IS NULL AND p.expires_at>now()
+ UNION ALL
+ SELECT h.id,x.port,'tunnel',t.id,t.account_id,t.access_mode,t.owner_team_id
+ FROM host h JOIN paperboat.tunnels t ON t.created_by_host_id=h.id JOIN paperboat.tunnel_routes r ON r.tunnel_id=t.id
+ JOIN target x ON x.machine=h.id AND x.address=r.origin_address
+ WHERE t.account_id=h.user_id AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>now())
+ AND r.protocol='private_tcp' AND r.desired_state='active' AND r.deleted_at IS NULL
+), authority AS (
+ SELECT e.machine,e.port,NULL::text AS team_id FROM explicit e JOIN host h ON h.id=e.machine
+ WHERE h.owner_team_id IS NULL AND h.user_id=$1 AND e.account_id=h.user_id AND e.access_mode='private' AND e.owner_team_id IS NULL
+ UNION ALL
+ SELECT e.machine,e.port,b.team_id FROM explicit e JOIN host h ON h.id=e.machine
+ JOIN paperboat.team_resource_bindings b ON b.resource_kind=e.kind AND b.resource_id=e.id AND b.owner_account=h.user_id AND b.active
+ JOIN team ON team.team_id=b.team_id
+ JOIN paperboat.team_resource_grants g ON g.team_id=b.team_id AND g.account_id=$1 AND g.resource_kind=e.kind AND g.resource_id=e.id
+  AND g.active AND g.permission IN ('use','manage')
+ WHERE (e.owner_team_id IS NULL OR e.owner_team_id=b.team_id)
+  AND (e.owner_team_id=b.team_id OR (h.owner_team_id IS NULL AND e.access_mode='team') OR h.owner_team_id=b.team_id)
+ UNION ALL
+ SELECT pair.machine,pair.port,NULL FROM pair JOIN host h ON h.id=pair.machine
+ WHERE (pair.port IN (80,443) OR pair.port>=1024) AND h.owner_team_id IS NULL AND h.user_id=$1 AND h.personal_auto_enabled
+ UNION ALL
+ SELECT pair.machine,pair.port,reach.team_id FROM pair JOIN reach ON reach.machine=pair.machine AND reach.ports@>pair.port
+)
+SELECT machine,port FROM authority GROUP BY 1,2 HAVING bool_or(team_id IS NULL) OR count(DISTINCT team_id)=1`
+
+// grantedPortsTx makes ResolveTx's decision for many machine ports in one query.
 func grantedPortsTx(ctx context.Context, tx *sql.Tx, actor string, machines []string, ports []int32) (granted map[machinePort]bool, resultErr error) {
 	granted = map[machinePort]bool{}
 	if len(machines) == 0 {
 		return granted, nil
 	}
-	rows, e := tx.QueryContext(ctx, `SELECT p.machine,p.port FROM unnest($2::text[],$3::int[]) p(machine,port)
- CROSS JOIN LATERAL paperboat.machine_service_authorities($1,p.machine,p.port) a
- GROUP BY 1,2 HAVING bool_or(coalesce(a.team_id,'')='') OR count(DISTINCT a.team_id)=1`, actor, machines, ports)
+	rows, e := tx.QueryContext(ctx, grantedPortsSQL, actor, machines, ports)
 	if e != nil {
 		return nil, e
 	}
