@@ -3,12 +3,14 @@ package handover_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -22,23 +24,20 @@ const manySockets = 2000
 // runOldWithManySockets is the serving process of TestHandoverPassesTwoThousandTCPListeners: it listens on
 // manySockets ports, writes their addresses to the state directory, offers them and waits to be released.
 func runOldWithManySockets(dir string) {
-	var probes []net.Listener
 	var addresses []string
-	for range manySockets {
+	for len(addresses) < manySockets {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			panic(err)
 		}
-		probes = append(probes, l)
-		addresses = append(addresses, l.Addr().String())
-	}
-	for _, l := range probes {
+		address := l.Addr().String()
 		_ = l.Close()
-	}
-	for _, address := range addresses {
-		if _, err := handover.Listen("tcp", address); err != nil {
+		if _, err := handover.Listen("tcp", address); errors.Is(err, syscall.EADDRINUSE) {
+			continue // another process on this host took the port since the probe closed
+		} else if err != nil {
 			panic(err)
 		}
+		addresses = append(addresses, address)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "addresses"), []byte(strings.Join(addresses, "\n")), 0o600); err != nil {
 		panic(err)
@@ -63,6 +62,7 @@ func TestHandoverPassesTwoThousandTCPListeners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	old.Stderr = os.Stderr
 	if err := old.Start(); err != nil {
 		t.Fatal(err)
 	}
