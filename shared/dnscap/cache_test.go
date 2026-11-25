@@ -53,7 +53,7 @@ func TestCacheAges(t *testing.T) {
 
 func TestPrivateAddressesAndLiteralsAreNotKept(t *testing.T) {
 	reset(t)
-	for host, ip := range map[string]string{"a.test": "10.0.0.1", "b.test": "127.0.0.1", "c.test": "fe80::1", "d.test": "fd00::1", "203.0.113.1": "203.0.113.1"} {
+	for host, ip := range map[string]string{"a.test": "10.0.0.1", "b.test": "127.0.0.1", "c.test": "fe80::1", "f.test": "100.100.1.1", "d.test": "fd00::1", "203.0.113.1": "203.0.113.1"} {
 		Verified(host, tcp(ip))
 		if Cached(host).IsValid() {
 			t.Errorf("%s at %s was kept", host, ip)

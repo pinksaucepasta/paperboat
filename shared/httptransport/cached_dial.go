@@ -58,8 +58,8 @@ func verifiedDial(ctx context.Context, dial func(context.Context, string, string
 	defer cancelHandshake()
 	if err := conn.HandshakeContext(handshakeCtx); err != nil {
 		_ = raw.Close()
-		if trace := httptrace.ContextClientTrace(ctx); trace != nil && trace.TLSHandshakeDone != nil {
-			trace.TLSHandshakeDone(tls.ConnectionState{}, err) // net/http calls it itself after a handshake that worked
+		if trace := httptrace.ContextClientTrace(ctx); wait == 0 && trace != nil && trace.TLSHandshakeDone != nil {
+			trace.TLSHandshakeDone(tls.ConnectionState{}, err) // net/http calls it itself after a handshake that worked; a kept address that failed is not this request's failure
 		}
 		return nil, err
 	}

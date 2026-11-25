@@ -116,7 +116,10 @@ func Persist(body []byte, write func([]byte)) {
 	}
 }
 
+// sharedSpace is carrier-grade NAT and Tailscale's range (RFC 6598): not an address the public name answers at.
+var sharedSpace = netip.MustParsePrefix("100.64.0.0/10")
+
 func cacheable(host string, address netip.Addr) bool {
 	_, literal := netip.ParseAddr(host)
-	return host != "" && literal != nil && address.IsGlobalUnicast() && !address.IsPrivate()
+	return host != "" && literal != nil && address.IsGlobalUnicast() && !address.IsPrivate() && !sharedSpace.Contains(address)
 }
