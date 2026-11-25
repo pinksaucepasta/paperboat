@@ -280,6 +280,10 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 				}
 				if err != nil {
 					c.recordOldLink(connection, "supervise", "read_failed", err)
+					// Nothing reads this link any more: left up, its input works while its output is gone for good.
+					if marker, ok := conn.(transportFailureMarker); ok && !errors.Is(err, io.EOF) {
+						marker.MarkTransportLost(err)
+					}
 					return
 				}
 			}

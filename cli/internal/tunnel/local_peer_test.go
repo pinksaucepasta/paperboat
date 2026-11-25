@@ -1,7 +1,9 @@
 package tunnel
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -1013,5 +1015,51 @@ func TestLocalPeerWriteFailureIsALostTransportWhateverTheErrno(t *testing.T) {
 		if !errors.Is(got, ErrLocalDaemonLost) || !errors.Is(got, ErrTransportLost) || errors.Is(got, unknown) {
 			t.Fatalf("%s = %v, want a lost local daemon without the errno in the cause tree", name, got)
 		}
+	}
+}
+
+// A refused read ended the window's output for good while its input kept working: the link is lost and the window reattaches.
+func TestReconnectingConnReplacesALinkWhoseReadFails(t *testing.T) {
+	open := func(sequence uint64, text string) Conn {
+		client, daemon := net.Pipe()
+		t.Cleanup(func() { _ = client.Close(); _ = daemon.Close() })
+		go func() { _, _ = io.Copy(io.Discard, daemon) }()
+		go func() {
+			writer := &localPeerWriter{writer: daemon}
+			for _, at := range []uint64{10, sequence} {
+				payload := binary.BigEndian.AppendUint64(nil, at)
+				if writer.write(localPeerTerminalData, append(payload, text...)) != nil {
+					return
+				}
+			}
+		}()
+		connection, err := NewLocalPeerConn(client, func(int) {}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return connection
+	}
+	connection := NewObservedReconnectingConn(context.Background(), open(5, "old"), 1, time.Millisecond,
+		func(context.Context) (Conn, error) { return open(11, "new"), nil }, nil, nil, TelemetryContext{})
+	defer connection.Close()
+	got := make(chan struct{})
+	go func() {
+		var output []byte
+		buffer := make([]byte, 64)
+		for {
+			n, err := connection.Read(buffer)
+			if output = append(output, buffer[:n]...); bytes.Contains(output, []byte("new")) {
+				close(got)
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no output after the read was refused")
 	}
 }
