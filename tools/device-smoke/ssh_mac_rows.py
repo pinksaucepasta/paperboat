@@ -441,11 +441,11 @@ def audit():
     if not check_warm(row):
         return
     try:
-        mid = find_machine_id(json.loads(cl('~/.local/bin/pb machine list --json 2>/dev/null')))
+        mid = find_machine_id(json.loads(cl('~/.local/bin/pb machine list --all --json 2>/dev/null')))
     except ValueError:
         mid = None
     if not mid:
-        return report(row, 'SKIP', 'could not read the Mac machine id from `pb machine list --json` on the client')
+        return report(row, 'SKIP', 'could not read the Mac machine id from `pb machine list --all --json` on the client')
     began = time.time()
     marker = 'ssh-audit-%d' % began
     if marker not in cl('~/.local/bin/pb ssh %s -- echo %s </dev/null 2>&1' % (shlex.quote(ARGS.alias), marker)):
@@ -688,11 +688,11 @@ def offline_audit():
     if not check_warm(row):
         return
     try:
-        mid = find_machine_id(json.loads(cl('~/.local/bin/pb machine list --json 2>/dev/null')))
+        mid = find_machine_id(json.loads(cl('~/.local/bin/pb machine list --all --json 2>/dev/null')))
     except ValueError:
         mid = None
     if not mid:
-        return report(row, 'SKIP', 'could not read the target machine id from `pb machine list --json` on the client')
+        return report(row, 'SKIP', 'could not read the target machine id from `pb machine list --all --json` on the client')
     api = cl(r"""sed -n 's/.*"server_url": *"https:\/\/\([^"\/]*\).*/\1/p' ~/.config/paperboat/config.json""").strip()
     if not api:
         return report(row, 'FAIL', 'could not read the control-plane hostname from the client')

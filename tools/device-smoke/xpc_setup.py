@@ -36,7 +36,7 @@ def sign_in_controller(dev):
 
 
 def machines():
-    done = fleet.controller_pb('machine', 'list', '--json')
+    done = fleet.controller_pb('machine', 'list', '--all', '--json')
     return {m['alias']: m for m in json.loads(done.text)['machines']}
 
 

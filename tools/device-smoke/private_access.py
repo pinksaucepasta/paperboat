@@ -309,7 +309,7 @@ def probe(args):
     if args.check == 'access-machine':
         forward(binary, phase)
     elif args.check == 'private-https':
-        machines = invoke(binary, 'machine', 'list', '--json')['machines']
+        machines = invoke(binary, 'machine', 'list', '--all', '--json')['machines']
         matches = [m for m in machines if m['id'] == phase['machine_id']]
         assert len(matches) == 1 and matches[0]['network_approved']
         alias = matches[0]['alias']
@@ -329,7 +329,7 @@ def probe(args):
                 path = command_diagnostic(command, b'', result.stderr)
                 raise RuntimeError('trusted private HTTPS failed; private diagnostics: ' + str(path))
     else:
-        machines = invoke(binary, 'machine', 'list', '--json')['machines']
+        machines = invoke(binary, 'machine', 'list', '--all', '--json')['machines']
         matches = [m for m in machines if m['id'] == phase['machine_id']]
         assert len(matches) == 1 and matches[0]['network_approved'], 'private target is not approved in inventory'
         if args.check.startswith('path-'):  # pair only: the UDP block is the Windows device's firewall rule
@@ -352,7 +352,7 @@ def pair(args):
     binary, device = winhost.pb_path(), winhost.device()
     if not device:
         raise SystemExit('pair drives the Windows device (PB_SMOKE_WINDOWS_PB); smoke.sh pairs Unix machines')
-    matches = [m for m in invoke(binary, 'machine', 'list', '--json')['machines'] if args.target in (m['id'], m['alias'])]
+    matches = [m for m in invoke(binary, 'machine', 'list', '--all', '--json')['machines'] if args.target in (m['id'], m['alias'])]
     assert len(matches) == 1, 'the origin machine is not one exact machine of this account'
     marker = 'PB_PRIVATE_' + uuid.uuid4().hex
     code = "import base64;exec(base64.b64decode('%s'))" % base64.b64encode(PEER_ORIGIN.encode()).decode()

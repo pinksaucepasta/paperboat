@@ -80,7 +80,7 @@ def main():
         raise RuntimeError('account is not a plain Free account: state=%s seats=%s' % (plan['state'], plan['seats_bought']))
     if plan['allowance_bytes'] <= 0 or plan['usage_bytes'] >= plan['allowance_bytes'] or not plan['allowance_period_end']:
         raise RuntimeError('Free allowance is missing or already exhausted')
-    machines = json.loads(run('machine', 'list', '--json')[1])['machines']
+    machines = json.loads(run('machine', 'list', '--all', '--json')[1])['machines']
     me = next((m for m in machines if m['alias'] == args.target), None)
     if me is None or me['state'] != 'online' or 'terminal' not in me['permissions'] or 'exec' not in me['permissions']:
         raise RuntimeError('paired machine is not online with terminal and exec on the Free plan')

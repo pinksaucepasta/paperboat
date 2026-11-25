@@ -183,7 +183,7 @@ def main():
     parser.add_argument('--team', required=True)
     args = parser.parse_args()
     owner, accessor, team = args.owner, args.accessor, args.team
-    machine = next(m for m in pb_json(owner, 'machine', 'list')['machines'] if m['alias'] == args.owner_alias)
+    machine = next(m for m in pb_json(owner, 'machine', 'list', '--all')['machines'] if m['alias'] == args.owner_alias)
     member = pb_json(accessor, 'auth', 'status')['account']['id']
     results = {}
     mac = ssh(accessor, 'uname -s').stdout.strip() == 'Darwin'  # no setsid or timeout(1) on macOS

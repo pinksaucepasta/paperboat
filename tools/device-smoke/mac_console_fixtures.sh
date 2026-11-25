@@ -57,7 +57,7 @@ tunnel-down)
   origin_down tunnel-origin ;;
 files-up)
   stamp=$(date +%s); name=final-files-$stamp.txt; content=FINAL_FILES_$stamp
-  list=$("$PB" machine list --json) || { echo "FAIL machine list" >&2; exit 1; }
+  list=$("$PB" machine list --all --json) || { echo "FAIL machine list" >&2; exit 1; }
   self=$(mine) || { echo "FAIL no machine id (registration file)" >&2; exit 1; }
   alias=$(python3 -c 'import json,sys;print(*[m["alias"] for m in json.loads(sys.argv[1])["machines"] if m["id"]==sys.argv[2]])' "$list" "$self")
   off=$(python3 -c 'import json,sys;o=[m["id"] for m in json.loads(sys.argv[1])["machines"] if not m["online"]];print(o[0] if o else "")' "$list")

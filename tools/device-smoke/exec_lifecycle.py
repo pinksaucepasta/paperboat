@@ -139,7 +139,7 @@ def execute(binary, target):
 
 
 def readiness(binary, target):
-    catalog = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')
+    catalog = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')
     matches = [item for item in catalog['machines'] if target in (item['id'], item['alias'])]
     if len(matches) != 1:
         raise RuntimeError('readiness target is not one exact authorized machine')

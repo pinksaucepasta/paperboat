@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SMOKE_CT_DOCKER=${SMOKE_CT_DOCKER:-docker}; . "$(cd "$(dirname "$0")" && pwd)/ct_env.sh"; DOCKER=$CT_DOCKER
 X() { local ct=$1; shift; ssh -o BatchMode=yes "$HOST" "$DOCKER exec -i -u $CT_USER -w $CT_HOME -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $ct bash -lc $(printf '%q' "$*")"; }
 STAMP=$(date +%s) NAME=final-files-$STAMP.txt CONTENT=FINAL_FILES_$STAMP
-LIST=$(X "$A" '.local/bin/pb machine list --json') || { echo "FAIL files: could not list machines"; exit 1; }
+LIST=$(X "$A" '.local/bin/pb machine list --all --json') || { echo "FAIL files: could not list machines"; exit 1; }
 SELF_B=$(X "$B" "python3 -c 'import json;print(json.load(open(\".local/state/paperboat/runtime/machine-registration.json\"))[\"machine_id\"])'") || { echo "FAIL files: no machine id in $B"; exit 1; }
 PEER=$(python3 -c 'import json,sys;l=json.loads(sys.argv[1])["machines"];print(*[m["alias"] for m in l if m["id"]==sys.argv[2]])' "$LIST" "$SELF_B")
 OFFLINE=$(python3 -c 'import json,sys;l=json.loads(sys.argv[1])["machines"];o=[m["id"] for m in l if not m["online"]];print(o[0] if o else "")' "$LIST")

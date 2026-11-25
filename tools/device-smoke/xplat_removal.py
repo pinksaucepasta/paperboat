@@ -65,7 +65,7 @@ def sign_in(dev, token):
 
 
 def listed(dev):
-    value = json.loads(dev.pb('machine', 'list', '--json', timeout=120).text)
+    value = json.loads(dev.pb('machine', 'list', '--all', '--json', timeout=120).text)
     return {m['alias']: m for m in value.get('data', value)['machines']}
 
 

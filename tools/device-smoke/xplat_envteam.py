@@ -45,7 +45,7 @@ def team(owner, *args, timeout=180):
 
 
 def machine_ids(owner):
-    listed = json.loads(owner.pb('machine', 'list', '--json').text)
+    listed = json.loads(owner.pb('machine', 'list', '--all', '--json').text)
     listed = listed.get('data', listed)
     return {m['alias']: m['id'] for m in listed['machines']}
 

@@ -328,7 +328,7 @@ def main():
     if args.controller == 'windows' and winhost.device() is None:
         parser.error('the windows controller needs PB_SMOKE_WINDOWS_PB and SMOKE_WINDOWS_SSH')
     only = set(filter(None, args.only.split(',')))
-    machines = pb_json(args.controller, 'machine', 'list')['machines']
+    machines = pb_json(args.controller, 'machine', 'list', '--all')['machines']
     found = [m for m in machines if m['alias'] == args.target and m.get('network_approved')]
     assert len(found) == 1, f'target {args.target} is not one approved machine'
     machine = found[0]

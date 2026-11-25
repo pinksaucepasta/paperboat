@@ -68,7 +68,7 @@ def setup_env(devices):
 
 
 def t_inventory(devices):
-    listed = fleet.json_pb(next(iter(devices.values())), 'machine', 'list')['machines']
+    listed = fleet.json_pb(next(iter(devices.values())), 'machine', 'list', '--all')['machines']
     seen = {m['alias']: m for m in listed}
     want = {'linux': 'L', 'darwin': 'M', 'windows': 'W'}
     for key, dev in devices.items():

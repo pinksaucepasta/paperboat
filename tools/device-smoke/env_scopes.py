@@ -60,7 +60,7 @@ def own_machine_id():
 
 
 def resolve(target):
-    code, out, err = run('machine', 'list', '--json')
+    code, out, err = run('machine', 'list', '--all', '--json')
     if code:
         raise RuntimeError('machine list failed: ' + err[:120])
     for machine in json.loads(out)['machines']:
@@ -75,7 +75,7 @@ PLATFORMS = {}
 def windows(machine):
     """Whether MACHINE (alias or id) is a Windows machine: it gets PowerShell in place of printenv, sh and printf."""
     if not PLATFORMS:
-        code, out, err = run('machine', 'list', '--json')
+        code, out, err = run('machine', 'list', '--all', '--json')
         if code:
             raise RuntimeError('machine list failed: ' + err[:120])
         for listed in json.loads(out)['machines']:

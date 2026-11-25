@@ -105,7 +105,7 @@ def main():
         raise Failure('member account is not an active team member')
 
     def member_view(machine_id):
-        code, value = parse(*member_raw('--workspace', team, 'machine', 'list', '--json'))
+        code, value = parse(*member_raw('--workspace', team, 'machine', 'list', '--all', '--json'))
         if code != 0:
             # A suspended team's workspace is unavailable to its members: nothing is visible.
             if isinstance(value, dict) and value.get('error', {}).get('code') == 'workspace_unavailable':
@@ -143,7 +143,7 @@ def main():
         cleanup.pop()
         if member_view(machine) is not None:
             raise Failure('unshared machine is still visible to the member')
-        listed = owner('machine', 'list')['machines']
+        listed = owner('machine', 'list', '--all')['machines']
         if not any(m['id'] == machine and m.get('ownership') == 'personal' for m in listed):
             raise Failure('unsharing took the machine away from its owner')
 
@@ -155,7 +155,7 @@ def main():
         pending = owner('team', 'machine', 'requests', team)
         if not any(r.get('machine_id') == mm for r in (pending if isinstance(pending, list) else pending.get('requests', []))):
             raise Failure(f'a member-shared machine is not waiting for approval: {pending}')
-        if any(m['id'] == mm for m in owner('--workspace', team, 'machine', 'list')['machines']):
+        if any(m['id'] == mm for m in owner('--workspace', team, 'machine', 'list', '--all')['machines']):
             raise Failure('an unapproved machine is visible in the team')
         owner('team', 'machine', 'approve', team, mm, '--generation', generation())
         if not any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team).get('machines', [])):

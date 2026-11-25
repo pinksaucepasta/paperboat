@@ -195,7 +195,7 @@ def run_pair(team, owner, member, oid, records, origin_controller, save):
                 deadline = time.monotonic() + 30
                 while True:
                     visible = [m for m in fleet.json_pb(member, '--workspace', team.id,
-                               'machine', 'list')['machines'] if m['id'] == oid]
+                               'machine', 'list', '--all')['machines'] if m['id'] == oid]
                     if visible and {'exec', 'private_access'} <= set(visible[0]['permissions']): break
                     assert time.monotonic() < deadline, 'allowed target not visible with exec/private_access: %r' % visible
                     time.sleep(1)

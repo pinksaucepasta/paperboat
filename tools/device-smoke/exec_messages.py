@@ -33,7 +33,7 @@ def failure(code, out, err, error_code, words):
 
 
 def main():
-    machines = json.loads(run('machine', 'list', '--json')[1])['machines']
+    machines = json.loads(run('machine', 'list', '--all', '--json')[1])['machines']
     offline = next((m for m in machines if not m['online']), None)
     if offline is None:
         raise RuntimeError('the account has no offline machine to check against')

@@ -263,13 +263,13 @@ def json_pb(dev, *args, timeout=120):
 
 def machines():
     """The controller's machine list as {alias: record}."""
-    listed = json.loads(controller_pb('machine', 'list', '--json').text)
+    listed = json.loads(controller_pb('machine', 'list', '--all', '--json').text)
     listed = listed.get('data', listed)
     return {m['alias']: m for m in listed['machines']}
 
 
 def state(dev):
-    done = dev.pb('machine', 'list', '--json')
+    done = dev.pb('machine', 'list', '--all', '--json')
     return done.rc
 
 

@@ -122,7 +122,7 @@ class Team:
     def setting(self, on):
         """The team's allow_private_access, set with the owner's CLI session (private_access_permission.SETTING, as the F9 check does)."""
         import private_access_permission
-        self.setter.pb('machine', 'list', '--json')  # the access token lives minutes: any call refreshes the secret the script reads
+        self.setter.pb('machine', 'list', '--all', '--json')  # the access token lives minutes: any call refreshes the secret the script reads
         done = self.setter.run(['python3', '-c', private_access_permission.SETTING, self.id, 'on' if on else 'off'], timeout=120)
         assert done.rc == 0, 'team setting: ' + (done.text + done.errtext)[-300:]
 
@@ -137,7 +137,7 @@ def py(dev):
 
 # --- steps ------------------------------------------------------------------------------------------------------------
 def permissions(team, o, m):
-    got = [x for x in fleet.json_pb(m, '--workspace', team.id, 'machine', 'list')['machines'] if x['alias'] == o.name]
+    got = [x for x in fleet.json_pb(m, '--workspace', team.id, 'machine', 'list', '--all')['machines'] if x['alias'] == o.name]
     assert got, 'the shared machine is not in the member\'s team list'
     return set(got[0]['permissions'])
 
@@ -266,7 +266,7 @@ def t_end(team, o, m, oid):
             out.append('%s ended the open terminal in %ds' % (how, ended))
         finally:
             term.close()
-    gone = [x for x in fleet.json_pb(m, '--workspace', team.id, 'machine', 'list')['machines'] if x['alias'] == o.name]
+    gone = [x for x in fleet.json_pb(m, '--workspace', team.id, 'machine', 'list', '--all')['machines'] if x['alias'] == o.name]
     assert not gone, 'the unshared machine is still in the member\'s team list'
     return '; '.join(out)
 
@@ -443,7 +443,7 @@ def t_removal(team, o, m, oid):
         took = ended_within(term, END_SECONDS)
         assert took is not None, 'the open terminal was still open %ds after the member was removed' % (END_SECONDS + 15)
         assert took <= END_SECONDS, 'the terminal ended %ds after the removal (bound %ds)' % (took, END_SECONDS)
-        visible = [x for x in (fleet.json_pb(m, '--workspace', team.id, 'machine', 'list')['machines'] if m.pb('--workspace', team.id, 'machine', 'list', '--json').rc == 0 else [])
+        visible = [x for x in (fleet.json_pb(m, '--workspace', team.id, 'machine', 'list', '--all')['machines'] if m.pb('--workspace', team.id, 'machine', 'list', '--all', '--json').rc == 0 else [])
                    if x['alias'] == o.name]
         assert not visible, 'the machine is still listed for the member after the removal'
         return 'removing %s ended the open terminal in %ds and hid the machine (member OS %s, machine OS %s)' % ('the member' if removed == member_id else 'the machine owner', took, m.os, o.os)
@@ -471,14 +471,14 @@ def t_suspension(team, o, m, oid):
         sql(suspend)
         took = ended_within(term, END_SECONDS)
         assert took is not None and took <= END_SECONDS, 'the open terminal was %s after the suspension' % ('still open %ds' % (END_SECONDS + 15) if took is None else 'closed after %ds (bound %ds)' % (took, END_SECONDS))
-        listed = m.pb('--workspace', team.id, 'machine', 'list', '--json')
+        listed = m.pb('--workspace', team.id, 'machine', 'list', '--all', '--json')
         gone = listed.rc != 0 or not any(x['alias'] == o.name for x in json.loads(listed.text)['machines'])
         assert gone, 'the suspended team still shows the machine to the member'
         refused = team.admin.pb('team', 'machine', 'grant', team.id, oid, '--all-members', '--capability', 'files', '--generation', team.generation(), '--json')
         assert refused.rc != 0 and 'suspend' in (refused.text + refused.errtext).lower(), 'a mutation during the suspension was not refused naming the suspension: ' + (refused.text + refused.errtext)[-160:]
         sql(resume)
         for _ in range(12):
-            back = m.pb('--workspace', team.id, 'machine', 'list', '--json')
+            back = m.pb('--workspace', team.id, 'machine', 'list', '--all', '--json')
             if back.rc == 0 and any(x['alias'] == o.name for x in json.loads(back.text)['machines']):
                 break
             time.sleep(5)

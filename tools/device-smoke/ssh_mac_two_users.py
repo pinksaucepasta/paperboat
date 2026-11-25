@@ -51,7 +51,7 @@ def refused(env, alias):
 
 
 def machine_id(env, alias):
-    rc, out = m.run(env, '%s --workspace personal machine list --json' % PB, 60)
+    rc, out = m.run(env, '%s --workspace personal machine list --all --json' % PB, 60)
     data = json.loads(out[out.index('{'):])
     return next(x['id'] for x in data['machines'] if x['alias'] == alias)
 

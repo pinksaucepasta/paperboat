@@ -42,7 +42,7 @@ def main():
         return str(member('team', 'get', team, '--json')['generation'])
 
     def seen_by_owner():
-        machines = owner('--workspace', team, 'machine', 'list', '--json')['machines']
+        machines = owner('--workspace', team, 'machine', 'list', '--all', '--json')['machines']
         return next((m for m in machines if m['id'] == machine_id), None)
 
     members = member('team', 'get', team, '--json')['members']

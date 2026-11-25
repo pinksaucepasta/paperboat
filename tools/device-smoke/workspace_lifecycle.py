@@ -16,7 +16,7 @@ def main():
     enrolled = registration()
     retained = os.environ.get('PAPERBOAT_SMOKE_TEAM', '')
     team = retained or 'smoke-f2-' + uuid.uuid4().hex[:12]
-    personal = invoke(pb, '--workspace', 'personal', 'machine', 'list', '--json')
+    personal = invoke(pb, '--workspace', 'personal', 'machine', 'list', '--all', '--json')
     expected = {machine['id'] for machine in personal['machines']}
     created = False
     try:
@@ -25,13 +25,13 @@ def main():
             created = True
         invoke(pb, 'switch', team, raw=True)
         for command in ('machine', 'environments'):
-            args = ('machine', 'list', '--json') if command == 'machine' else ('environments', '--json')
+            args = ('machine', 'list', '--all', '--json') if command == 'machine' else ('environments', '--json')
             if invoke(pb, *args)['machines']:
                 raise RuntimeError(command + ' leaked personal machines into the empty team')
         if invoke(pb, 'status', '--json')['machines']:
             raise RuntimeError('local status leaked personal machines into the empty team')
         invoke(pb, 'auth', 'switch', 'personal', raw=True)
-        actual = invoke(pb, 'machine', 'list', '--json')['machines']
+        actual = invoke(pb, 'machine', 'list', '--all', '--json')['machines']
         if {machine['id'] for machine in actual} != expected:
             raise RuntimeError('auth switch did not restore personal inventory')
         if registration() != enrolled:

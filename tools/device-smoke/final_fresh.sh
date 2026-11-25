@@ -30,7 +30,7 @@ for i in $(seq 1 24); do $X final-a-$STAMP timeout 40 $CT_HOME/.local/bin/pb exe
 [ -n "$ready" ] || { echo "the fresh pair is not usable: fx-a cannot run a command on fx-b"; exit 1; }
 # the stopped machine shows offline only after the server's heartbeat timeout
 for i in $(seq 1 60); do
-  $X final-a-$STAMP $CT_HOME/.local/bin/pb machine list --json | python3 -c 'import json,sys;sys.exit(0 if any(m["alias"]=="fx-c" and not m["online"] for m in json.load(sys.stdin)["machines"]) else 1)' && exit 0
+  $X final-a-$STAMP $CT_HOME/.local/bin/pb machine list --all --json | python3 -c 'import json,sys;sys.exit(0 if any(m["alias"]=="fx-c" and not m["online"] for m in json.load(sys.stdin)["machines"]) else 1)' && exit 0
   sleep 5
 done
 echo "fx-c did not show offline within 5 minutes"; exit 1

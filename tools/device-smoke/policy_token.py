@@ -99,7 +99,7 @@ def main():
     finally:
         rc, out, err = owner('api-token', 'revoke', name, '--yes')
         step('revoke the token', rc == 0, out + err)
-    rc, out, err = holder('machine', 'list', '--json')
+    rc, out, err = holder('machine', 'list', '--all', '--json')
     step('revoking ends the token session', rc != 0, out + err)
     tag_scope(a, owner, holder, step, name + '-ci', marker)
     print('RESULT', 'PASS' if not fails else 'FAIL ' + ','.join(fails))
