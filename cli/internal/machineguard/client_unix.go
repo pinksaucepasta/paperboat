@@ -78,6 +78,9 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 	if c.conn == nil {
 		return response{}, nil, net.ErrClosed
 	}
+	if err := ctx.Err(); err != nil { // ended while it waited for the request before it: nothing was sent, the connection stays good
+		return response{}, nil, err
+	}
 	connection := c.conn
 	started := time.Now()
 	deadline := started.Add(exchangeTimeout(in.Operation))
