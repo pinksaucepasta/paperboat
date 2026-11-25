@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	"github.com/quic-go/quic-go"
@@ -36,17 +37,35 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	if tlsConf.ServerName == "" {
 		tlsConf.ServerName = host
 	}
-	remote, kept, err := resolve(ctx, host, port)
+	if kept := dnscap.Cached(host); kept.IsValid() {
+		wait := dnscap.KeptDialWait
+		if deadline, ok := ctx.Deadline(); ok {
+			wait = min(wait, time.Until(deadline)/2) // the rest is for the looked-up address
+		}
+		keptCtx, cancel := context.WithTimeout(ctx, wait)
+		defer cancel()
+		connection, err := dialRemote(keptCtx, net.UDPAddrFromAddrPort(netip.AddrPortFrom(kept, uint16(port))), tlsConf, conf, early)
+		if err == nil {
+			dnscap.Refresh(host, func(ctx context.Context) {
+				if found, err := dialName(ctx, host, port, tlsConf, conf, false); err == nil {
+					_ = found.CloseWithError(0, "")
+				}
+			})
+		}
+		if err == nil || ctx.Err() != nil {
+			return connection, err
+		}
+	}
+	return dialName(ctx, host, port, tlsConf, conf, early)
+}
+
+// dialName looks host up, dials it and keeps the address if the handshake verified it.
+func dialName(ctx context.Context, host string, port int, tlsConf *tls.Config, conf *quic.Config, early bool) (*quic.Conn, error) {
+	remote, err := resolve(ctx, host, port)
 	if err != nil {
 		return nil, err
 	}
 	connection, err := dialRemote(ctx, remote, tlsConf, conf, early)
-	if err != nil && kept.IsValid() {
-		dnscap.Expire(host, kept)
-		if again, lookupErr := route(ctx, host, port); lookupErr == nil && !again.IP.Equal(remote.IP) {
-			connection, err = dialRemote(ctx, again, tlsConf, conf, early)
-		}
-	}
 	if err == nil && tlsConf.ServerName == host && len(connection.ConnectionState().TLS.VerifiedChains) > 0 {
 		dnscap.Verified(host, connection.RemoteAddr())
 	}
@@ -88,25 +107,8 @@ var lookup = func(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return dnscap.New().LookupIPAddr(ctx, host)
 }
 
-// resolve returns the address host last verified at (kept is then set), or its route: at once while fresh, else only
-// when the lookup fails.
-func resolve(ctx context.Context, host string, port int) (remote *net.UDPAddr, kept netip.Addr, err error) {
-	kept, fresh := dnscap.Cached(host)
-	if !fresh {
-		lookupCtx, cancel := ctx, func() {}
-		if kept.IsValid() {
-			lookupCtx, cancel = context.WithTimeout(ctx, dnscap.LastGoodWait)
-		}
-		defer cancel()
-		if remote, err = route(lookupCtx, host, port); err == nil || !kept.IsValid() {
-			return remote, netip.Addr{}, err
-		}
-	}
-	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(kept, uint16(port))), kept, nil
-}
-
-// route returns the first address of host that a UDP socket can be connected to (a route exists), else the first.
-func route(ctx context.Context, host string, port int) (*net.UDPAddr, error) {
+// resolve returns the first address of host that a UDP socket can be connected to (a route exists), else the first.
+func resolve(ctx context.Context, host string, port int) (*net.UDPAddr, error) {
 	ips, err := lookup(ctx, host)
 	if err != nil {
 		return nil, err

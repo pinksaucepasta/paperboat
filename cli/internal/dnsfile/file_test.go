@@ -41,13 +41,13 @@ func TestAddressFileIsOwnerOnlyAndAForeignOneIsIgnored(t *testing.T) {
 		return file
 	}
 	Open(plant("ours.example.test", 0o600, false))
-	if _, fresh := dnscap.Cached("ours.example.test"); !fresh {
+	if !dnscap.Cached("ours.example.test").IsValid() {
 		t.Fatal("an owner-only file was not loaded")
 	}
 	Open(plant("writable.example.test", 0o666, false))
 	Open(plant("linked.example.test", 0o600, true))
 	for _, host := range []string{"writable.example.test", "linked.example.test"} {
-		if address, _ := dnscap.Cached(host); address.IsValid() {
+		if dnscap.Cached(host).IsValid() {
 			t.Fatalf("%s was loaded", host)
 		}
 	}

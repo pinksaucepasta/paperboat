@@ -1,6 +1,7 @@
 package dnscap
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/netip"
@@ -9,20 +10,22 @@ import (
 	"time"
 )
 
-// The address each fixed Paperboat host last answered TLS at (Tailscale net/dnscache: 10 minutes, then last good for
-// at most 3 s of looking up). TLS stays the authority: only an address whose handshake verified the host name is kept.
+// The address each fixed Paperboat host last answered TLS at, after a lookup (Tailscale net/dnscache). It is dialed at
+// once for a day; from 10 minutes on a dial also starts one lookup in the background. TLS stays the authority: only an
+// address whose handshake verified the host name is kept.
 const (
 	freshFor    = 10 * time.Minute
 	lastGoodFor = 24 * time.Hour
-	// LastGoodWait bounds a dial of a kept address, and a lookup while there is one to fall back to.
-	LastGoodWait = 3 * time.Second
-	maxHosts     = 32
+	retryAfter  = time.Minute // between background lookups of one host
+	maxHosts    = 32
+	// KeptDialWait bounds a dial of a kept address: a host that moved is then looked up.
+	KeptDialWait = 3 * time.Second
 )
 
 type entry struct {
-	Address  netip.Addr `json:"address"`
-	Verified time.Time  `json:"verified"`
-	failed   bool       // a dial failed since: looked up again, kept as last good
+	Address   netip.Addr `json:"address"`
+	Verified  time.Time  `json:"verified"`
+	refreshed time.Time
 }
 
 var (
@@ -32,19 +35,36 @@ var (
 	save   func([]byte)
 )
 
-// Cached is the kept address of host (invalid: none); fresh ones are used without a lookup.
-func Cached(host string) (address netip.Addr, fresh bool) {
+// Cached is the kept address of host; invalid: none.
+func Cached(host string) netip.Addr {
 	mu.Lock()
 	defer mu.Unlock()
 	e, ok := hosts[strings.ToLower(host)]
-	age := time.Since(e.Verified)
-	if !ok || age < 0 || age > lastGoodFor {
-		return netip.Addr{}, false
+	if age := time.Since(e.Verified); !ok || age < 0 || age > lastGoodFor {
+		return netip.Addr{}
 	}
-	return e.Address, age < freshFor && !e.failed
+	return e.Address
 }
 
-// Verified keeps the address a TLS handshake just verified as host. A private address (a captive portal, a company's
+// Refresh runs dial, which looks host up and calls Verified, in the background if the kept address is due for it.
+func Refresh(host string, dial func(context.Context)) {
+	host = strings.ToLower(host)
+	mu.Lock()
+	defer mu.Unlock()
+	e, ok := hosts[host]
+	if !ok || time.Since(e.Verified) < freshFor || time.Since(e.refreshed) < retryAfter {
+		return
+	}
+	e.refreshed = time.Now()
+	hosts[host] = e
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), retryAfter/2)
+		defer cancel()
+		dial(ctx)
+	}()
+}
+
+// Verified keeps the looked-up address a TLS handshake just verified as host. A private address (a captive portal, a company's
 // own network) is used but not kept.
 func Verified(host string, remote net.Addr) {
 	endpoint, err := netip.ParseAddrPort(remote.String())
@@ -54,7 +74,7 @@ func Verified(host string, remote net.Addr) {
 	}
 	mu.Lock()
 	old, known := hosts[host]
-	if !known && len(hosts) >= maxHosts || known && old.Address == address && !old.failed && time.Since(old.Verified) < time.Minute {
+	if !known && len(hosts) >= maxHosts || old.Address == address && time.Since(old.Verified) < time.Minute {
 		mu.Unlock()
 		return
 	}
@@ -68,16 +88,6 @@ func Verified(host string, remote net.Addr) {
 	mu.Unlock()
 	if err == nil && write != nil {
 		write(body) // shortcut: the last process to write wins, another's newer host is verified and written again
-	}
-}
-
-// Expire makes the next dial of host look it up, if address is still the kept one.
-func Expire(host string, address netip.Addr) {
-	mu.Lock()
-	defer mu.Unlock()
-	if e, ok := hosts[strings.ToLower(host)]; ok && e.Address == address {
-		e.failed = true
-		hosts[strings.ToLower(host)] = e
 	}
 }
 

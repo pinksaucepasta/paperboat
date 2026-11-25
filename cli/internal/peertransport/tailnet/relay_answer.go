@@ -72,7 +72,7 @@ func (a *Authority) awaitRelayAnswer(ctx context.Context) bool {
 			lookup, cancel := context.WithTimeout(ctx, time.Second)
 			ips, err := dnscap.New().LookupNetIP(lookup, "ip", n.EndpointHost)
 			cancel()
-			if kept, _ := dnscap.Cached(n.EndpointHost); err != nil && kept.IsValid() {
+			if kept := dnscap.Cached(n.EndpointHost); err != nil && kept.IsValid() {
 				ips, err = []netip.Addr{kept}, nil
 			}
 			if err == nil && len(ips) > 0 {

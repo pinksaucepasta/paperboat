@@ -132,7 +132,7 @@ func TestDialRejectsBadAddress(t *testing.T) {
 	}
 }
 
-// A kept address nobody answers at is expired, the name looked up again and the new address dialed, in one Dial.
+// A kept address nobody answers at: the name is looked up and the new address dialed, in one Dial.
 func TestDialLeavesADeadKeptAddress(t *testing.T) {
 	certificate := serverCertificate(t)
 	port := listen(t, "udp4", net.IPv4(127, 0, 0, 1), certificate)
@@ -152,7 +152,4 @@ func TestDialLeavesADeadKeptAddress(t *testing.T) {
 		t.Fatalf("lookups %d: %v", lookups, err)
 	}
 	_ = connection.CloseWithError(0, "")
-	if _, fresh := dnscap.Cached("moved.example.test"); fresh {
-		t.Fatal("the dead address is still fresh")
-	}
 }

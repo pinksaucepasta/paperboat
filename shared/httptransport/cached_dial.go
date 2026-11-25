@@ -5,44 +5,42 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http/httptrace"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 )
 
-// cachedDialTLS tries the address the host last verified at before looking its name up, and expires it when the TCP or
-// TLS dial fails. An address older than 10 minutes is tried only after 3 s of looking up (Tailscale net/dnscache).
+// cachedDialTLS dials the address the host last verified at and looks its name up only when there is none or it fails.
 func cachedDialTLS(dial func(context.Context, string, string) (net.Conn, error), config Config) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, err
 		}
-		kept, fresh := dnscap.Cached(host)
-		if kept.IsValid() {
-			if !fresh {
-				if conn, err := verifiedDial(ctx, dial, config, network, address, host, true); err == nil || ctx.Err() != nil {
-					return conn, err
-				}
-			}
-			conn, err := verifiedDial(ctx, dial, config, network, net.JoinHostPort(kept.String(), port), host, true)
+		if kept := dnscap.Cached(host); kept.IsValid() {
+			conn, err := verifiedDial(ctx, dial, config, network, net.JoinHostPort(kept.String(), port), host, dnscap.KeptDialWait)
 			if err == nil {
-				return conn, nil
+				dnscap.Refresh(host, func(ctx context.Context) {
+					if conn, err := verifiedDial(ctx, dial, config, network, address, host, 0); err == nil {
+						_ = conn.Close()
+					}
+				})
 			}
-			dnscap.Expire(host, kept)
-			if ctx.Err() != nil {
-				return nil, err
+			if err == nil || ctx.Err() != nil {
+				return conn, err
 			}
 		}
-		return verifiedDial(ctx, dial, config, network, address, host, false)
+		return verifiedDial(ctx, dial, config, network, address, host, 0)
 	}
 }
 
-func verifiedDial(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), config Config, network, address, host string, short bool) (net.Conn, error) {
+// verifiedDial dials address, limited to wait (0: none) each for TCP and TLS, and keeps where a looked-up name verified.
+func verifiedDial(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), config Config, network, address, host string, wait time.Duration) (net.Conn, error) {
 	dialCtx, handshakeWait := ctx, config.TLSHandshakeTimeout
-	if short {
-		bounded, cancel := context.WithTimeout(ctx, dnscap.LastGoodWait)
+	if wait > 0 {
+		bounded, cancel := context.WithTimeout(ctx, wait)
 		defer cancel()
-		dialCtx, handshakeWait = bounded, min(handshakeWait, dnscap.LastGoodWait)
+		dialCtx, handshakeWait = bounded, min(handshakeWait, wait)
 	}
 	raw, err := dial(dialCtx, network, address)
 	if err != nil {
@@ -65,7 +63,7 @@ func verifiedDial(ctx context.Context, dial func(context.Context, string, string
 		}
 		return nil, err
 	}
-	if len(conn.ConnectionState().VerifiedChains) > 0 && tlsConfig.ServerName == host {
+	if wait == 0 && len(conn.ConnectionState().VerifiedChains) > 0 && tlsConfig.ServerName == host {
 		dnscap.Verified(host, raw.RemoteAddr())
 	}
 	return conn, nil
