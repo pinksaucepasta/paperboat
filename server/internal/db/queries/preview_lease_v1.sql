@@ -108,8 +108,8 @@ LIMIT sqlc.arg(row_limit);
 
 -- name: CountPreviewLeasesV1 :one
 -- Every preview ListPreviewLeasesV1 can page through with the same filters.
-SELECT count(*) FROM preview_leases AS c WHERE c.id IN (SELECT paperboat.manageable_preview_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean,
-  sqlc.narg(workspace_team_id)::text, sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text, NULL, NULL, NULL));
+SELECT count(*) FROM paperboat.manageable_preview_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean,
+  sqlc.narg(workspace_team_id)::text, sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text, NULL, NULL, NULL);
 
 -- name: AdvancePreviewLeaseLifecycleV1 :one
 UPDATE preview_leases

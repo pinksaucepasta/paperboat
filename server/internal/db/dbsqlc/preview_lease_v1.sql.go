@@ -141,8 +141,8 @@ func (q *Queries) CompletePreviewLeaseCreateOperationV1(ctx context.Context, arg
 }
 
 const countPreviewLeasesV1 = `-- name: CountPreviewLeasesV1 :one
-SELECT count(*) FROM preview_leases AS c WHERE c.id IN (SELECT paperboat.manageable_preview_ids($1::text, $2::boolean,
-  $3::text, $4::text, $5::text, $6::text, $7::text, NULL, NULL, NULL))
+SELECT count(*) FROM paperboat.manageable_preview_ids($1::text, $2::boolean,
+  $3::text, $4::text, $5::text, $6::text, $7::text, NULL, NULL, NULL)
 `
 
 type CountPreviewLeasesV1Params struct {
