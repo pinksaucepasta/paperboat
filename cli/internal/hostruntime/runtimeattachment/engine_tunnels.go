@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/originhealth"
 	"io"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -127,8 +128,7 @@ type engineTunnel struct {
 	routes     []hoststate.TunnelConfigRoute
 	// publicHost is the tunnel's stable hostname, the SNI its origin probe presents for routes without one.
 	publicHost string
-	// capture is the inspector identity of each route (tunnel and route generations), so a
-	// captured request can be replayed.
+	// capture is the inspector identity of each route (its generation), so a captured request can be replayed.
 	capture map[string]tunnelmanager.CaptureIdentity
 }
 
@@ -145,10 +145,21 @@ type engineRouteKey struct {
 
 type engineRoute struct {
 	tunnel       string
-	generation   uint64
-	hash         string
+	config       engineRouteConfig
 	registration *preview.DataCarrierPreviewRegistration
 	streams      *tunnelmanager.RunningOriginStreams
+}
+
+// engineRouteConfig is all a running route is started with. A configuration change that leaves it equal (a rename) does
+// not restart the route: that cut its open connections.
+type engineRouteConfig struct {
+	route      hoststate.TunnelConfigRoute
+	restricted bool
+	capture    tunnelmanager.CaptureIdentity
+}
+
+func (t engineTunnel) routeConfig(route hoststate.TunnelConfigRoute) engineRouteConfig {
+	return engineRouteConfig{route: route, restricted: t.restricted, capture: t.capture[route.ID]}
 }
 
 // Served reports whether tunnelID is served on the engine now.
@@ -321,15 +332,14 @@ func decodeEngineTunnel(item runtimewire.EngineTunnel) (engineTunnel, error) {
 		return engineTunnel{}, err
 	}
 	tunnel := engineTunnel{generation: item.ConfigGeneration, hash: item.ConfigContentHash, restricted: parsed.AccessMode != "public", publicHost: strings.TrimPrefix(parsed.StableEndpoint, "https://"), capture: map[string]tunnelmanager.CaptureIdentity{}}
-	// Replay re-checks a fresh server decision each time; this expiry only bounds the local binding.
-	// shortcut: a route restarts on config changes only, so a tunnel generation bump alone (rename)
-	// leaves its captures unreplayable until the next config change; key restarts on it if that matters.
-	expires := time.Now().AddDate(1, 0, 0)
+	// Replay re-checks a fresh server decision each time; this expiry only bounds the local binding. It is fixed, so
+	// that decoding the same configuration again gives an equal identity.
+	expires := time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
 	if parsed.ExpiresAt != nil {
 		expires = *parsed.ExpiresAt
 	}
 	for routeID, generation := range item.RouteGenerations {
-		tunnel.capture[routeID] = tunnelmanager.CaptureIdentity{ResourceID: routeID, ResourceGeneration: item.TunnelGeneration, RouteGeneration: generation, TargetGeneration: generation, ExpiresAt: expires}
+		tunnel.capture[routeID] = tunnelmanager.CaptureIdentity{ResourceID: routeID, ResourceGeneration: generation, RouteGeneration: generation, TargetGeneration: generation, ExpiresAt: expires}
 	}
 	if parsed.DesiredState != "active" {
 		return tunnel, nil
@@ -343,7 +353,7 @@ func decodeEngineTunnel(item runtimewire.EngineTunnel) (engineTunnel, error) {
 }
 
 // reconcile serves every active route of every engine tunnel on every live hub, and stops what is
-// no longer wanted. A route whose tunnel configuration changed is restarted.
+// no longer wanted. A route whose own configuration changed is restarted.
 func (e *EngineTunnels) reconcile(ctx context.Context, hubs []*preview.DataCarrierPreviewHub) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -354,7 +364,7 @@ func (e *EngineTunnels) reconcile(ctx context.Context, hubs []*preview.DataCarri
 				key := engineRouteKey{hub: hub, route: route.ID}
 				wanted[key] = struct{}{}
 				if current := e.routes[key]; current != nil {
-					if current.generation == tunnel.generation && current.hash == tunnel.hash {
+					if reflect.DeepEqual(current.config, tunnel.routeConfig(route)) {
 						continue
 					}
 					stopEngineRoute(current)
@@ -401,7 +411,7 @@ func (e *EngineTunnels) serve(ctx context.Context, hub *preview.DataCarrierPrevi
 		_ = registration.Close()
 		return nil, err
 	}
-	return &engineRoute{tunnel: tunnelID, generation: tunnel.generation, hash: tunnel.hash, registration: registration, streams: streams}, nil
+	return &engineRoute{tunnel: tunnelID, config: tunnel.routeConfig(route), registration: registration, streams: streams}, nil
 }
 
 func stopEngineRoute(route *engineRoute) {

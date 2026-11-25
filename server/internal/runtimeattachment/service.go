@@ -810,7 +810,7 @@ func (s *Service) Tunnels(ctx context.Context, proof previewattachment.MachinePr
 	if proof.Validate() != nil || request.OperationID != proof.OperationID {
 		return nil, ErrInvalid
 	}
-	rows, err := s.DB.Pool().Query(ctx, `SELECT g.tunnel_id,g.generation,'sha256:'||encode(g.content_hash,'hex'),convert_from(g.snapshot,'UTF8'),t.generation,
+	rows, err := s.DB.Pool().Query(ctx, `SELECT g.tunnel_id,g.generation,'sha256:'||encode(g.content_hash,'hex'),convert_from(g.snapshot,'UTF8'),
  COALESCE((SELECT jsonb_object_agg(r.id,r.generation) FROM tunnel_routes r WHERE r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL),'{}'::jsonb)::text
 FROM endpoints e JOIN tunnel_config_generations g ON g.tunnel_id=e.tunnel_id AND g.activation_state='active'
 JOIN tunnels t ON t.id=e.tunnel_id AND t.account_id=$2 AND t.created_by_host_id=$1
@@ -825,11 +825,9 @@ ORDER BY g.tunnel_id`, proof.MachineID, proof.UserID)
 		var tunnel runtimewire.EngineTunnel
 		var generation int64
 		var snapshot, routeGenerations string
-		var tunnelGeneration int64
-		if err := rows.Scan(&tunnel.TunnelID, &generation, &tunnel.ConfigContentHash, &snapshot, &tunnelGeneration, &routeGenerations); err != nil {
+		if err := rows.Scan(&tunnel.TunnelID, &generation, &tunnel.ConfigContentHash, &snapshot, &routeGenerations); err != nil {
 			return nil, err
 		}
-		tunnel.TunnelGeneration = uint64(tunnelGeneration)
 		if err := json.Unmarshal([]byte(routeGenerations), &tunnel.RouteGenerations); err != nil {
 			return nil, err
 		}

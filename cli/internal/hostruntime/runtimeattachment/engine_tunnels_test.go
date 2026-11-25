@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -377,7 +378,7 @@ func TestEngineTunnelsRefuseToStartWithoutAnOriginTransport(t *testing.T) {
 }
 
 // a test VM 2026-10-26: `pb tunnel replay` answered inspector_expired on engine tunnels because their
-// captures had no replay identity. Each route now carries the tunnel and route generations the
+// captures had no replay identity. Each route now carries the route generation the
 // server's inspector credential binds.
 func TestEngineTunnelRoutesCarryTheirInspectorIdentity(t *testing.T) {
 	payload := `{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_cap","generation":2,"name":"cap","desired_state":"active","access_mode":"public","stable_endpoint":"https://brave-blue-beacon-0421.tunnel.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":"route_cap","name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"mtls_credential_reference":null,"connect_timeout_ms":1000,"idle_timeout_ms":90000,"max_concurrent_streams":16,"desired_state":"active"}]}`
@@ -385,13 +386,40 @@ func TestEngineTunnelRoutesCarryTheirInspectorIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tunnel, err := decodeEngineTunnel(runtimewire.EngineTunnel{TunnelID: "tunnel_cap", ConfigGeneration: 2, ConfigContentHash: snapshot.ContentHash, Snapshot: json.RawMessage(snapshot.Payload), TunnelGeneration: 5, RouteGenerations: map[string]uint64{"route_cap": 7}})
+	tunnel, err := decodeEngineTunnel(runtimewire.EngineTunnel{TunnelID: "tunnel_cap", ConfigGeneration: 2, ConfigContentHash: snapshot.ContentHash, Snapshot: json.RawMessage(snapshot.Payload), RouteGenerations: map[string]uint64{"route_cap": 7}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	identity := tunnel.capture["route_cap"]
-	if identity.ResourceID != "route_cap" || identity.ResourceGeneration != 5 || identity.RouteGeneration != 7 || identity.TargetGeneration != 7 || identity.ExpiresAt.IsZero() {
+	if identity.ResourceID != "route_cap" || identity.ResourceGeneration != 7 || identity.RouteGeneration != 7 || identity.TargetGeneration != 7 || identity.ExpiresAt.IsZero() {
 		t.Fatalf("route inspector identity = %+v", identity)
+	}
+	// A rename is a new configuration of the same route: restarting the route for it cut its open connections, and its
+	// captures stayed bound to the generation before it.
+	decode := func(payload string, routeGeneration uint64) engineRouteConfig {
+		t.Helper()
+		snapshot, err := hoststate.NewConfigSnapshot("tunnel_cap", 3, []byte(strings.Replace(payload, `"generation":2`, `"generation":3`, 1)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := decodeEngineTunnel(runtimewire.EngineTunnel{TunnelID: "tunnel_cap", ConfigGeneration: 3, ConfigContentHash: snapshot.ContentHash, Snapshot: json.RawMessage(snapshot.Payload), RouteGenerations: map[string]uint64{"route_cap": routeGeneration}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return next.routeConfig(next.routes[0])
+	}
+	running := tunnel.routeConfig(tunnel.routes[0])
+	if renamed := decode(strings.Replace(payload, `"name":"cap"`, `"name":"renamed"`, 1), 7); !reflect.DeepEqual(running, renamed) {
+		t.Fatalf("a rename restarts the route: %+v -> %+v", running, renamed)
+	}
+	for name, changed := range map[string]engineRouteConfig{
+		"origin":     decode(strings.Replace(payload, "127.0.0.1:3000", "127.0.0.1:3001", 1), 7),
+		"access":     decode(strings.Replace(payload, `"access_mode":"public"`, `"access_mode":"private"`, 1), 7),
+		"generation": decode(payload, 8),
+	} {
+		if reflect.DeepEqual(running, changed) {
+			t.Fatalf("a changed %s does not restart the route", name)
+		}
 	}
 }
 

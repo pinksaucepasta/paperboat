@@ -193,17 +193,18 @@ func resolveResource(ctx context.Context, tx *db.Tx, kind, id, route string, now
 		return a, ErrInvalid
 	}
 	var owner, routeID string
-	var tunnelGen, routeGen int64
+	var routeGen int64
 	var expiry time.Time
-	err := tx.QueryRow(ctx, `SELECT t.account_id,r.id,t.generation,r.generation,COALESCE(t.expires_at,$4::timestamptz+interval '100 years') FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.id=$1 AND r.id=$2 AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$3) AND r.desired_state='active' AND r.deleted_at IS NULL`, id, route, now, now).Scan(&owner, &routeID, &tunnelGen, &routeGen, &expiry)
+	err := tx.QueryRow(ctx, `SELECT t.account_id,r.id,r.generation,COALESCE(t.expires_at,$4::timestamptz+interval '100 years') FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.id=$1 AND r.id=$2 AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$3) AND r.desired_state='active' AND r.deleted_at IS NULL`, id, route, now, now).Scan(&owner, &routeID, &routeGen, &expiry)
 	if err != nil {
 		return a, mapMissing(err)
 	}
-	if tunnelGen < 1 || tunnelGen > maxGeneration || routeGen < 1 || routeGen > maxGeneration {
+	if routeGen < 1 || routeGen > maxGeneration {
 		return a, ErrNotAuthorized
 	}
 	a.kind, a.id, a.route, a.owner = kind, id, routeID, owner
-	a.resourceGeneration = uint64(tunnelGen)
+	// The route's, as a preview's: the tunnel's moves on a rename, which left every earlier capture unreplayable.
+	a.resourceGeneration = uint64(routeGen)
 	a.routeGeneration = uint64(routeGen)
 	a.targetGeneration = uint64(routeGen)
 	a.expires = expiry

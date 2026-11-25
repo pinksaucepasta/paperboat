@@ -163,6 +163,11 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A rename moves the tunnel's generation only: an open inspector and the captures before it stay valid.
+	exec(`UPDATE paperboat.tunnels SET name=name||'-renamed',generation=generation+1 WHERE id=$1`, tunnel)
+	if d, err := authorize(owner, ownerTunnel.Token, "tunnel", tunnel, route, "inspect"); err != nil || d.ResourceGeneration != 7 || d.RouteGeneration != 7 {
+		t.Fatalf("after a rename: %+v, %v", d, err)
+	}
 	if _, err := svc.ResolveBrowserCredential(ctx, owner, ownerTunnel.CredentialID); err != ErrNotAuthorized {
 		t.Fatalf("tunnel credential opened a console inspector channel: %v", err)
 	}
