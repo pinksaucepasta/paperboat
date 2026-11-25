@@ -381,20 +381,39 @@ func validAccessorAdmission(t *testing.T, now time.Time, protocol string) access
 	return a
 }
 
-func TestPrivateTCPAdmissionTakesEitherEdgeAndRejectsStaleAndClosedSource(t *testing.T) {
+// Private TCP used the first edge of the pair only, so it failed for as long as that edge was down.
+func TestPrivateTCPFailsOverToTheOtherEdgeAndRejectsStaleAndClosedSource(t *testing.T) {
 	now := time.Now().UTC()
-	valid := accessorAdmission{ResourceKind: "tunnel", Protocol: "private_tcp", RouteID: "route_tcp_01", ExpiresAt: now.Add(time.Minute)}
-	if got, err := privateTCPAdmission([]accessorAdmission{valid}, valid.RouteID, now); err != nil || got.RouteID != valid.RouteID {
-		t.Fatalf("valid admission=%+v err=%v", got, err)
-	}
+	valid := accessorAdmission{ResourceKind: "tunnel", Protocol: "private_tcp", RouteID: "route_tcp_01", EdgeNodeID: "node_primary", ExpiresAt: now.Add(time.Minute)}
 	other := valid
 	other.EdgeNodeID = "node_fallback"
-	if got, err := privateTCPAdmission([]accessorAdmission{valid, other}, valid.RouteID, now); err != nil || got.RouteID != valid.RouteID {
-		t.Fatalf("route on both edges=%+v err=%v", got, err)
-	}
 	stale := valid
-	stale.ExpiresAt = now
-	if _, err := privateTCPAdmission([]accessorAdmission{stale}, stale.RouteID, now); !errors.Is(err, privatepreviewproxy.ErrAccessForbidden) {
+	stale.RouteID, stale.ExpiresAt = "route_tcp_02", now
+	edges := privateTCPAdmissions([]accessorAdmission{valid, stale, other}, valid.RouteID, now)
+	if len(edges) != 2 || edges[0].EdgeNodeID != "node_primary" || edges[1].EdgeNodeID != "node_fallback" {
+		t.Fatalf("route on both edges=%+v", edges)
+	}
+	var tried []string
+	open := func(a accessorAdmission) (io.ReadWriteCloser, error) {
+		tried = append(tried, a.EdgeNodeID)
+		if a.EdgeNodeID == "node_primary" {
+			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable // the first edge is down
+		}
+		client, server := net.Pipe()
+		_ = server.Close()
+		return client, nil
+	}
+	stream, err := eitherEdge(context.Background(), edges, open)
+	if err != nil || len(tried) != 2 {
+		t.Fatalf("first edge down: tried=%v err=%v", tried, err)
+	}
+	_ = stream.Close()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := eitherEdge(cancelled, edges, open); err == nil || len(tried) != 3 {
+		t.Fatalf("cancelled caller tried another edge: tried=%v err=%v", tried, err)
+	}
+	if _, err := eitherEdge(context.Background(), privateTCPAdmissions([]accessorAdmission{stale}, stale.RouteID, now), open); !errors.Is(err, privatepreviewproxy.ErrAccessForbidden) {
 		t.Fatalf("stale error=%v", err)
 	}
 	source, err := newPrivateAccessSource(&privateAccessGrantClient{})

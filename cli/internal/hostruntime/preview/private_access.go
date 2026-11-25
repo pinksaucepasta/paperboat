@@ -145,6 +145,7 @@ type privateAccessRoute struct {
 	identity  connector.DataCarrierIdentity
 	token     uint64
 	accessor  *accessorAdmission
+	otherEdge *accessorAdmission // accessor's route on the other edge of the pair, tried when accessor's edge fails
 	matchType string
 }
 
@@ -285,7 +286,9 @@ func (s *PrivateAccessSource) Snapshot(ctx context.Context) ([]privatepreviewpro
 			}
 			if existing, exists := next[key]; exists {
 				if existing.accessor.RouteID == a.RouteID {
-					continue // the same route through the other edge of the pair
+					existing.otherEdge = &copy // the same route through the other edge of the pair
+					next[key] = existing
+					continue
 				}
 				return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 			}
@@ -340,33 +343,33 @@ func (s *PrivateAccessSource) OpenPrivateTCP(ctx context.Context, routeID string
 	if err != nil {
 		return nil, err
 	}
-	selected, err := privateTCPAdmission(admissions, routeID, s.now())
-	if err != nil {
-		return nil, err
-	}
-	s.mu.RLock()
-	closed = s.closed
-	s.mu.RUnlock()
-	if closed {
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
-	}
-	return s.openAccessorProtocol(ctx, "", selected, "tcp")
+	return eitherEdge(ctx, privateTCPAdmissions(admissions, routeID, s.now()), func(a accessorAdmission) (io.ReadWriteCloser, error) {
+		return s.openAccessorProtocol(ctx, "", a, "tcp")
+	})
 }
 
-func privateTCPAdmission(admissions []accessorAdmission, routeID string, now time.Time) (accessorAdmission, error) {
-	var selected *accessorAdmission
-	for i := range admissions {
-		a := &admissions[i]
-		// shortcut: the first edge of the pair wins, no failover to the other edge; add it when an edge outage shows up.
+// privateTCPAdmissions is the route's live admission on each edge of the account's pair, in the server's order.
+func privateTCPAdmissions(admissions []accessorAdmission, routeID string, now time.Time) []accessorAdmission {
+	var edges []accessorAdmission
+	for _, a := range admissions {
 		if a.RouteID == routeID && a.ResourceKind == "tunnel" && a.Protocol == "private_tcp" && a.ExpiresAt.After(now) {
-			selected = a
-			break
+			edges = append(edges, a)
 		}
 	}
-	if selected == nil {
-		return accessorAdmission{}, privatepreviewproxy.ErrAccessForbidden
+	return edges
+}
+
+// eitherEdge opens the route through the first edge that takes it: an edge that is down, restarting or refusing
+// leaves the other edge of the pair, as a browser reaches a public preview through either edge's address.
+func eitherEdge(ctx context.Context, edges []accessorAdmission, open func(accessorAdmission) (io.ReadWriteCloser, error)) (io.ReadWriteCloser, error) {
+	err := error(privatepreviewproxy.ErrAccessForbidden)
+	for _, a := range edges {
+		var stream io.ReadWriteCloser
+		if stream, err = open(a); err == nil || ctx.Err() != nil {
+			return stream, err
+		}
 	}
-	return *selected, nil
+	return nil, err
 }
 
 func (s *PrivateAccessSource) Open(ctx context.Context, host string) (io.ReadWriteCloser, error) {
@@ -402,7 +405,11 @@ func (s *PrivateAccessSource) Open(ctx context.Context, host string) (io.ReadWri
 		}
 	}
 	if entry.accessor != nil {
-		return s.openAccessor(ctx, normalized, *entry.accessor)
+		edges := []accessorAdmission{*entry.accessor}
+		if entry.otherEdge != nil {
+			edges = append(edges, *entry.otherEdge)
+		}
+		return eitherEdge(ctx, edges, func(a accessorAdmission) (io.ReadWriteCloser, error) { return s.openAccessor(ctx, normalized, a) })
 	}
 	identifier, err := newPrivateAccessIdentifier()
 	if err != nil {
