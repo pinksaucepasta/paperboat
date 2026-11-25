@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -40,6 +41,11 @@ func (t *failingObservationTransport) RoundTrip(request *http.Request) (*http.Re
 // met ~1,000 requests/s from 10k machines. Failures back off; a healthy server is still reported to
 // at about the interval.
 func TestRuntimeObservationBacksOffWhileTheServerFails(t *testing.T) {
+	// Fake clock: the runs compare how many observations fit in the same time, which a loaded host's own clock does not give.
+	synctest.Test(t, testRuntimeObservationBackoff)
+}
+
+func testRuntimeObservationBackoff(t *testing.T) {
 	run := func(transport http.RoundTripper) {
 		sender := &runtimeObservationSender{
 			endpoint: "https://observations.invalid/v1/runtime-observations", tokens: livenessObservationTokenSource{}, proofs: livenessObservationProofSource{},
