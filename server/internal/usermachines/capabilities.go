@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
@@ -116,6 +117,11 @@ func (s *Service) SetMachineCapabilities(ctx context.Context, userID, machineID,
 		}
 		_, err = tx.Queries().CreateUserMachineCapabilityOperation(ctx, dbsqlc.CreateUserMachineCapabilityOperationParams{UserMachineID: machineID, UserID: userID, IdempotencyKey: idempotencyKey, RequestHash: hash[:], ExpectedVersion: expectedVersion, ResultingVersion: expectedVersion + 1, ConfiguredCapabilities: names, Result: encoded})
 		if err != nil {
+			return err
+		}
+		// The policy travels in the response to the machine's next observation; this topic makes it send one now
+		// instead of at its 4 min heartbeat.
+		if err := machineevents.Publish(ctx, tx, []string{machineID}, machineevents.TopicConfig); err != nil {
 			return err
 		}
 		if s.audit == nil {

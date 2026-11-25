@@ -70,9 +70,24 @@ func TestMachineCapabilityApplicationMatchesDesiredPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := MachineCapabilitySelection{ManagedSSH: true}
+	configTopic := func() (generation int64) {
+		t.Helper()
+		if err := f.store.Pool().QueryRow(f.ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='config'`, f.machine).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		return generation
+	}
+	topicBefore := configTopic()
 	policy, err := f.service.SetMachineCapabilities(f.ctx, f.account, f.machine, "capability-observation-"+f.suffix, desired, initial.DesiredVersion)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Without this wake the machine learned the new policy only at its next heartbeat, up to 4 minutes later.
+	if moves := configTopic() - topicBefore; moves != 1 {
+		t.Fatalf("setting the capabilities moved the machine's config topic %d times, want 1", moves)
+	}
+	if _, err := f.service.SetMachineCapabilities(f.ctx, f.account, f.machine, "capability-observation-"+f.suffix, desired, initial.DesiredVersion); err != nil || configTopic()-topicBefore != 1 {
+		t.Fatalf("a replayed request woke the machine again: %v", err)
 	}
 	observed := MachineCapabilitiesObservation{Schema: MachineCapabilitiesSchemaV1, Version: policy.DesiredVersion, Applied: initial.Desired, Status: "applied", ObservedAt: time.Now().UTC()}
 	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID, observed); !errors.Is(err, ErrCapabilitiesObservationStale) {
