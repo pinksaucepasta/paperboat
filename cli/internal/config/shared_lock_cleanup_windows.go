@@ -25,3 +25,7 @@ func removeSharedLock(path string) error {
 func sharedLockRemovalRetryable(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_ACCESS_DENIED)
 }
+
+// sharedLockBeingRemoved: creating a directory whose removal another process's open handle delays is refused with
+// access denied until that handle closes. A refusal that lasts is a real one.
+func sharedLockBeingRemoved(err error) bool { return errors.Is(err, windows.ERROR_ACCESS_DENIED) }

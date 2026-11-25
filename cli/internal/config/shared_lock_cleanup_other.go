@@ -5,3 +5,5 @@ package config
 import "os"
 
 func removeSharedLock(path string) error { return os.RemoveAll(path) }
+
+func sharedLockBeingRemoved(error) bool { return false }

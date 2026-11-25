@@ -125,6 +125,16 @@ func (l *sharedLock) Lock() error {
 			}
 			locked = true
 			return nil
+		} else if sharedLockBeingRemoved(err) {
+			if invalidSince.IsZero() {
+				invalidSince = time.Now()
+			}
+			if time.Since(invalidSince) > sharedLockInspectGrace {
+				return safeConfigCause("shared credential lock could not be acquired", err)
+			}
+			//paperboat:allow-source-policy sleep owner=runtime-auth reason=bounded-cross-process-lock-poll
+			time.Sleep(25 * time.Millisecond)
+			continue
 		} else if !os.IsExist(err) {
 			return safeConfigCause("shared credential lock could not be acquired", err)
 		}
