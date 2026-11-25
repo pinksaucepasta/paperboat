@@ -24,6 +24,8 @@ func TestTeardownDiagnosticsDoesNotOpenRemovedStorage(t *testing.T) {
 		{"--config", "private-config", "reset", "--json"},
 		{"__runtime-service", "purge"},
 		{"__runtime-service", "purge", "--preserve-cli"},
+		// The root host service's unit: HOME is root's, where its segment outlived every uninstall.
+		{"daemon", "__runtime-host-service", "--uid", "1000", "--gid", "1000", "--listen-address", "127.0.0.1:1"},
 	} {
 		t.Run(args[0]+args[1], func(t *testing.T) {
 			var stderr bytes.Buffer

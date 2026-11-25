@@ -73,6 +73,8 @@ func TestRemovalCommandsKeepDiagnosticsInMemory(t *testing.T) {
 		{"purge only as an argument", runtimeService, []string{"__runtime-service", "hostd", "purge"}, "linux", false},
 		{"Windows elevated helper", runtimeService, []string{"__runtime-service", "bridge", "--request", "r"}, "windows", true},
 		{"service process", runtimeService, []string{"__runtime-service", "hostd"}, "linux", false},
+		{"root host service", &cobra.Command{Use: "__runtime-host-service"}, nil, "linux", true},
+		{"root host service on macOS", &cobra.Command{Use: "__runtime-host-service"}, nil, "darwin", true},
 		{"uninstall", &cobra.Command{Use: "uninstall"}, nil, "linux", true},
 		{"complete-uninstall off Windows", &cobra.Command{Use: "__complete-uninstall"}, nil, "linux", false},
 		{"complete-uninstall on Windows", &cobra.Command{Use: "__complete-uninstall"}, nil, "windows", true},

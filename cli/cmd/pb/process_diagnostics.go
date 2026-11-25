@@ -228,8 +228,8 @@ func processDiagnosticsDirectory(ctx context.Context, command *cobra.Command) (s
 	return filepath.Join(paths.StateRoot, "diagnostics"), nil
 }
 
-// diagnosticsStayInMemory names the commands that remove the diagnostics directory itself, and the Windows
-// elevated helper (the UAC bridge), whose profile may be another admin's that the user's uninstall never sees.
+// diagnosticsStayInMemory names the commands that remove the diagnostics directory itself, and those whose own
+// profile the user's uninstall never sees: the root host service, and the Windows elevated helper (the UAC bridge).
 func diagnosticsStayInMemory(command *cobra.Command, args []string, goos string) bool {
 	if command == nil {
 		return false
@@ -237,6 +237,8 @@ func diagnosticsStayInMemory(command *cobra.Command, args []string, goos string)
 	switch command.Name() {
 	case "uninstall", "reset":
 		return true
+	case "__runtime-host-service":
+		return true // root, with root's HOME from its unit: started at pairing, stopped (and still recording) by uninstall
 	case "__complete-uninstall":
 		return goos == "windows"
 	case "__runtime-service":
