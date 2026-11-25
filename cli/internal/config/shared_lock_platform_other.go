@@ -22,6 +22,7 @@ func validateSharedLockDirectory(string) error { return nil }
 func writeSharedLockOwner(path string, data []byte) (resultErr error) {
 	// Unique: a creator whose directory was taken away meanwhile must not publish the next creator's record. That left
 	// owner.json naming a live process that had already failed, and no credential was readable until it exited.
+	//paperboat:allow-source-policy atomic-replacement owner=runtime-auth reason=atomic-owner-publish
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
