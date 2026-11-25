@@ -210,8 +210,10 @@ func TestWindowsSSHServiceSetPreservesUnifiedInstallation(t *testing.T) {
 }
 
 func TestWindowsHostRuntimeFailurePreservesManagedSSHState(t *testing.T) {
-	programData := t.TempDir()
-	t.Setenv("ProgramData", programData)
+	// The real C:\ProgramData\Paperboat, created here with inherited permissions, made every later install on the host refuse.
+	previousRoot := windowsProgramDataRoot
+	windowsProgramDataRoot = filepath.Join(t.TempDir(), "Paperboat")
+	t.Cleanup(func() { windowsProgramDataRoot = previousRoot })
 	layout, err := service.WindowsUserLayout("S-1-5-21-1-2-3-4")
 	if err != nil {
 		t.Fatal(err)
