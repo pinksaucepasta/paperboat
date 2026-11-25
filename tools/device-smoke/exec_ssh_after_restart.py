@@ -84,15 +84,15 @@ DEVICE_LEGS = r'''
 $pb=$req.pb
 function Call($argv,$ms){$p=New-Object Diagnostics.Process;$p.StartInfo.FileName=$pb
 $p.StartInfo.Arguments=(($argv|ForEach-Object{if($_ -match '\s'){'"'+$_+'"'}else{$_}}) -join ' ')
-$p.StartInfo.RedirectStandardOutput=$true;$p.StartInfo.UseShellExecute=$false;$p.StartInfo.CreateNoWindow=$true
-[void]$p.Start();$o=$p.StandardOutput.ReadToEndAsync()
-if(-not $p.WaitForExit([int][math]::Max(1,$ms))){$p.Kill();return @{rc=-1;out=''}};@{rc=$p.ExitCode;out=$o.Result}}
+$p.StartInfo.RedirectStandardOutput=$true;$p.StartInfo.RedirectStandardError=$true;$p.StartInfo.UseShellExecute=$false;$p.StartInfo.CreateNoWindow=$true
+[void]$p.Start();$o=$p.StandardOutput.ReadToEndAsync();$e=$p.StandardError.ReadToEndAsync()
+if(-not $p.WaitForExit([int][math]::Max(1,$ms))){$p.Kill();return @{rc=-1;out='';err='no answer'}};@{rc=$p.ExitCode;out=$o.Result;err=$e.Result}}
 $res=foreach($l in $req.legs){$r=Call @('service','restart') 120000
 if($r.rc){throw ('pb service restart failed: '+$r.rc)}
 $w=[Diagnostics.Stopwatch]::StartNew();$ok=$false;$why='no attempt'
 $limit=[double]$l.deadline
 while(-not $ok -and $w.Elapsed.TotalSeconds -lt $limit){$r=Call (@($l.command,$l.target,'--')+@($l.argv)) (($limit-$w.Elapsed.TotalSeconds)*1000)
-$ok=($r.rc -eq 0) -and (($r.out -split "\r?\n") -contains [string]$l.expected);if(-not $ok){$why='exit '+$r.rc;Start-Sleep -Milliseconds 250}}
+$ok=($r.rc -eq 0) -and (($r.out -split "\r?\n") -contains [string]$l.expected);if(-not $ok){$why='exit '+$r.rc+': '+$r.err.Trim();Start-Sleep -Milliseconds 250}}
 [pscustomobject]@{leg=$l.label;ok=$ok;seconds=[math]::Round($w.Elapsed.TotalSeconds,1);limit=$limit;why=$why}}
 [Console]::Out.Write((ConvertTo-Json -InputObject @($res) -Compress))
 '''
