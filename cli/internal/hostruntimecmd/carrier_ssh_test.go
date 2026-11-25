@@ -99,3 +99,48 @@ func TestCarrierSSHGivesUpQuietlyWhenTheCarrierNeverPairs(t *testing.T) {
 		t.Fatalf("applied %d times to a carrier that never paired", applies)
 	}
 }
+
+// A deferred state the carrier refused or never received was reported as applied and never sent again, so SSH stayed off.
+func TestCarrierSSHRetriesADeferredStateThatFailedToApply(t *testing.T) {
+	var mu sync.Mutex
+	paired, applies, applied := false, 0, false
+	ssh := &carrierSSH{
+		read: func(context.Context) (hostinstall.CarrierConfig, error) { return hostinstall.CarrierConfig{}, nil },
+		paired: func(hostinstall.CarrierConfig) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return paired
+		},
+		apply: func(_ context.Context, _ hostinstall.CarrierConfig, enabled bool) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if applies++; applies == 1 {
+				return errors.New("carrier closed the connection")
+			}
+			applied = enabled
+			return nil
+		},
+	}
+	if err := ssh.reconcile(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	paired = true
+	mu.Unlock()
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		mu.Lock()
+		done, tries := applied, applies
+		mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the deferred state was not applied after %d tries", tries)
+		}
+	}
+	ssh.mu.Lock()
+	defer ssh.mu.Unlock()
+	if ssh.waiting || ssh.wanted != nil {
+		t.Fatal("the applied state is still pending")
+	}
+}

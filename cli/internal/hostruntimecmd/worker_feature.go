@@ -133,7 +133,7 @@ var carrierSSHPairWait = 2 * time.Minute
 // the new hostd's worker starts while the previous generation's carrier still serves the network, and that carrier
 // fences every worker but its own hostd's: that is the update in progress, not a failure. The wanted state is then
 // kept and applied in the background once the active carrier pairs with this hostd, polling with backoff (50 ms
-// doubling to 1 s) for at most carrierSSHPairWait; nothing is reported as an error meanwhile. It never waits in
+// doubling to 1 s) for at most carrierSSHPairWait, also when applying it fails; nothing is reported as an error meanwhile. It never waits in
 // reconcile itself: the first reconcile runs inside worker startup, which a handover bounds to seconds.
 type carrierSSH struct {
 	read   func(context.Context) (hostinstall.CarrierConfig, error)
@@ -182,17 +182,19 @@ func (c *carrierSSH) applyWhenPaired(ctx context.Context) {
 			continue
 		}
 		c.mu.Lock()
-		wanted := c.wanted
-		c.wanted, c.waiting = nil, false
 		var applyErr error
-		if wanted != nil {
-			applyErr = c.apply(ctx, config, *wanted)
+		if c.wanted != nil {
+			applyErr = c.apply(ctx, config, *c.wanted)
+		}
+		if applyErr == nil {
+			c.wanted, c.waiting = nil, false
 		}
 		c.mu.Unlock()
-		if applyErr != nil {
-			diagnosticlog.TryWarn("managed SSH state could not be applied to the carrier", "error", applyErr)
+		if applyErr == nil {
+			return
 		}
-		return
+		// The caller was already told "applied" and does not ask again: keep the state and try again within the bound.
+		diagnosticlog.TryWarn("managed SSH state could not be applied to the carrier", "error", applyErr)
 	}
 }
 
