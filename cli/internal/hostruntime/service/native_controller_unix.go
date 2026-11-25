@@ -57,9 +57,8 @@ func (c SystemdController) Enable(ctx context.Context, _ string) error {
 		}
 		return values
 	}
-	if err := c.Runner.Run(operationCtx, "systemctl", arguments("daemon-reload")...); err != nil {
-		return err
-	}
+	// enable reloads the manager itself (no --no-reload), which loads the unit file just written; a separate
+	// daemon-reload before it doubled the reloads of every install, ~70 ms each (ptp-base-5, 2026-11-26).
 	return c.Runner.Run(operationCtx, "systemctl", arguments("enable", c.unit())...)
 }
 

@@ -83,7 +83,6 @@ func TestSystemdNativeLifecycleStateAndCommands(t *testing.T) {
 	want := []string{
 		"systemctl show paperboat-hostd.service --property=LoadState --property=UnitFileState --property=ActiveState --property=SubState",
 		"systemctl show paperboat-hostd.service --property=LoadState --property=UnitFileState --property=ActiveState --property=SubState",
-		"systemctl daemon-reload",
 		"systemctl enable paperboat-hostd.service",
 		"systemctl start paperboat-hostd.service",
 		"systemctl is-active --quiet paperboat-hostd.service",
