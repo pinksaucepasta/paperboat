@@ -7,6 +7,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-derp-carrier
+	"tailscale.com/tailcfg"
 )
 
 // Endpoint reports tell the server this engine's own candidate addresses, so peers can reach it directly with
@@ -167,10 +169,17 @@ func (a *Authority) homeRelayReport() string {
 	home := engine.HomeRegion()
 	a.relay.mu.Lock()
 	defer a.relay.mu.Unlock()
-	for _, node := range a.relay.nodes {
-		if regionalID(node.NodeID) == home {
-			return node.NodeID
-		}
+	return a.reportedHomeLocked(home)
+}
+
+// reportedHomeLocked names the relay of region home, keeping the last one reported while the engine has none (0: every
+// relay refused a replaced grant until the next one lands, seconds) and that relay is still authorized. Reporting
+// none made every such gap two mesh changes that woke every machine of the account; Tailscale keeps its
+// home through a gap it cannot replace it in (wgengine/magicsock/derp.go maybeSetNearestDERP). a.relay.mu held.
+func (a *Authority) reportedHomeLocked(home tailcfg.DERPRegionID) string {
+	if home == 0 {
+		home = a.relay.home
 	}
-	return ""
+	a.relay.home = home
+	return a.relay.nodes[home].NodeID
 }

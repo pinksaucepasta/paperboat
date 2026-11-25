@@ -53,6 +53,7 @@ type relayAuthority struct {
 	peerNodes    []*tailcfg.Node
 	controlPeers []key.NodePublic
 	nodes        map[tailcfg.DERPRegionID]RegionalNode
+	home         tailcfg.DERPRegionID // the last home relay reported (reportedHomeLocked)
 	// listed is the last relay each region was listed with. magicsock builds a region's carrier lazily and keeps
 	// it while the region is unchanged, so a carrier built while its relay was momentarily missing from nodes
 	// took an empty relay (no address, no pin) for good (a test Mac 2026-11-05). Written by setRelayNodesLocked.

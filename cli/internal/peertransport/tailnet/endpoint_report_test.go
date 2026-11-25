@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
 
@@ -189,5 +190,32 @@ func TestTheFirstEndpointReportWaitsForCandidatesButNotLongerThanTheBound(t *tes
 	a.endpointsReported([]string{"192.0.2.1:1234"})
 	if due := a.endpointReportDue(); due == nil || len(*due) != 0 {
 		t.Fatalf("a later empty set was held back: %v", due)
+	}
+}
+
+// home_relay flipped to none and back at each replaced grant: the relays refuse the old one for seconds, the engine drops
+// its relay regions, and the report named none.
+func TestHomeRelayReportKeepsTheLastHomeWhileTheEngineHasNone(t *testing.T) {
+	a := &Authority{}
+	one, two := RegionalNode{NodeID: "node_relay_a"}, RegionalNode{NodeID: "node_relay_b"}
+	a.relay.nodes = map[tailcfg.DERPRegionID]RegionalNode{regionalID(one.NodeID): one, regionalID(two.NodeID): two}
+	for _, step := range []struct {
+		name string
+		home tailcfg.DERPRegionID
+		want string
+	}{
+		{"before the first relay", 0, ""},
+		{"homed", regionalID(one.NodeID), one.NodeID},
+		{"engine has none", 0, one.NodeID},
+		{"moved to a live relay", regionalID(two.NodeID), two.NodeID},
+		{"engine has none after the move", 0, two.NodeID},
+	} {
+		if got := a.reportedHomeLocked(step.home); got != step.want {
+			t.Fatalf("%s: reported %q, want %q", step.name, got, step.want)
+		}
+	}
+	delete(a.relay.nodes, regionalID(two.NodeID))
+	if got := a.reportedHomeLocked(0); got != "" {
+		t.Fatalf("a relay no longer authorized is still reported: %q", got)
 	}
 }
