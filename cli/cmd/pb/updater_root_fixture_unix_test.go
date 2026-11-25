@@ -66,13 +66,10 @@ func updaterFixtureRootSocket(t *testing.T, target string) string {
 		ready <- scanner.Scan() && scanner.Text() == "READY"
 		_, _ = io.Copy(io.Discard, output)
 	}()
-	select {
-	case ok := <-ready:
-		if !ok {
-			t.Fatal("root updater fixture did not become ready; passwordless sudo is required")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("root updater fixture startup timed out")
+	// No timer: the fixture is this race-built test binary started through sudo, 11 s on a loaded runner. A fixture
+	// that fails or exits closes its output, which ends this wait.
+	if !<-ready {
+		t.Fatal("root updater fixture did not become ready; passwordless sudo is required")
 	}
 	return path
 }
