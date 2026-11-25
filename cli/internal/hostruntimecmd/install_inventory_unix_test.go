@@ -657,3 +657,26 @@ func TestInventoryPathsAreTheServiceLayout(t *testing.T) {
 		t.Log("host has a Paperboat install; layout only checked by value")
 	}
 }
+
+// pb pair's commit found the user daemon on the image pb install started and signalled it; systemd brought it back
+// only after RestartSec, 5 s of every pair (ptp-base-4, 2026-11-26). The unit is restarted instead; a failed
+// restart falls back to the signal.
+func TestInstallInventoryRestartsAStaleUserDaemonUnit(t *testing.T) {
+	for _, restartErr := range []error{nil, errors.New("no user manager")} {
+		process := unixProcess{pid: 4003, ppid: 1, exe: invRoot + "/bin/pb", stale: true, started: time.Unix(1_800_000_000, 0), unit: "paperboatd.service"}
+		plan, err := newUnixPurgePlan("linux", 1001)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake := newPurgeFake(process)
+		fake.termExits[4003] = true
+		sweep := testSweep(t.TempDir(), plan, fake)
+		restarts := 0
+		sweep.restartUserDaemon = func(context.Context) error { restarts++; return restartErr }
+		sweep.removeFindings(context.Background(), []inventoryFinding{{process: &process}}, digestA)
+		signalled := len(fake.signals) > 0
+		if restarts != 1 || signalled != (restartErr != nil) || len(fake.commands) != 0 {
+			t.Errorf("restart error %v: restarts %d, signals %v, commands %v", restartErr, restarts, fake.signals, fake.commands)
+		}
+	}
+}

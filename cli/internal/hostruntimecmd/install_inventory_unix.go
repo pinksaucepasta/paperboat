@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -169,6 +170,11 @@ func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFindi
 	if len(units) > 0 {
 		_ = s.reloadUnits(ctx, units)
 	}
+	// A signalled user daemon comes back only after its unit's RestartSec (5 s): every pb pair waited for it. An
+	// explicit restart of the unit starts it on the current image at once; the signal stays the fallback.
+	if s.restartUserDaemon != nil && slices.ContainsFunc(processes, isUserDaemon) && s.restartUserDaemon(ctx) == nil {
+		processes = slices.DeleteFunc(processes, isUserDaemon)
+	}
 	_ = s.stopTargets(ctx, processes)
 	// A fixed role that ran a replaced image comes back on the current one. launchd's KeepAlive and the user
 	// unit's Restart=always do that already. Roles restarted only on failure need a start, because a signal
@@ -195,6 +201,8 @@ func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFindi
 		}
 	}
 }
+
+func isUserDaemon(process unixProcess) bool { return process.unit == "paperboatd.service" }
 
 // versionLeftovers lists every item of this account and the shared guard that
 // the active version does not own. Owned: the active version; session-owner

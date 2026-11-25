@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -276,6 +277,8 @@ type unixSweep struct {
 	sources   func(context.Context) (hostinstall.InventorySources, error)
 	// jobs maps the main pid of each running unit or launchd job to its name.
 	jobs func(context.Context) (map[int]string, error)
+	// restartUserDaemon restarts the account's user daemon unit (Linux); nil where there is none.
+	restartUserDaemon func(context.Context) error
 	// imageInodes lists the inodes a process maps as text (macOS); nil when
 	// the process listing already compared images (Linux).
 	imageInodes   func(context.Context, int) ([]uint64, error)
@@ -299,8 +302,29 @@ func newHostUnixSweep(plan unixPurgePlan) unixSweep {
 	if plan.platform == "linux" {
 		processes = listLinuxProcesses
 	}
+	var restartUserDaemon func(context.Context) error
+	if plan.platform == "linux" {
+		restartUserDaemon = func(ctx context.Context) error {
+			// The inventory runs without cancellation; a stuck user manager must not hold the install.
+			ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if plan.uid == 0 { // root's daemon is a system unit (service.UserServiceRoot)
+				return exec.CommandContext(ctx, "/usr/bin/systemctl", "restart", "paperboatd.service").Run()
+			}
+			account, err := user.LookupId(strconv.Itoa(plan.uid))
+			if err != nil {
+				return err
+			}
+			command, err := userSystemctl(ctx, account, "restart", "paperboatd.service")
+			if err != nil {
+				return err
+			}
+			return command.Run()
+		}
+	}
 	return unixSweep{
-		plan: plan,
+		plan:              plan,
+		restartUserDaemon: restartUserDaemon,
 		run: func(ctx context.Context, name string, arguments ...string) error {
 			return exec.CommandContext(ctx, name, arguments...).Run()
 		},
