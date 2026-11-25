@@ -108,3 +108,44 @@ func TestRuntimeObservationRetriesSoonWhileNoConnectionOpens(t *testing.T) {
 		}
 	}
 }
+
+type firstFailsObservationTransport struct {
+	calls atomic.Int64
+	rest  livenessObservationTransport
+}
+
+func (t *firstFailsObservationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if t.calls.Add(1) == 1 {
+		if request.Body != nil {
+			_ = request.Body.Close()
+		}
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"unavailable"}}`)), Request: request}, nil
+	}
+	return t.rest.RoundTrip(request)
+}
+
+// A machine whose first observation failed (a restart that met a slow server) waited out the 4-minute heartbeat, with
+// jitter 2-6 minutes, before it reported again, and was offline at the server meanwhile.
+func TestAFailedFirstObservationIsRetriedAfterTheIntervalNotTheHeartbeat(t *testing.T) {
+	transport := &firstFailsObservationTransport{rest: livenessObservationTransport{notify: make(chan struct{}, 8)}}
+	sender := &runtimeObservationSender{
+		endpoint: "https://observations.invalid/v1/runtime-observations", tokens: livenessObservationTokenSource{}, proofs: livenessObservationProofSource{},
+		operationID: func() (string, error) { return "op_runtime_observation_first_0001", nil }, environmentID: "env_runtime_observation_first",
+		machineID: "machine_runtime_observation_first", reporterVersion: "test", client: &http.Client{Transport: transport},
+		receiptPath: filepath.Join(t.TempDir(), "runtime", "server-heartbeat.json"), workerGeneration: 1, osBootID: "boot-runtime-observation-first",
+	}
+	service := &runtimeObservationService{sender: sender, interval: 50 * time.Millisecond, heartbeat: time.Hour, timeout: time.Second, servicesWatch: time.Hour}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = service.Shutdown(ctx)
+	})
+	select {
+	case <-transport.rest.notify:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no second observation in 5 s after the first failed (%d sent)", transport.calls.Load())
+	}
+}

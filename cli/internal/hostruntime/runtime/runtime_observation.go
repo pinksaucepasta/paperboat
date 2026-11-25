@@ -76,8 +76,8 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 		// Presence is the required part of this service. A first observation
 		// can fail while credentials, DNS, or an auxiliary local store is
 		// recovering. Do not let one transient failure make the optional
-		// component disappear permanently: install the stable loop and let its
-		// bounded sends retry on the normal heartbeat cadence.
+		// component disappear permanently: install the stable loop, which sends
+		// again after the failure's own wait.
 		reportRuntimeObservationAttempt(initial, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -95,7 +95,7 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 	// because hostd always invokes Shutdown for an accepted or failed component.
 	runCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	s.cancel, s.done = stop, make(chan struct{})
-	go s.loop(runCtx, s.done)
+	go s.loop(runCtx, s.done, err)
 	return nil
 }
 
@@ -153,12 +153,14 @@ func (s *runtimeObservationService) successWait() time.Duration {
 	return s.interval
 }
 
-func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct{}) {
+// started is the first observation's error: a failed one is retried after an interval, not after the heartbeat (a machine
+// whose start met a slow server stayed offline for 2-6 minutes).
+func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct{}, started error) {
 	defer close(done)
 	// The next observation follows the interval with jitter, so a fleet that reconnected together (a
 	// server deploy) does not report in lockstep; consecutive failures the server answered back off to
 	// runtimeObservationMaxRetry instead of every machine asking a failing server every interval.
-	next := time.NewTimer(backoff.Jitter(s.successWait()))
+	next := time.NewTimer(s.runtimeObservationWait(started, 0))
 	defer next.Stop()
 	failures := 0
 	watchEvery := s.servicesWatch
