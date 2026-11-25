@@ -26,17 +26,6 @@ func TestParseWingetPackageListCurrentTable(t *testing.T) {
 	}
 }
 
-func TestNoInstalledWingetPackageRequiresAuthoritativeMessage(t *testing.T) {
-	if !noInstalledWingetPackage("No installed package found matching input criteria.") {
-		t.Fatal("authoritative package-absent response was not recognized")
-	}
-	for _, output := range []string{"", "source unavailable", "operation timed out"} {
-		if noInstalledWingetPackage(output) {
-			t.Fatalf("probe failure %q was treated as package absence", output)
-		}
-	}
-}
-
 // A clean Windows 11 guest threw 0x80072ee6 from the capability query and pairing aborted (2026-11-10).
 func TestInventoryTreatsThrowingCapabilityQueryAsAbsent(t *testing.T) {
 	script := inventoryPowerShell(Config{InstallRoot: `C:\Program Files\OpenSSH`})

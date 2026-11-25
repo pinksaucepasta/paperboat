@@ -449,7 +449,7 @@ func TestInventoryNamesTheWindowsStepWhileHostKeysAreUnpublished(t *testing.T) {
 			t.Fatalf("status=%#v", status)
 		}
 	}
-	if recovery := windows.Health[0].Recovery; strings.Contains(recovery, "sshd") || !strings.Contains(recovery, "pb doctor --repair") || !strings.Contains(recovery, "App Installer") {
+	if recovery := windows.Health[0].Recovery; strings.Contains(recovery, "sshd") || !strings.Contains(recovery, "pb doctor --repair") || !strings.Contains(recovery, "installer") {
 		t.Fatalf("windows recovery=%q", recovery)
 	}
 	if recovery := linux.Health[0].Recovery; recovery != sshHostKeysUnpublishedRecovery {

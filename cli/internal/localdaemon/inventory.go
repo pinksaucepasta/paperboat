@@ -692,8 +692,8 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 	return result
 }
 
-const managedSSHWindowsTargetRecovery = "If this stays, install \"App Installer\" (winget) from the Microsoft Store " +
-	"on the machine, then run pb doctor --repair there"
+const managedSSHWindowsTargetRecovery = "If this stays, run pb doctor --repair on the machine; " +
+	"it installs Microsoft OpenSSH through winget or Microsoft's installer"
 
 // The Windows form of sshHostKeysUnpublishedRecovery: the same wait, then the Windows step.
 const sshHostKeysUnpublishedWindowsRecovery = "A newly set up machine publishes them within a minute or two. " + managedSSHWindowsTargetRecovery

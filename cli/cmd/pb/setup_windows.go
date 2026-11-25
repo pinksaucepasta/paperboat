@@ -31,8 +31,8 @@ func runSetupOpenSSH(ctx context.Context, step func(context.Context) error) erro
 	bounded, cancel := context.WithTimeout(ctx, timingsOf(ctx).setupOpenSSH)
 	defer cancel()
 	if err := step(bounded); err != nil {
-		return fmt.Errorf("set up managed SSH: %w; make sure App Installer (winget) is installed for all users "+
-			"or the PowerShell Gallery is reachable, then run the command again", err)
+		return fmt.Errorf("set up managed SSH: %w; make sure the network allows downloading Microsoft OpenSSH (winget or "+
+			"Microsoft's installer from GitHub), then run the command again", err)
 	}
 	return nil
 }

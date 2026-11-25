@@ -137,7 +137,7 @@ func leaveRequestDirectory() error {
 // a stable code, which survives the elevation boundary where the typed error does not; any other error is returned as is.
 func openSSHUnobtainableAsRemote(request elevation.Request, err error) error {
 	if request.Operation == elevation.OperationOpenSSH && windowsopenssh.Unobtainable(err) {
-		return &elevation.RemoteError{Code: elevation.CodeOpenSSHUnobtainable, Message: "this machine cannot supply OpenSSH (no App Installer or package source)"}
+		return &elevation.RemoteError{Code: elevation.CodeOpenSSHUnobtainable, Message: "this machine cannot supply OpenSSH (neither winget nor Microsoft's installer download worked)"}
 	}
 	return err
 }

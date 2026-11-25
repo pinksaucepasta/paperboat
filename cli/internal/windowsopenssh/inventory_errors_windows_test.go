@@ -32,7 +32,7 @@ func TestUndecodableInventoryIsUnobtainable(t *testing.T) {
 	}
 }
 
-func TestSharedStateWithoutInventoryOrPackageClientIsUnobtainable(t *testing.T) {
+func TestSharedStateWithoutInventoryIsUnobtainable(t *testing.T) {
 	root := t.TempDir()
 	_, err := PrepareSharedState(context.Background(), Config{Platform: "windows", InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: noPackageClientRunner{}})
 	if !Unobtainable(err) {
@@ -40,21 +40,5 @@ func TestSharedStateWithoutInventoryOrPackageClientIsUnobtainable(t *testing.T) 
 	}
 	if _, statErr := os.Lstat(filepath.Join(root, "state")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("skipped OpenSSH left state behind: %v", statErr)
-	}
-}
-
-func TestSystemWingetInventoryFailureKeepsCauseWithoutTranscript(t *testing.T) {
-	const privateTranscript = "private package cache C:\\Users\\Alice\\AppData\\Local\\Temp"
-	cause := errors.New("WinGet inventory failed")
-	runner := &queuedRunner{replies: []runnerReply{
-		{output: []byte(approvedWinGetModuleVersion)},
-		{output: []byte(privateTranscript), err: cause},
-	}}
-	_, _, err := inventoryWithSystemWinget(context.Background(), runner)
-	if !errors.Is(err, ErrInstallerUnavailable) || !errors.Is(err, cause) {
-		t.Fatalf("system inventory error = %v, want installer classification and runner cause", err)
-	}
-	if strings.Contains(err.Error(), privateTranscript) {
-		t.Fatalf("system inventory error exposed command output: %v", err)
 	}
 }

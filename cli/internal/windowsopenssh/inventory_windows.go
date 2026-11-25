@@ -29,17 +29,7 @@ func collectInventory(ctx context.Context, config Config) (InventoryRecord, erro
 	wingetPath, resolveErr := resolveWinget(resolveCtx, config.Runner)
 	resolveCancel()
 	if resolveErr != nil {
-		registered, version, moduleErr := inventoryWithSystemWinget(ctx, config.Runner)
-		if moduleErr != nil {
-			if approvedProgramFilesInstall(record, config) {
-				record.WingetRegistered = true
-				record.WingetVersion = record.ProgramFilesSSHD.Version
-				return record, nil
-			}
-			return record, errors.Join(ErrInstallerUnavailable, resolveErr, moduleErr)
-		}
-		record.WingetRegistered, record.WingetVersion = registered, version
-		return record, nil
+		return record, nil // no package client: ClassifyInventory judges the installed files themselves
 	}
 	listCtx, listCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer listCancel()
@@ -47,39 +37,10 @@ func collectInventory(ctx context.Context, config Config) (InventoryRecord, erro
 	// (winpool, 2026-11-21); a slow source refresh falls back below like any list failure.
 	wingetOutput, listErr := config.Runner.Run(listCtx, wingetPath, wingetListArgs()...)
 	if listErr != nil {
-		if noInstalledWingetPackage(string(wingetOutput)) {
-			return record, nil
-		}
-		registered, version, moduleErr := inventoryWithSystemWinget(ctx, config.Runner)
-		if moduleErr != nil {
-			if approvedProgramFilesInstall(record, config) {
-				record.WingetRegistered = true
-				record.WingetVersion = record.ProgramFilesSSHD.Version
-				return record, nil
-			}
-			return record, errors.Join(ErrInstallerUnavailable,
-				operationFailure("could not inspect the installed Windows package", ErrInstallerUnavailable, listErr),
-				fmt.Errorf("query the Windows package inventory fallback: %w", moduleErr))
-		}
-		record.WingetRegistered, record.WingetVersion = registered, version
-		return record, nil
+		return record, nil // nothing installed, or a package client LocalSystem cannot use
 	}
 	record.WingetRegistered, record.WingetVersion = parseWingetPackageList(string(wingetOutput))
 	return record, nil
-}
-
-// App Installer's package catalog is unavailable to LocalSystem on some
-// Windows IoT builds. An already-installed OpenSSH tree may still be safely
-// reused when its complete PE signature, publisher, architecture, path, and
-// approved version are independently verified.
-func approvedProgramFilesInstall(record InventoryRecord, config Config) bool {
-	if !trustedBinary(record.ProgramFilesSSHD, config) {
-		return false
-	}
-	if !versionMatches(record.ProgramFilesSSHD.Version, config.ApprovedVersion) {
-		return false
-	}
-	return true
 }
 
 func inventoryPowerShell(config Config) string {
@@ -119,8 +80,4 @@ func parseWingetPackageList(output string) (bool, string) {
 		}
 	}
 	return false, ""
-}
-
-func noInstalledWingetPackage(output string) bool {
-	return strings.Contains(strings.ToLower(output), "no installed package found matching input criteria")
 }

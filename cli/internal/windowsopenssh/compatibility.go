@@ -3,6 +3,7 @@ package windowsopenssh
 import (
 	_ "embed"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -22,6 +23,8 @@ type Compatibility struct {
 	ExpectedInstallRoot string   `json:"expected_install_root"`
 	TestedWindowsBuilds []string `json:"tested_windows_builds"`
 	ConfigurationSchema string   `json:"configuration_schema"`
+
+	MSI map[string]MSIPackage `json:"msi"`
 }
 
 var compatibility = mustCompatibility()
@@ -37,6 +40,7 @@ func CompatibilityMetadata() Compatibility {
 	result.Architectures = slices.Clone(result.Architectures)
 	result.ExpectedBinaryNames = slices.Clone(result.ExpectedBinaryNames)
 	result.TestedWindowsBuilds = slices.Clone(result.TestedWindowsBuilds)
+	result.MSI = maps.Clone(result.MSI)
 	return result
 }
 
@@ -44,6 +48,11 @@ func mustCompatibility() Compatibility {
 	var value Compatibility
 	if json.Unmarshal(compatibilityJSON, &value) != nil || value.Schema == "" || value.PackageID != "Microsoft.OpenSSH.Preview" || value.ApprovedVersion == "" || value.MinimumVersion == "" || value.MaximumVersion == "" || value.ApprovedVersion != value.MinimumVersion || value.ApprovedVersion != value.MaximumVersion || value.ExpectedPublisher == "" || value.ConfigurationSchema != value.Schema || !slices.Contains(value.Architectures, "amd64") || !slices.Contains(value.Architectures, "arm64") || len(value.ExpectedBinaryNames) == 0 || strings.TrimSpace(value.ExpectedInstallRoot) == "" || len(value.TestedWindowsBuilds) == 0 {
 		panic("invalid embedded Windows OpenSSH compatibility metadata")
+	}
+	for _, architecture := range value.Architectures {
+		if msi := value.MSI[architecture]; !strings.HasPrefix(msi.URL, "https://") || len(msi.SHA256) != 64 {
+			panic("invalid embedded Windows OpenSSH installer metadata")
+		}
 	}
 	return value
 }

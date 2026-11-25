@@ -103,7 +103,7 @@ func TestProvisionDoesNotFallBackWhenWingetIsUnavailable(t *testing.T) {
 	}
 }
 
-// noPackageClientRunner is a machine with neither App Installer nor the WinGet PowerShell module: every
+// noPackageClientRunner is a machine without App Installer: every
 // command but the firewall snapshot fails (Windows Sandbox, Server, LTSC).
 type noPackageClientRunner struct{}
 
@@ -114,11 +114,12 @@ func (noPackageClientRunner) Run(_ context.Context, _ string, arguments ...strin
 	return []byte("private transcript"), errors.New("exit status 1")
 }
 
-func TestProvisionWithoutAnyPackageClientIsUnobtainable(t *testing.T) {
+func TestProvisionWithoutWingetAndWithoutNetworkIsUnobtainable(t *testing.T) {
+	serveMSI(t, "", errors.New("no route"))
 	root := t.TempDir()
 	_, err := Provision(context.Background(), Config{Platform: "windows", InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: noPackageClientRunner{}})
-	if !errors.Is(err, ErrInstallerUnavailable) || !Unobtainable(err) {
-		t.Fatalf("provision without a package client = %v, want unobtainable", err)
+	if !Unobtainable(err) || !strings.Contains(err.Error(), "download") {
+		t.Fatalf("provision without winget or network = %v, want unobtainable naming the download", err)
 	}
 }
 

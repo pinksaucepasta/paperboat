@@ -205,9 +205,6 @@ every tunnel runs on an enrolled Paperboat machine.
 
 Release builds are ad-hoc signed only (`.github/workflows/release.yml`), so macOS treats every `pb` update as a new app: the local-network permission prompt returns after each update and the identity macOS keys permissions on is not stable. Needs an Apple Developer Program membership (paid, user decision 2026-11-16: not now), a Developer ID Application certificate in CI secrets, `codesign --options runtime` with that identity and notarization (`notarytool`) in the release job, and a check that an update keeps the local-network grant.
 
-### Windows without App Installer: install OpenSSH from Microsoft's MSI (user 2026-11-21)
-On machines without App Installer/winget for LocalSystem (plain Windows Server, Windows Sandbox), `pb install` now fails visibly instead of setting up managed SSH. Direction: install Microsoft's signed OpenSSH MSI (PowerShell/Win32-OpenSSH release, pinned version, Authenticode check; `msiexec /i OpenSSH-Win64.msi /qn ADDLOCAL=Server`), as Ansible and Chocolatey do. Same rule for `pb update`, which now rolls back there. Start when the user says.
-
 ## Servers and scale
 
 ### Self-hosted control server through pbh — after launch (user 2026-11-19)

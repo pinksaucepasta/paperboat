@@ -121,47 +121,6 @@ func TestProvisionKeepsInstallCauseWithoutTranscript(t *testing.T) {
 	}
 }
 
-func TestSystemWingetInstallKeepsCauseWithoutTranscript(t *testing.T) {
-	const privateTranscript = "private package source C:\\Users\\Alice\\AppData\\Local\\Temp"
-	cause := errors.New("system package install failed")
-	runner := &queuedRunner{replies: []runnerReply{
-		{output: []byte(approvedWinGetModuleVersion)},
-		{output: []byte(privateTranscript), err: cause},
-	}}
-	err := installWithSystemWinget(context.Background(), Config{Runner: runner, ApprovedVersion: ApprovedVersion}, false)
-	if !errors.Is(err, ErrInstallFailed) || !errors.Is(err, cause) {
-		t.Fatalf("system WinGet error = %v, want install classification and runner cause", err)
-	}
-	if strings.Contains(err.Error(), privateTranscript) {
-		t.Fatalf("system WinGet error exposed command output: %v", err)
-	}
-}
-
-func TestSystemWingetPreparationKeepsCauseWithoutTranscript(t *testing.T) {
-	const privateTranscript = "private module path C:\\Users\\Alice\\Documents\\PowerShell"
-	cause := errors.New("package-management setup failed")
-	err := ensureSystemWingetModule(context.Background(), verificationOutputRunner{
-		output: []byte(privateTranscript), err: cause,
-	})
-	if !errors.Is(err, ErrInstallerUnavailable) || !errors.Is(err, cause) {
-		t.Fatalf("package-management preparation error = %v, want installer classification and runner cause", err)
-	}
-	if strings.Contains(err.Error(), privateTranscript) {
-		t.Fatalf("package-management preparation error exposed command output: %v", err)
-	}
-}
-
-func TestSystemWingetPreparationDoesNotExposeUnexpectedVersionOutput(t *testing.T) {
-	const privateTranscript = "unexpected private module output C:\\Users\\Alice\\Documents\\PowerShell"
-	err := ensureSystemWingetModule(context.Background(), verificationOutputRunner{output: []byte(privateTranscript)})
-	if !errors.Is(err, ErrInstallerUnavailable) {
-		t.Fatalf("package-management preparation error = %v, want installer unavailable", err)
-	}
-	if strings.Contains(err.Error(), privateTranscript) {
-		t.Fatalf("package-management preparation error exposed command output: %v", err)
-	}
-}
-
 func TestSetupHostKeyGenerationKeepsCauseWithoutTranscript(t *testing.T) {
 	const privateTranscript = "private host key C:\\Users\\Alice\\ProgramData\\Paperboat\\ssh"
 	cause := errors.New("host-key generator failed")
@@ -207,31 +166,4 @@ func commandExitFailure(t *testing.T, code int) error {
 		t.Fatalf("exit command error = %v, want process exit %d", err, code)
 	}
 	return err
-}
-
-type scriptCapture struct{ scripts []string }
-
-func (c *scriptCapture) Run(_ context.Context, _ string, arguments ...string) ([]byte, error) {
-	c.scripts = append(c.scripts, arguments[len(arguments)-1])
-	if len(c.scripts) == 1 {
-		return []byte(approvedWinGetModuleVersion), nil
-	}
-	return []byte(`{}`), nil
-}
-
-// The SYSTEM-context package install must turn winget's progress bar off before it adds the source, or the add
-// hangs on a headless machine (a Windows test VM paired without managed SSH for this reason).
-func TestSystemWingetInstallDisablesTheProgressBarBeforeAddingTheSource(t *testing.T) {
-	runner := &scriptCapture{}
-	if err := installWithSystemWinget(context.Background(), Config{Runner: runner, ApprovedVersion: ApprovedVersion}, false); err != nil {
-		t.Fatal(err)
-	}
-	install := runner.scripts[len(runner.scripts)-1]
-	seed, add := strings.Index(install, `"progressBar":"disabled"`), strings.Index(install, "Add-WinGetSource")
-	if seed < 0 || add < 0 || seed > add {
-		t.Fatalf("install script must write the quiet winget settings before Add-WinGetSource (seed=%d add=%d)", seed, add)
-	}
-	if !strings.Contains(install, "if(-not (Test-Path -LiteralPath $wingetSettings))") {
-		t.Fatal("existing winget settings must not be overwritten")
-	}
 }

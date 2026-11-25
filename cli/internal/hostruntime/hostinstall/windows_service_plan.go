@@ -13,13 +13,12 @@ import (
 )
 
 // windowsSSHPreparationBudget bounds one attempt at the OpenSSH step of an install, pair or repair: obtaining the
-// package may fall back to the PowerShell Gallery (5 min) and Install-WinGetPackage (10 min), which exceed the 3 min the
-// elevated bridge allows the whole operation.
+// package (winget up to 10 min, Microsoft's MSI up to 7 min) may exceed the 3 min the elevated bridge allows the whole operation.
 var windowsSSHPreparationBudget = 75 * time.Second
 
 // windowsSSHFailureAdvice is what the user can do when managed SSH could not be prepared.
-const windowsSSHFailureAdvice = "set up managed SSH (OpenSSH via App Installer/winget); make sure App Installer is " +
-	"installed for all users or the PowerShell Gallery is reachable, then run the command again"
+const windowsSSHFailureAdvice = "set up managed SSH (Microsoft OpenSSH, through winget or Microsoft's installer " +
+	"from GitHub); make sure the network allows the download, then run the command again"
 
 // prepareWindowsSSHWithin runs one OpenSSH preparation step under its own budget.
 func prepareWindowsSSHWithin(ctx context.Context, step func(context.Context) error) error {

@@ -9,5 +9,9 @@
   "expected_binary_names": ["ssh.exe", "sshd.exe", "scp.exe", "sftp.exe", "sftp-server.exe", "ssh-keygen.exe"],
   "expected_install_root": "%ProgramFiles%\\OpenSSH",
   "tested_windows_builds": ["26100"],
+  "msi": {
+    "amd64": {"url": "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64-v10.0.0.0.msi", "sha256": "ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9"},
+    "arm64": {"url": "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-ARM64-v10.0.0.0.msi", "sha256": "7a17d0e22d004fb47ca4bfd8fef926fa305de4ebf70a6f3c7a29c39aabef0023"}
+  },
   "configuration_schema": "paperboat.windows-openssh/v1"
 }

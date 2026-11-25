@@ -184,18 +184,13 @@ func provision(ctx context.Context, config Config, force bool) (Result, error) {
 		return Result{}, firewallErr
 	}
 	wingetPath := config.WingetPath
-	useSystemModule := false
+	useMSI := false
 	if wingetPath == "" {
 		var err error
 		wingetPath, err = resolveWinget(ctx, config.Runner)
-		if err != nil {
-			if moduleErr := ensureSystemWingetModule(ctx, config.Runner); moduleErr != nil {
-				return Result{}, errors.Join(err, moduleErr)
-			}
-			useSystemModule = true
-		}
+		useMSI = err != nil
 	}
-	if !useSystemModule {
+	if !useMSI {
 		verifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		versionOutput, err := config.Runner.Run(verifyCtx, wingetPath, "--version")
 		cancel()
@@ -207,14 +202,11 @@ func provision(ctx context.Context, config Config, force bool) (Result, error) {
 			if config.WingetPath != "" {
 				return Result{}, errors.Join(ErrInstallerUnavailable, versionFailure)
 			}
-			if moduleErr := ensureSystemWingetModule(ctx, config.Runner); moduleErr != nil {
-				return Result{}, errors.Join(ErrInstallerUnavailable, versionFailure, moduleErr)
-			}
-			useSystemModule = true
+			useMSI = true
 		}
 	}
-	if useSystemModule {
-		if err := installWithSystemWinget(ctx, config, force); err != nil {
+	if useMSI {
+		if err := installWithMSI(ctx, config, force); err != nil {
 			return Result{}, err
 		}
 	} else {
