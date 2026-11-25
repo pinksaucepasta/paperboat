@@ -52,6 +52,60 @@ func TestManagedSSHStartsFromTheRefreshAndRetriesAFailedStart(t *testing.T) {
 	}
 }
 
+// A failed start or rewrite of managed SSH waited for the next machine event (or the inventory's fallback, 5 to 30
+// minutes): it now asks for a refresh itself, spaced wider while it keeps failing, and not after a success or a close.
+func TestManagedSSHAsksForARefreshAfterAFailure(t *testing.T) {
+	first, most := managedSSHRetryFirst, managedSSHRetryMost
+	t.Cleanup(func() { managedSSHRetryFirst, managedSSHRetryMost = first, most })
+	managedSSHRetryFirst, managedSSHRetryMost = 20*time.Millisecond, 40*time.Millisecond
+	asked := make(chan struct{}, 8)
+	var failure error
+	owner := &managedSSHOwner{
+		runtime:   &ManagedSSHRuntime{refresh: func(context.Context, []api.UserMachine) error { return failure }},
+		onStarted: func() { asked <- struct{}{} },
+	}
+	expect := func(want bool, when string) {
+		t.Helper()
+		wait := 2 * time.Second
+		if !want {
+			wait = 100 * time.Millisecond
+		}
+		select {
+		case <-asked:
+			if !want {
+				t.Fatal("asked for a refresh " + when)
+			}
+		case <-time.After(wait):
+			if want {
+				t.Fatal("did not ask for a refresh " + when)
+			}
+		}
+	}
+	failure = errors.New("write managed SSH configuration")
+	for range 3 {
+		if err := owner.refresh(t.Context(), nil); !errors.Is(err, failure) {
+			t.Fatal(err)
+		}
+		expect(true, "after a failed rewrite")
+	}
+	expect(false, "twice for one failure")
+	_ = owner.refresh(t.Context(), nil)
+	failure = nil
+	if err := owner.refresh(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	expect(false, "after a success")
+	failed := &managedSSHOwner{lifetime: t.Context(), onStarted: owner.onStarted, report: func(context.Context, error) {},
+		start: func(context.Context, ManagedSSHConfig, []api.UserMachine) (*ManagedSSHRuntime, error) {
+			return nil, errors.New("no server")
+		}}
+	_ = failed.refresh(t.Context(), nil)
+	expect(true, "after a failed start")
+	_ = failed.refresh(t.Context(), nil)
+	_ = failed.close()
+	expect(false, "after close")
+}
+
 func TestInventoryRefreshesWhenAsked(t *testing.T) {
 	source := &scriptedMachineSource{results: []machineResult{{}}}
 	store, err := localapi.NewSnapshotStore(nil)

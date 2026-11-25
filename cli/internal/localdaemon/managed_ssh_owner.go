@@ -31,6 +31,26 @@ type managedSSHOwner struct {
 	runtime  *ManagedSSHRuntime
 	reported bool
 	lastCode string
+	retry    *time.Timer
+	failures int
+}
+
+// managedSSHRetryFirst and managedSSHRetryMost space the inventory refreshes asked for after a failed start or rewrite,
+// doubling: the inventory itself asks again only on an event or after its 5 min fallback.
+var managedSSHRetryFirst, managedSSHRetryMost = 30 * time.Second, 5 * time.Minute
+
+// settle asks for another inventory refresh after a failure, and drops a pending one after a success.
+func (o *managedSSHOwner) settle(err error) {
+	if o.retry != nil {
+		o.retry.Stop()
+		o.retry = nil
+	}
+	if err == nil || o.onStarted == nil {
+		o.failures = 0
+		return
+	}
+	o.retry = time.AfterFunc(min(managedSSHRetryFirst<<min(o.failures, 4), managedSSHRetryMost), o.onStarted)
+	o.failures++
 }
 
 // refresh starts managed SSH when it is not running, else rewrites its aliases for machines (the
@@ -52,9 +72,12 @@ func (o *managedSSHOwner) refresh(ctx context.Context, machines []api.UserMachin
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.runtime != nil {
-		return o.runtime.Refresh(ctx, machines)
+		err := o.runtime.Refresh(ctx, machines)
+		o.settle(err)
+		return err
 	}
 	runtime, err := o.start(o.lifetime, o.config, machines)
+	o.settle(err)
 	code := ""
 	if err != nil {
 		code = ManagedSSHHealthCode(err)
@@ -79,6 +102,7 @@ func (o *managedSSHOwner) close() error {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.settle(nil)
 	if o.runtime == nil {
 		return nil
 	}
