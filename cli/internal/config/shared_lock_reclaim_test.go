@@ -1,11 +1,13 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 )
 
@@ -36,6 +38,10 @@ func TestSharedLockWaitersReclaimADeadOwnerOnce(t *testing.T) {
 				<-start
 				if err := lock.Lock(); err != nil {
 					t.Errorf("round %d: %v", round, err)
+					var errno syscall.Errno
+					if errors.As(err, &errno) {
+						t.Errorf("errno %d: %v", int(errno), errno)
+					}
 					return
 				}
 				if holders.Add(1) != 1 {
