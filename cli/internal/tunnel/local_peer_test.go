@@ -901,6 +901,40 @@ func TestLocalPeerCarriesAHandoverEndToTheCLI(t *testing.T) {
 	}
 }
 
+type noEOFRemote struct{ *localPeerRemote }
+
+func (noEOFRemote) CloseWrite() error { return ErrInputEOFUnsupported }
+
+// pb connect with stdin at EOF (a script, `< /dev/null`) half-closes its input. A terminal cannot take that; the daemon
+// ended the link, which the CLI showed as "Paperboat on this computer restarted" and reconnected.
+func TestTerminalStdinEOFKeepsTheLink(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	remoteServer, remotePeer := net.Pipe()
+	defer remotePeer.Close()
+	served := make(chan error, 1)
+	go func() {
+		served <- ServeLocalPeerTerminalConn(context.Background(), localServer, noEOFRemote{&localPeerRemote{Conn: remoteServer}}, &LocalPeerCursorBridge{})
+	}()
+	connection, err := NewLocalPeerConn(localClient, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if err := connection.(InputHalfCloser).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-served:
+		t.Fatalf("daemon ended the link on stdin EOF: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	go func() { _, _ = remotePeer.Write([]byte("after")) }()
+	buffer := make([]byte, 5)
+	if _, err := io.ReadFull(connection, buffer); err != nil || string(buffer) != "after" {
+		t.Fatalf("output after stdin EOF=%q err=%v", buffer, err)
+	}
+}
+
 type recordingPeerRemote struct {
 	*localPeerRemote
 	observer chan func(bool)

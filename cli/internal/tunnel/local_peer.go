@@ -463,14 +463,13 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 					return
 				}
 			case localPeerCloseWrite:
-				closer, ok := remote.(InputHalfCloser)
-				if !ok {
-					done <- ErrInputEOFUnsupported
-					return
-				}
-				if err := closer.CloseWrite(); err != nil {
-					done <- err
-					return
+				// A terminal has no stdin EOF: the client already ignores that, so the link stays up (ending it read as a
+				// daemon restart, and a remote Wait cut short by the close could even report exit 0).
+				if closer, ok := remote.(InputHalfCloser); ok {
+					if err := closer.CloseWrite(); err != nil && !errors.Is(err, ErrInputEOFUnsupported) {
+						done <- err
+						return
+					}
 				}
 			case localPeerWait:
 				if waitStarted {
