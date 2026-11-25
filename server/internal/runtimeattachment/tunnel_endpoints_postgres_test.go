@@ -728,6 +728,32 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if rows := snapshot(); len(rows) != 1 || rows[0].PublicHost != renamed || strings.Contains(rows[0].DomainBindings, "never-") {
 		t.Fatalf("edge snapshot after the undone move = %+v", rows)
 	}
+	// Taking the old name back and losing that move leaves it in its cooldown: no other account gets it early.
+	patch(endpointID)
+	settle(time.Now().UTC().Add(policy.MoveTimeout + time.Minute))
+	var cooling bool
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT until>now()+interval '50 minutes' FROM tunnel_address_holds WHERE hostname=$1`, oldHost).Scan(&cooling); err != nil || !cooling || holds() != "retired:"+oldHost {
+		t.Fatalf("after an undone take-back: holds %q cooling %v, %v", holds(), cooling, err)
+	}
+	// An operator block on the current name during a move stops the move; the moving-to name stays claimed past the
+	// deadline until the move is settled, for machine services too.
+	blockedMove := "blocked-" + endpointID[:8]
+	patch(blockedMove)
+	f.exec(t, `UPDATE tunnel_address_holds SET until=now()-interval '1 second' WHERE hostname=$1`, blockedMove+".tunnels.example.test")
+	if _, err := f.database.SQL().ExecContext(f.ctx, `SELECT paperboat.claim_managed_hostname($1,'preview','pre_moving')`, blockedMove+".tunnels.example.test"); err == nil {
+		t.Fatal("a new resource claimed a name the edges may still serve for the move")
+	}
+	var reserved string
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT paperboat.reserve_machine_hostname($1,8080,$2)`, f.machine, blockedMove+".tunnels.example.test").Scan(&reserved); err != nil || reserved != "" {
+		t.Fatalf("machine service took a moving-to name: %q %v", reserved, err)
+	}
+	f.exec(t, `INSERT INTO publication_blocks(hostname,blocked,reason) VALUES($1,true,'test')`, renamed)
+	allReady()
+	settle(time.Now().UTC())
+	if got, want := addressChange(), "failed:"+blockedMove+".tunnels.example.test:address_blocked"; got != want || endpoint() != "https://"+renamed {
+		t.Fatalf("a block during a move: address change %q, want %q, address %q", got, want, endpoint())
+	}
+	f.exec(t, `DELETE FROM publication_blocks WHERE hostname=$1`, renamed)
 	// A tunnel paused (or deleted) during a move has no edge to confirm the name: the move is undone at once and its
 	// operation fails, instead of waiting out the timeout (or hanging).
 	for _, state := range []string{"paused", "deleted"} {

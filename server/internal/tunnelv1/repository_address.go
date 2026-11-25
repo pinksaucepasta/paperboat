@@ -85,9 +85,10 @@ func startAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, ne
 	// A hold of another tunnel blocks the claim: a move in progress to the name is never taken over, not even one past
 	// its deadline (SettleAddressMoves undoes it and fails its operation first, so no operation can report a change
 	// that did not happen), and a cooldown only once it has ended. The tunnel's own holds (it may take its old name
-	// back) are replaced.
-	claimed, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,operation_id,kind,until) VALUES($1,$2,$5,'incoming',$3)
-ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,operation_id=EXCLUDED.operation_id,kind='incoming',until=EXCLUDED.until,created_at=$4
+	// back) are replaced; created_at keeps when its cooldown began (dropMoveHoldTx).
+	claimed, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,operation_id,kind,until,created_at) VALUES($1,$2,$5,'incoming',$3,$4)
+ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,operation_id=EXCLUDED.operation_id,kind='incoming',until=EXCLUDED.until,
+ created_at=CASE WHEN paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id THEN paperboat.tunnel_address_holds.created_at ELSE $4 END
 WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id
  OR (paperboat.tunnel_address_holds.kind='retired' AND paperboat.tunnel_address_holds.until<=$4)`, newHost, tunnel.ID, now.Add(policy.MoveTimeout), now, operationID)
 	if err != nil {
@@ -128,12 +129,12 @@ WHERE tunnel_id=$1 AND protocol='http' AND match_type='managed' AND match_hostna
 // with the old link must not land on another account's tunnel meanwhile).
 func finishAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, newHost, actorID string, policy AddressPolicy, now time.Time) (dbsqlc.Tunnel, error) {
 	oldHost := strings.TrimPrefix(tunnel.StableEndpoint, "https://")
-	var newBlocked bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.publication_blocks WHERE hostname=$1 AND blocked)`, newHost).Scan(&newBlocked); err != nil {
+	var blocked bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.publication_blocks WHERE hostname IN ($1,$2) AND blocked)`, newHost, oldHost).Scan(&blocked); err != nil {
 		return tunnel, translate(err)
 	}
-	if newBlocked {
-		return tunnel, ErrAddressBlocked // an operator blocked the name while the move was in progress
+	if blocked {
+		return tunnel, ErrAddressBlocked // an operator blocked either name while the move was in progress
 	}
 	moved, err := tx.Exec(ctx, `UPDATE paperboat.managed_hostnames SET hostname=$2 WHERE hostname=$1 AND resource_kind='tunnel' AND resource_id=$3`, oldHost, newHost, tunnel.ID)
 	if err != nil {
@@ -159,7 +160,7 @@ WHERE tunnel_id=$1 AND match_hostname=$2 AND deleted_at IS NULL`, tunnel.ID, old
 	if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming'`, newHost, tunnel.ID); err != nil {
 		return tunnel, translate(err)
 	}
-	retired, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,kind,until) VALUES($1,$2,'retired',$3)
+	retired, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,kind,until,created_at) VALUES($1,$2,'retired',$3,$4)
 ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,operation_id=NULL,kind='retired',until=EXCLUDED.until,created_at=$4
 WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id OR paperboat.tunnel_address_holds.until<=$4`, oldHost, tunnel.ID, now.Add(policy.Cooldown), now)
 	if err != nil {
@@ -263,6 +264,18 @@ func undoReason(err error) string {
 	return ""
 }
 
+// dropMoveHoldTx drops an undone move's claim. A name the tunnel was taking back goes back to the cooldown it was in: its
+// hold is older than the move (which began MoveTimeout before its deadline).
+func dropMoveHoldTx(ctx context.Context, tx *db.Tx, host, tunnelID string, input AddressSettleRecord) error {
+	if _, err := tx.Exec(ctx, `UPDATE paperboat.tunnel_address_holds SET kind='retired',operation_id=NULL,until=created_at+make_interval(secs=>$3)
+WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming' AND created_at<until-make_interval(secs=>$4) AND created_at+make_interval(secs=>$3)>$5`,
+		host, tunnelID, input.Policy.Cooldown.Seconds(), input.Policy.MoveTimeout.Seconds(), input.Now); err != nil {
+		return translate(err)
+	}
+	_, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming'`, host, tunnelID)
+	return translate(err)
+}
+
 func settleAddressMoveTx(ctx context.Context, tx *db.Tx, newHost string, input AddressSettleRecord, undoCode string) error {
 	if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 		return err
@@ -293,8 +306,8 @@ WHERE id=$1 AND state IN ('pending','running')`, operationID, input.Now, code, n
 	}
 	if tunnel.DesiredState == DesiredDeleted {
 		// Nothing serves the tunnel any more; the move is moot.
-		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming'`, newHost, tunnelID); err != nil {
-			return translate(err)
+		if err := dropMoveHoldTx(ctx, tx, newHost, tunnelID, input); err != nil {
+			return err
 		}
 		return failOperation(moveDeleted)
 	}
@@ -324,8 +337,8 @@ WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.
 		}
 	} else {
 		eventType, outcome = "tunnel.address_change_failed", "unchanged"
-		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming'`, newHost, tunnelID); err != nil {
-			return translate(err)
+		if err := dropMoveHoldTx(ctx, tx, newHost, tunnelID, input); err != nil {
+			return err
 		}
 		if err := touchAddressRoutesTx(ctx, tx, tunnelID, oldHost, input.ActorID, input.Now); err != nil {
 			return err
