@@ -70,6 +70,8 @@ type MachineSSH struct {
 	HostKeys []string `json:"host_keys,omitempty"`
 	// HostKeyConflict is set while the server refuses the machine's host keys as another live machine's.
 	HostKeyConflict *HostKeyConflict `json:"host_key_conflict,omitempty"`
+	// Unreachable is set while the machine reports that its SSH server does not answer.
+	Unreachable bool `json:"unreachable,omitempty"`
 }
 
 // HostKeyConflict names the machine that already has the keys, when the caller may see it.
@@ -111,6 +113,7 @@ type SSHAuthority struct {
 	HostKeyGeneration uint64
 	// HostKeyInUse: the server refuses the machine's host keys as HostKeyInUseBy's (empty when not visible).
 	HostKeyInUse   bool
+	Unreachable    bool // the machine reports that its SSH server does not answer
 	HostKeyInUseBy string
 }
 

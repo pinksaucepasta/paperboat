@@ -65,6 +65,23 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 	if err != nil || len(items) != 3 {
 		t.Fatalf("inventory: %d items err=%v; want the 3 machines in use", len(items), err)
 	}
+	// The machine's observed ssh_unreachable is listed, and each change of it moves the topic once; a repeat moves nothing.
+	unreachableBefore := topic()
+	for _, unreachable := range []bool{true, true, false, false} {
+		exec(`UPDATE paperboat.user_machines SET observed_capabilities=CASE WHEN $2 THEN ARRAY['ssh_unreachable'] ELSE '{}'::text[] END WHERE id='inv_ssh_1_'||$1`, suffix, unreachable)
+		listed, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range listed {
+			if item.Alias == "ssh-1" && (item.SSH == nil || item.SSH.Unreachable != unreachable) {
+				t.Fatalf("ssh-1 listed as %+v, want unreachable %v", item.SSH, unreachable)
+			}
+		}
+	}
+	if moves := topic() - unreachableBefore; moves != 2 {
+		t.Fatalf("a stop and a start moved the inventory topic %d times, want 2", moves)
+	}
 	// A revoked machine is gone: not listed by default and not when asked for by state.
 	revoked, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10, State: "revoked"})
 	if err != nil || len(revoked) != 0 {

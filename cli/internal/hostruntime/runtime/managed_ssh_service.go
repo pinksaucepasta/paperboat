@@ -9,6 +9,7 @@ import (
 	"net/http"
 	goruntime "runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
@@ -22,12 +23,17 @@ import (
 // machine's terminal and other services. Admission remains controlled by the
 // authenticated machine policy; local reachability grants no authority.
 type managedSSHService struct {
-	disable           chan chan error
-	attemptCancel     context.CancelFunc
-	gate              server.CapabilityGate
-	initialize        func(context.Context) (Service, error)
-	cleanup           func(context.Context) error
-	retarget          func(context.Context)
+	disable       chan chan error
+	attemptCancel context.CancelFunc
+	gate          server.CapabilityGate
+	initialize    func(context.Context) (Service, error)
+	cleanup       func(context.Context) error
+	retarget      func(context.Context)
+	// probe asks the machine's sshd (nil error: it answers); ok is false when there is nothing to ask yet.
+	probe             func(context.Context) (ok bool, err error)
+	probedAt          time.Time
+	answered          bool // the last probe's result
+	unreachable       atomic.Bool
 	interval, timeout time.Duration
 	mu                sync.Mutex
 	cancel            context.CancelFunc
@@ -53,6 +59,19 @@ func newProductionManagedSSH(controlURL string, transport http.RoundTripper, reg
 	service := &managedSSHService{gate: gate, interval: 5 * time.Second, timeout: 45 * time.Second, cleanup: func(ctx context.Context) error { return cleanupProductionManagedSSH(ctx, registration) }, initialize: func(ctx context.Context) (Service, error) {
 		return initializeProductionManagedSSH(ctx, host, controlURL, transport, currentSSHPort(registration, registered), identity, generation, workerEpoch, keyEvents)
 	}}
+	service.answered = true
+	service.probe = func(ctx context.Context) (bool, error) {
+		target, ok := host.Target()
+		port := target.Port
+		if !ok && goruntime.GOOS != "windows" { // sshd was already stopped at start
+			port = currentSSHPort(registration, registered).SSHPort
+		}
+		if port == 0 {
+			return false, nil
+		}
+		_, err := managedssh.ProbeLoopbackSSH(ctx, port, 3*time.Second)
+		return true, err
+	}
 	if goruntime.GOOS != "windows" { // Windows serves the port of its installed sshd generation
 		service.retarget = func(ctx context.Context) {
 			target, ok := host.Target()
@@ -180,6 +199,7 @@ func (s *managedSSHService) run(ctx context.Context) {
 				s.setHealth(health.Ready, "")
 			}
 		}
+		s.observeServer(ctx, time.Now())
 		if authority != nil && !cleanupPending && s.gate.Enabled("ssh.v1") {
 			if s.retarget != nil {
 				s.retarget(ctx)
@@ -208,6 +228,35 @@ func (s *managedSSHService) run(ctx context.Context) {
 		}
 	}
 }
+
+// sshProbeInterval spaces the probes of the machine's sshd.
+const sshProbeInterval = 30 * time.Second
+
+// observeServer records whether the machine's sshd answers once two probes in a row agree, so a restarting sshd reports
+// nothing. Prior art: Tailscale's Hostinfo, which a peer hears of only when it changes.
+func (s *managedSSHService) observeServer(ctx context.Context, now time.Time) {
+	if s.probe == nil || !s.gate.Enabled("ssh.v1") {
+		s.unreachable.Store(false)
+		s.answered, s.probedAt = true, time.Time{}
+		return
+	}
+	if now.Sub(s.probedAt) < sshProbeInterval {
+		return
+	}
+	s.probedAt = now
+	ok, err := s.probe(ctx)
+	if !ok || ctx.Err() != nil {
+		return
+	}
+	if answers := err == nil; answers == s.answered {
+		s.unreachable.Store(!answers)
+	} else {
+		s.answered = answers
+	}
+}
+
+// ServerUnreachable reports that the machine's sshd does not answer.
+func (s *managedSSHService) ServerUnreachable() bool { return s.unreachable.Load() }
 
 func (s *managedSSHService) setHealth(state health.State, reason string) {
 	s.mu.Lock()

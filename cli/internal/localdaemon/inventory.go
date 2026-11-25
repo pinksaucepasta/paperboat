@@ -673,6 +673,9 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_host_key_changed", Severity: "warning", Title: "SSH host identity is not ready", Recovery: "Review and approve the machine's current SSH host keys", ETag: "ssh_host_key_changed"}}
+		} else if generation > 0 && machine.SSHAuthority.Unreachable {
+			// Not an ssh_ code: those refuse `pb ssh` before it dials, and this report lags a restarted sshd by a minute.
+			status.Health = []localapi.HealthItem{{Code: "sshd_unreachable", Severity: "warning", Title: "The machine's SSH server does not answer", Recovery: "Start sshd or Remote Login there; SSH shows as ready about a minute after it answers", ETag: "sshd_unreachable"}}
 		}
 		if len(status.Health) == 0 {
 			// Every degraded readiness names why: a machine that just came online has services still starting
@@ -745,7 +748,7 @@ func sshReadiness(machine api.UserMachine, generation uint64) string {
 	if generation == 0 || machine.State == "revoked" || machine.State == "deleted" || machine.SSHAuthority.TargetGeneration == 0 {
 		return "unavailable"
 	}
-	if !machine.Online || !machine.SSHLocalReady || machine.SSHAuthority.TargetGeneration != generation || machine.SSHAuthority.HostKeyGeneration != generation {
+	if !machine.Online || !machine.SSHLocalReady || machine.SSHAuthority.Unreachable || machine.SSHAuthority.TargetGeneration != generation || machine.SSHAuthority.HostKeyGeneration != generation {
 		return "degraded"
 	}
 	return "ready"

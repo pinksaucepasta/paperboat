@@ -6376,7 +6376,7 @@
           "capabilities": {
             "type": "array",
             "uniqueItems": true,
-            "maxItems": 7,
+            "maxItems": 8,
             "items": {
               "type": "string",
               "enum": [
@@ -6385,7 +6385,8 @@
                 "terminal_host",
                 "session_host",
                 "keep_awake",
-                "environment_injection"
+                "environment_injection",
+                "ssh_unreachable"
               ]
             }
           }
@@ -16068,6 +16069,10 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "unreachable": {
+                "type": "boolean",
+                "description": "Present and true while the machine reports that its SSH server does not answer."
               },
               "host_key_conflict": {
                 "type": "object",

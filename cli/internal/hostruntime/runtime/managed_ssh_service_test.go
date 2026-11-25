@@ -182,3 +182,39 @@ func TestOptionalSSHFirstDisabledPolicyCleansCrashLeftGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A stopped sshd was reported nowhere: the account's lists kept saying SSH is ready. One failed probe (an sshd being
+// restarted) reports nothing; two in a row do, and two good ones take it back.
+func TestManagedSSHReportsAServerThatStoppedAnsweringOnTheSecondProbe(t *testing.T) {
+	gate := newMachineCapabilityController(nil)
+	applySSHSelection(t, gate, 1, true)
+	down, probes := false, 0
+	service := &managedSSHService{gate: gate, answered: true, probe: func(context.Context) (bool, error) {
+		probes++
+		if down {
+			return true, ErrManagedSSHUnavailable
+		}
+		return true, nil
+	}}
+	sender := &runtimeObservationSender{sshUnreachable: service.ServerUnreachable}
+	now := time.Now()
+	for step, want := range []struct{ down, unreachable bool }{{false, false}, {true, false}, {false, false}, {true, false}, {true, true}, {false, true}, {true, true}, {false, true}, {false, false}} {
+		down = want.down
+		now = now.Add(sshProbeInterval)
+		service.observeServer(t.Context(), now)
+		service.observeServer(t.Context(), now.Add(sshProbeInterval/2)) // inside the interval: no probe
+		if probes != step+1 || sender.sshUnreachable() != want.unreachable {
+			t.Fatalf("step %d: %d probes, unreachable %v, want %v", step, probes, sender.sshUnreachable(), want.unreachable)
+		}
+	}
+	down = true
+	for range 2 {
+		now = now.Add(sshProbeInterval)
+		service.observeServer(t.Context(), now)
+	}
+	applySSHSelection(t, gate, 2, false)
+	service.observeServer(t.Context(), now)
+	if service.ServerUnreachable() {
+		t.Fatal("disabled SSH is still reported as not answering")
+	}
+}

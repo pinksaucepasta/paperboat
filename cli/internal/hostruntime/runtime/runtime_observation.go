@@ -241,6 +241,7 @@ func (s *runtimeObservationService) Shutdown(ctx context.Context) error {
 }
 
 type runtimeObservationSender struct {
+	sshUnreachable                                      func() bool // the machine's sshd does not answer (managedSSHService.ServerUnreachable)
 	machineServicesDiscover                             func(context.Context) ([]machineservices.Service, error)
 	machineServicesMu                                   sync.Mutex
 	sentMu                                              sync.Mutex
@@ -662,6 +663,9 @@ func (s *runtimeObservationSender) runtimeDiagnostics(observedAt time.Time, envi
 	}
 	if environmentEnabled && !slices.Contains(capabilities, "environment_injection") {
 		capabilities = append(capabilities, "environment_injection")
+	}
+	if s.sshUnreachable != nil && s.sshUnreachable() {
+		capabilities = append(capabilities, "ssh_unreachable")
 	}
 	return &runtimeDiagnosticsObservation{Capabilities: capabilities, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID, ConnectorState: state, WorkerServiceScope: s.serviceScope, ObservedAt: observedAt}
 }

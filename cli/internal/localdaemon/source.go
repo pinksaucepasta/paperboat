@@ -326,7 +326,7 @@ func applyListedSSH(machines []api.UserMachine) []api.UserMachine {
 			continue
 		}
 		machine.SSHUser, machine.SSHPort, machine.SSHHostKeys = ssh.OSUser, ssh.Port, ssh.HostKeys
-		machine.SSHAuthority = api.SSHAuthority{TargetGeneration: ssh.TargetGeneration, HostKeyGeneration: ssh.HostKeyGeneration}
+		machine.SSHAuthority = api.SSHAuthority{TargetGeneration: ssh.TargetGeneration, HostKeyGeneration: ssh.HostKeyGeneration, Unreachable: ssh.Unreachable}
 		if ssh.HostKeyConflict != nil {
 			machine.SSHAuthority.HostKeyInUse, machine.SSHAuthority.HostKeyInUseBy = true, ssh.HostKeyConflict.MachineName
 		}

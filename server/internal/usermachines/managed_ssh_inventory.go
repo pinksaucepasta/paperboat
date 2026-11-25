@@ -23,6 +23,8 @@ type MachineSSH struct {
 	// HostKeyConflict is present while this machine's latest host-key observation was refused
 	// because another live machine has the same keys (a cloned image).
 	HostKeyConflict *HostKeyConflict `json:"host_key_conflict,omitempty"`
+	// Unreachable: the machine reports that its SSH server does not answer (observed capability ssh_unreachable).
+	Unreachable bool `json:"unreachable,omitempty"`
 }
 
 // HostKeyConflict names the other machine only when the caller may see it.
@@ -45,7 +47,7 @@ func (s *Service) describeManagedSSH(ctx context.Context, account string, machin
 		ids = append(ids, machine.ID)
 		byID[machine.ID] = machine
 	}
-	rows, err := s.db.SQL().QueryContext(ctx, `SELECT m.id,t.os_user,t.target_port,t.machine_generation,coalesce(h.machine_generation,0),c.user_machine_id IS NOT NULL,
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT m.id,t.os_user,t.target_port,t.machine_generation,coalesce(h.machine_generation,0),coalesce('ssh_unreachable'=ANY(m.observed_capabilities),false),c.user_machine_id IS NOT NULL,
  coalesce((SELECT json_agg(k.public_key ORDER BY member.ordinal) FROM machine_ssh_host_keys member JOIN machine_ssh_host_key_owners k ON k.fingerprint=member.fingerprint AND k.user_machine_id=member.user_machine_id WHERE member.set_id=h.id),'[]'::json),
  CASE WHEN o.user_id=$1 OR machine_management_allowed($1,o.id) THEN coalesce(nullif(o.alias,''),o.id) END
  FROM user_machines m
@@ -67,7 +69,7 @@ func (s *Service) describeManagedSSH(ctx context.Context, account string, machin
 		var conflict bool
 		var otherName sql.NullString
 		var keys []byte
-		if err := rows.Scan(&id, &ssh.OSUser, &ssh.Port, &ssh.TargetGeneration, &ssh.HostKeyGeneration, &conflict, &keys, &otherName); err != nil {
+		if err := rows.Scan(&id, &ssh.OSUser, &ssh.Port, &ssh.TargetGeneration, &ssh.HostKeyGeneration, &ssh.Unreachable, &conflict, &keys, &otherName); err != nil {
 			return errors.Join(err, rows.Close())
 		}
 		if err := json.Unmarshal(keys, &ssh.HostKeys); err != nil {

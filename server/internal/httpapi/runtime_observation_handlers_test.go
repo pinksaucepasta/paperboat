@@ -441,7 +441,7 @@ func TestNormalizeConfigStatusTimestampPreservesAgeAcrossClockSkew(t *testing.T)
 }
 
 func TestValidObservedCapabilitiesRejectsUnknownDuplicatesAndMachineRelay(t *testing.T) {
-	if !validObservedCapabilities([]string{"file_receive", "preview_launch"}) {
+	if !validObservedCapabilities([]string{"file_receive", "preview_launch", "ssh_unreachable"}) {
 		t.Fatal("client capabilities should be valid")
 	}
 	for _, capabilities := range [][]string{{"terminal"}, {"file_receive", "file_receive"}, {"peer_relay"}, {"file_receive", "file_transfer_modes"}} {

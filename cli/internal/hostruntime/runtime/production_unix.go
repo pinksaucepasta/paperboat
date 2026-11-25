@@ -367,6 +367,9 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
+	if observed, ok := managedSSHService.(interface{ ServerUnreachable() bool }); ok {
+		machineServiceObserver.sshUnreachable = observed.ServerUnreachable
+	}
 	comparisonHome, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
