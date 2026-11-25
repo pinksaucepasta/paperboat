@@ -107,13 +107,14 @@ func TestCLIUpdateRequiredHasActionableFailure(t *testing.T) {
 	}
 }
 
-func TestUpdateNoticeSkipsSSHConnections(t *testing.T) {
+func TestUpdateNoticeSkipsInteractiveConnections(t *testing.T) {
 	root := &cobra.Command{Use: "pb"}
 	ssh := &cobra.Command{Use: "ssh"}
 	doctor := &cobra.Command{Use: "doctor"}
-	root.AddCommand(ssh)
+	connect := &cobra.Command{Use: "connect <environment>"}
+	root.AddCommand(ssh, connect)
 	ssh.AddCommand(doctor)
-	if !sshConnectionCommand(ssh) || sshConnectionCommand(doctor) || sshConnectionCommand(root) {
-		t.Fatal("only `pb ssh` itself skips the updater notice")
+	if !interactiveConnectionCommand(ssh) || !interactiveConnectionCommand(connect) || interactiveConnectionCommand(doctor) || interactiveConnectionCommand(root) {
+		t.Fatal("only the commands that open a shell skip the updater notice")
 	}
 }
