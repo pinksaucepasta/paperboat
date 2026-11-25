@@ -18,9 +18,20 @@ func (e *sshTargetNotReadyError) Error() string {
 	return "SSH to " + e.machine + " is not ready: " + strings.TrimSuffix(e.title, ".") + ". " + strings.TrimSuffix(e.recovery, ".") + "."
 }
 
-// sshTargetHealth returns sshTargetNotReadyError when the daemon's snapshot reports the machine's SSH as
-// not ready with a health item, and nil otherwise (including when the daemon cannot be asked).
+// sshTargetHealth returns sshTargetNotReadyError when the daemon reports the machine's SSH as not ready with a health
+// item, and nil otherwise (including when the daemon cannot be asked). The daemon's view can be behind the server's, so
+// it is asked to refresh once before a refusal; the host key check itself is OpenSSH's, against the published keys.
 func sshTargetHealth(ctx context.Context, machineID, alias string) error {
+	if snapshotSSHHealth(ctx, machineID, alias) == nil {
+		return nil
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, sshHostKeysRefreshTimeout)
+	defer cancel()
+	_ = sshDependenciesOf(ctx).refreshInventory(refreshCtx)
+	return snapshotSSHHealth(ctx, machineID, alias)
+}
+
+func snapshotSSHHealth(ctx context.Context, machineID, alias string) error {
 	ctx, cancel := context.WithTimeout(ctx, daemonSnapshotLookupTimeout)
 	defer cancel()
 	snapshot, err := hostDependenciesOf(ctx).readSnapshot(ctx)

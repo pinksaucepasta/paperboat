@@ -30,6 +30,37 @@ func TestSSHToATargetThatIsNotReadyNamesTheReason(t *testing.T) {
 	}
 }
 
+// Host keys published a moment ago were refused as missing until the daemon's next refresh. A refusal asks the daemon
+// to refresh once first; a ready target asks nothing.
+func TestSSHRefreshesOnceBeforeRefusingATarget(t *testing.T) {
+	status := localapi.MachineStatus{ID: "machine_b", Alias: "box", SSHReadiness: "degraded", Health: []localapi.HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "info", Title: "Publishing the machine's SSH host keys", Recovery: "Wait a minute"}}}
+	refreshes, published := 0, false
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.readSnapshot = func(context.Context) (localapi.Snapshot, error) {
+			return localapi.Snapshot{Machines: []localapi.MachineStatus{status}}, nil
+		}
+	})
+	ctx = withSSHDependencies(ctx, func(d *sshDependencies) {
+		d.refreshInventory = func(context.Context) error {
+			refreshes++
+			if published {
+				status.SSHReadiness, status.Health = "ready", nil
+			}
+			return nil
+		}
+	})
+	if err := sshTargetHealth(ctx, "machine_b", "box"); err == nil || refreshes != 1 {
+		t.Fatalf("still unpublished: err=%v refreshes=%d, want a refusal after one refresh", err, refreshes)
+	}
+	published = true
+	if err := sshTargetHealth(ctx, "machine_b", "box"); err != nil || refreshes != 2 {
+		t.Fatalf("published since: err=%v refreshes=%d, want no refusal after one refresh", err, refreshes)
+	}
+	if err := sshTargetHealth(ctx, "machine_b", "box"); err != nil || refreshes != 2 {
+		t.Fatalf("ready: err=%v refreshes=%d, want no refresh", err, refreshes)
+	}
+}
+
 // A machine with no SSH target (an OS user name managed SSH cannot serve) answers 404; pb ssh says why and what to
 // do instead of "The requested Paperboat resource was not found" (X-28, OS user "Zoë Test").
 func TestSSHToAMachineWithoutATargetNamesTheCauses(t *testing.T) {
