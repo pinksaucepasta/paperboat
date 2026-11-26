@@ -710,6 +710,11 @@ func unixParticipantReady(probe UnixParticipantProbe, version string, baseline U
 	if probe.State == "ready" {
 		return nil
 	}
+	// A machine removed from its account (or signed out) waits for enrollment before and after; the
+	// update must still land, as long as it is not worse than before.
+	if baseline.State == "awaiting_enrollment" && probe.State == "awaiting_enrollment" {
+		return nil
+	}
 	// An installation that was already unhealthy before the update, for a reason other than the
 	// control plane being unreachable (a broken local access setup, say), can only be repaired by
 	// updating it. The updater must work when the app is broken: the daemon has to come back

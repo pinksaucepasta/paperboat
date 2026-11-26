@@ -85,3 +85,24 @@ func TestValidateReadyToleratesTransientDegradedAfterHealth(t *testing.T) {
 	}
 }
 
+// A machine removed from its account waits for enrollment before and after the update; that is its
+// ready state (smoke 2026-11-26: every update of a removed machine rolled back on daemon_state). A
+// removed machine never accepts a worse state, and a ready machine never accepts awaiting_enrollment.
+func TestRemovedMachineUpdatesWhileAwaitingEnrollment(t *testing.T) {
+	awaiting := UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "awaiting_enrollment"}
+	next := awaiting
+	next.Version, next.UpdaterVersion = "2", "2"
+	if err := unixParticipantReady(next, "2", awaiting, false); err != nil {
+		t.Fatalf("removed machine: %v", err)
+	}
+	worse := next
+	worse.State = "degraded"
+	if err := unixParticipantReady(worse, "2", awaiting, false); err == nil {
+		t.Fatal("removed machine accepted a degraded daemon")
+	}
+	ready := awaiting
+	ready.State = "ready"
+	if err := unixParticipantReady(next, "2", ready, true); err == nil {
+		t.Fatal("ready machine accepted awaiting_enrollment")
+	}
+}
