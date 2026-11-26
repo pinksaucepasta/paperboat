@@ -403,7 +403,8 @@ def run_check(check, argv, args, device):
               else 'exit %s: %s' % (done.returncode, (done.stderr.strip() or done.stdout.strip())[-300:]))
     took = round(time.monotonic() - started)
     if outcome != 'PASS' and os.environ.get('SMOKE_ON_FAIL'):  # the devices' evidence at the failure, as smoke.sh does
-        subprocess.run([os.environ['SMOKE_ON_FAIL'], 'fail', check], timeout=900, check=False, capture_output=True)
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):  # evidence never changes the result
+            subprocess.run([os.environ['SMOKE_ON_FAIL'], 'fail', check], timeout=900, check=False, capture_output=True)
     return outcome, took, detail
 
 
