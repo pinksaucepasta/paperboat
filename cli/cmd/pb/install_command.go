@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -21,6 +22,9 @@ func suppliedInstallTimeout(platform string) time.Duration {
 func platformInstallCommand() *cobra.Command {
 	command := &cobra.Command{Use: "install", Short: "Install this executable and its local service", Args: commandArgs(cobra.NoArgs), SilenceUsage: true, SilenceErrors: true,
 		RunE: func(c *cobra.Command, _ []string) error {
+			if err := refuseMacRootInstall(runtime.GOOS, os.Geteuid()); err != nil {
+				return err
+			}
 			executable, source, err := installDependenciesOf(c.Context()).runningSource()
 			if err != nil {
 				return err
@@ -70,4 +74,13 @@ func selectedInstallServer(command *cobra.Command) string {
 		return ""
 	}
 	return server
+}
+
+// refuseMacRootInstall stops `pb install` as root on macOS before any step: the install is per user (launchd
+// agents in the user's session), and a root install failed midway at the machine guard step.
+func refuseMacRootInstall(platform string, euid int) error {
+	if platform == "darwin" && euid == 0 {
+		return commandRejection{reason: commandRejectMacRootInstall}
+	}
+	return nil
 }
