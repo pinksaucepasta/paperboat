@@ -24,6 +24,7 @@ Measured during the 22-26 Nov fix batch; none makes first use feel broken, so th
 - **Not reproduced, watch for:** `pb ssh` stalled ~115 s with the store locked (Windows not checked); 4 min "offline" after a same-version install.
 - **DNS cache for relay/edge QUIC dials** and the carrier TCP fallback (`connector/data_carrier_endpoint.go:164`).
 - **Unreliable test:** `TestForwardExecInputSwitchesConnectionsAndReplaysTheJournal` fails in a 20x run on main.
+- **Failed restore leaves a mixed set:** when the native-installation restore fails (a revoked machine whose previous carrier cannot start), `LifecycleManager.rollbackKeeping` (`cli/internal/hostruntime/service/transaction.go`, the `nativeInstallation.Restore` return) stops before the component restores, so the host service keeps the new build until the journal retry succeeds. The message says the restore did not finish (388e7b487 + cause-text fix). Idea: keep restoring components after a failed native restore and join the errors; test with an unrestorable `NativeInstallationState` and assert every component's `Restore` ran.
 - **Security review (week of 27 Nov):** elevated PowerShell on Windows loads modules via the user's PSModulePath; the machine guard takes its install dir from `%ProgramFiles%`. Proposed: clean the environment once where pb elevates.
 
 ## Before launch: decide
