@@ -228,7 +228,7 @@ func TestTeamMachineTransferToPersonalRefusalsHaveTheirOwnCodes(t *testing.T) {
 		r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "actor"}}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
-		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) {
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) || !strings.Contains(w.Body.String(), tc.says) {
 			t.Fatalf("%v: status %d body %s", tc.err, w.Code, w.Body.String())
 		}
 	}
@@ -243,13 +243,20 @@ func (s inviteErrorTeamHTTPStub) Invite(context.Context, string, string, teams.I
 	return teams.Invitation{}, s.err
 }
 
-// An invite of a current member says so, never team_changed.
+// Every invite refusal answers its own typed code; only a real generation conflict is team_changed.
 func TestTeamInviteOfAMemberHasItsOwnCode(t *testing.T) {
 	for _, tc := range []struct {
-		err  error
-		code string
+		err    error
+		status int
+		code   string
+		says   string
 	}{
-		{teams.ErrAlreadyMember, "already_member"},
+		{teams.ErrAlreadyMember, http.StatusConflict, "already_member", "Invite step: this person is already a member"},
+		{&teams.LimitError{Kind: "invitation", Used: 128, Limit: 128}, http.StatusConflict, "team_limit", "Team limit reached: 128 of 128"},
+		{teams.ErrSeatRequired, http.StatusConflict, "seat_required", ""},
+		{teams.ErrDomainNotVerified, http.StatusBadRequest, "invitation_domain_not_verified", ""},
+		{teams.ErrForbidden, http.StatusForbidden, "forbidden", ""},
+		{teams.ErrConflict, http.StatusConflict, "team_changed", ""},
 	} {
 		mux := http.NewServeMux()
 		pass := func(h http.Handler) http.Handler { return h }
@@ -259,7 +266,7 @@ func TestTeamInviteOfAMemberHasItsOwnCode(t *testing.T) {
 		r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "actor"}}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
-		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) {
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) || !strings.Contains(w.Body.String(), tc.says) {
 			t.Fatalf("%v: status %d body %s", tc.err, w.Code, w.Body.String())
 		}
 	}

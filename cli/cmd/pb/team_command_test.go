@@ -542,6 +542,27 @@ func TestTeamInviteExplainsSeatRequiredFromTheErrorCode(t *testing.T) {
 	}
 }
 
+// Inviting a current member names that step and what to do, not "state changed".
+func TestTeamInviteOfACurrentMemberSaysSo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":{"code":"already_member","message":"wording may change","request_id":"r","details":{}}}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	var output bytes.Buffer
+	args := []string{"team", "invite", "team_1", "member@example.test", "--generation", "3", "--server", server.URL, "--config", configPath}
+	if code := run(t.Context(), args, &output, &output); code == 0 || !strings.Contains(output.String(), "Invite step: this person is already a member") || !strings.Contains(output.String(), "pb team get") || strings.Contains(output.String(), "state changed") {
+		t.Fatalf("exit=%d output=%s", code, output.String())
+	}
+}
+
 // Inviting someone whose invitation is pending re-sends it, and says so.
 func TestTeamInviteSaysWhenItReSentAPendingInvitation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

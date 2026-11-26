@@ -239,6 +239,7 @@ var publicAPIMessages = map[string]string{
 	"outside_token_scope":             "This API token's scope does not cover this. Use a token whose scope includes it, or sign in with `pb login`.",
 	"team_sso_required":               "This team requires single sign-on. Run `pb login` and sign in through your company's identity provider, then retry.",
 	"directory_managed":               "This member is managed by your company directory. Change their membership or role in your identity provider.",
+	"already_member":                  "Invite step: this person is already a member of the team, so no invitation was sent. Nothing to do; `pb team get <team>` lists the members.",
 	"invitation_domain_not_verified":  "This team requires SSO, so invitations go only to its verified domains. Invite an address at a verified domain, or verify the domain with `pb team sso setup <team> --step domain`.",
 }
 

@@ -150,6 +150,23 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	// A re-invite asking for a lower role never downgrades a pending admin invitation.
+	adminInvite, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "admin_invite", ExpectedGeneration: state.Generation, Email: other + ".admin@example.test", Role: "admin"})
+	if e != nil || adminInvite.Role != "admin" {
+		t.Fatalf("admin invitation: %+v %v", adminInvite, e)
+	}
+	lower, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "admin_reinvite_member", ExpectedGeneration: adminInvite.Generation, Email: other + ".admin@example.test", Role: "member"})
+	if e != nil || !lower.Resent || lower.InvitationID != adminInvite.InvitationID || lower.Role != "admin" {
+		t.Fatalf("re-invite downgraded or replaced a pending admin invitation: %+v %v", lower, e)
+	}
+	var storedRole string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT role FROM paperboat.team_invitations WHERE invitation_id=$1`, adminInvite.InvitationID).Scan(&storedRole); err != nil || storedRole != "admin" {
+		t.Fatalf("stored role after re-invite %q: %v", storedRole, err)
+	}
+	state, e = s.CancelInvite(ctx, owner, team, adminInvite.InvitationID, MutationRequest{OperationID: "cancel_admin_invite", ExpectedGeneration: lower.Generation})
+	if e != nil {
+		t.Fatal(e)
+	}
 	emailRequest := InviteRequest{OperationID: "pre_signup", ExpectedGeneration: state.Generation, Email: strings.ToUpper(other + ".Member+tag@example.test")}
 	emailInvite, err := s.Invite(ctx, owner, team, emailRequest)
 	if err != nil || emailInvite.AccountID != "" || emailInvite.Email != other+".member@example.test" {
