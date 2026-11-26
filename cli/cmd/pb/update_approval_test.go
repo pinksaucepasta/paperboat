@@ -531,7 +531,7 @@ func TestUpdateWhileAnActivationFinishesSaysSoAtOnce(t *testing.T) {
 	if code := run(ctx, []string{"update", "--force"}, &stdout, &stderr); code == 0 {
 		t.Fatalf("update during an activation succeeded: %q", stdout.String())
 	}
-	if want := "an update to " + updateApprovalCandidateVersion + " is installed, finishing its health check (about 5 minutes left); run `pb update status`"; !strings.Contains(stderr.String(), want) {
+	if want := "An update to " + updateApprovalCandidateVersion + " is in progress: finishing its health check (about 5 minutes left). Run `pb update status` to follow it."; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
 	}
 }
@@ -559,7 +559,7 @@ func TestUpdateDuringAnActivationRefusesAtOnceAsBusy(t *testing.T) {
 			if code == 0 || time.Since(started) > 10*time.Second {
 				t.Fatalf("exit %d after %v: %q", code, time.Since(started), output)
 			}
-			want := "an update to " + updateApprovalCandidateVersion + " is installed, finishing its health check (up to 10 minutes)"
+			want := "An update to " + updateApprovalCandidateVersion + " is in progress: finishing its health check (up to 10 minutes). Run `pb update status` to follow it."
 			if !strings.Contains(output, want) || strings.Contains(output, `"ok":true`) {
 				t.Fatalf("busy refusal missing: %q", output)
 			}
@@ -597,11 +597,11 @@ func TestUpdateStatusAfterCommitDropsChecksFromBeforeTheInstall(t *testing.T) {
 // A handoff left behind past the signed window has no "minutes left": the busy text says how to recover instead.
 func TestUpdateBusyTextForAStuckActivationSaysHowToRecover(t *testing.T) {
 	response := updated.ControlResponse{Activating: true, Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.26.11", UpdatedAt: time.Now().Add(-11 * time.Minute)}}
-	if text := activationDetail(response); !strings.Contains(text, "has not finished its health check after 10 minutes") || !strings.Contains(text, "pb doctor") {
+	if text := activationRefusal(response, nil).Error(); !strings.Contains(text, "has not finished its health check after 10 minutes") || !strings.Contains(text, "pb doctor") {
 		t.Fatalf("stuck activation text = %q", text)
 	}
 	response.Transaction.UpdatedAt = time.Now()
-	if text := activationDetail(response); !strings.Contains(text, "(up to 10 minutes)") {
+	if text := activationRefusal(response, nil).Error(); text != "An update to 2026.11.26.11 is in progress: finishing its health check (up to 10 minutes). Run `pb update status` to follow it." {
 		t.Fatalf("fresh activation text = %q", text)
 	}
 }

@@ -119,7 +119,7 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 	installed, err := updateDependenciesOf(ctx).install(ctx, executable, source, bundle, force, "", selectedInstallServer(command))
 	if err != nil {
 		if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
-			return commandRejection{reason: commandRejectUpdateBusy, cause: err, detail: finishingUpdateDetail(ctx)}
+			return finishingUpdateRefusal(ctx, err)
 		}
 		return err
 	}
@@ -241,16 +241,18 @@ func exportOfficialBundle(ctx context.Context, proofDirectory, output string) (s
 	return index.Version, err
 }
 
-// finishingUpdateDetail names the update whose health check holds the installation, or "" when the updater does not say.
-func finishingUpdateDetail(ctx context.Context) string {
+// finishingUpdateRefusal refuses an install that hostd's maintenance lock turned away, naming the activation that
+// holds it when the updater says which one.
+func finishingUpdateRefusal(ctx context.Context, cause error) error {
 	response, err := updaterActivation(ctx)
-	if err != nil {
-		return ""
+	if err != nil || response.Transaction.CandidateVersion == "" {
+		return commandRejection{reason: commandRejectUpdateBusy, cause: cause}
 	}
-	return activationDetail(response)
+	return activationRefusal(response, cause)
 }
 
-func activationDetail(response updated.ControlResponse) string {
+// activationRefusal says an update is being activated (the JSON code stays update_busy).
+func activationRefusal(response updated.ControlResponse, cause error) error {
 	update := "an update"
 	if response.Transaction.CandidateVersion != "" {
 		update += " to " + response.Transaction.CandidateVersion
@@ -258,9 +260,10 @@ func activationDetail(response updated.ControlResponse) string {
 	state := response.Transaction
 	// Without a deadline the signed window bounds the activation; one started longer ago than that is stuck.
 	if state.HealthDeadline.IsZero() && !state.UpdatedAt.IsZero() && time.Since(state.UpdatedAt) > activationWindow {
-		return update + " has not finished its health check after 10 minutes; run `pb doctor`, and `pb update status` to see whether it recovered"
+		return commandRejection{reason: commandRejectUpdateBusy, cause: cause, detail: update + " has not finished its health check after 10 minutes; run `pb doctor`, and `pb update status` to see whether it recovered"}
 	}
-	return update + " is " + activationFinishingText(state.HealthDeadline, time.Now()) + "; run `pb update status`"
+	finishing := strings.TrimPrefix(activationFinishingText(state.HealthDeadline, time.Now()), "installed, ")
+	return commandRejection{reason: commandRejectUpdateActivating, cause: cause, detail: "A" + update[1:] + " is in progress: " + finishing + ". Run `pb update status` to follow it."}
 }
 
 // activationWindow is the signed stability window (releasepolicy StabilityWindowSeconds) that bounds an activation.
@@ -284,7 +287,7 @@ func refuseUpdateWhileActivating(ctx context.Context) error {
 	if err != nil || !response.Activating {
 		return nil
 	}
-	return commandRejection{reason: commandRejectUpdateBusy, cause: hostdproto.ErrMaintenanceBusy, detail: activationDetail(response)}
+	return activationRefusal(response, hostdproto.ErrMaintenanceBusy)
 }
 
 // fetchSignedReleaseVersion reads the version of the signed official release for this platform.

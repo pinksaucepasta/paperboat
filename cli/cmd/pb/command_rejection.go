@@ -22,6 +22,7 @@ const (
 	commandRejectNoninteractiveHome
 	commandRejectCustomUpdate
 	commandRejectUpdateBusy
+	commandRejectUpdateActivating
 	commandRejectReleaseQuarantined
 	commandRejectUpdateVerification
 	commandRejectLegacyCarrierRunning
@@ -175,6 +176,8 @@ func (e commandRejection) Error() string {
 		return "The official Paperboat release has no build for this platform (" + e.detail + ") yet, so there is no official update to save or install. Nothing was changed. Install a supplied build with `pb update --from <file>`."
 	case commandRejectReleaseQuarantined:
 		return "This release rolled back earlier; run `pb update` to retry it."
+	case commandRejectUpdateActivating:
+		return e.detail
 	case commandRejectUpdateBusy:
 		if e.detail != "" {
 			return "Paperboat is busy: " + e.detail + ". The installed version is unchanged."
