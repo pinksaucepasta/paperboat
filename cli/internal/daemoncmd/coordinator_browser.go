@@ -66,7 +66,7 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	if err := client.ReplaceAliases(ctx, aliases); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
 	}
-	if err := c.issueBrowserRouteCertificates(c.ctx, client, routes, nil); err != nil {
+	if err := c.issueBrowserRouteCertificates(client, routes, nil); err != nil {
 		return guardedWebRoute{}, err
 	}
 	state := &browserGatewayState{}
@@ -188,7 +188,7 @@ func (c *Coordinator) updateBrowserGatewayLocked(ctx context.Context, client gua
 	if err := client.ReplaceAliases(ctx, aliases); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
 	}
-	if err := c.issueBrowserRouteCertificates(c.ctx, client, routes, old.browserRoutes); err != nil {
+	if err := c.issueBrowserRouteCertificates(client, routes, old.browserRoutes); err != nil {
 		return guardedWebRoute{}, err
 	}
 	if err := old.proxy.SetRoutes(routes, denied); err != nil {
@@ -233,9 +233,16 @@ func browserGatewayRoutes(routes map[string]splitdns.BrowserRoute, aliases map[s
 // issueBrowserRouteCertificates issues the certificate of every routed name not in previous. The
 // local certificate service knows a name only after its aliases are replaced, so this runs after
 // ReplaceAliases (issuing first left the gateway without listeners, round 22).
-func (c *Coordinator) issueBrowserRouteCertificates(ctx context.Context, client guardedNameClient, routes, previous map[string]splitdns.BrowserRoute) error {
+func (c *Coordinator) issueBrowserRouteCertificates(client guardedNameClient, routes, previous map[string]splitdns.BrowserRoute) error {
+	// One stage budget for every new route, so N routes never hold c.mu for N certificate and trust steps; the
+	// routes it does not reach leave the browser step pending, and the reconcile retry finishes them.
+	ctx, cancel := c.stageCtx(c.cfg.ReconcileTimeout)
+	defer cancel()
 	issued := map[string]bool{} // one certificate covers every name under a machine's wildcard
 	for name, route := range routes {
+		if err := ctx.Err(); err != nil {
+			return coordinatorOperationFailure("browser_certificate", err)
+		}
 		if strings.HasPrefix(name, "*.") {
 			continue
 		}
@@ -399,7 +406,7 @@ func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guarde
 	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: hostname}); err != nil {
 		return tls.Certificate{}, err
 	}
-	// The trust step has its own budget, ended by Stop (ctx is the coordinator's lifetime on the reconcile path, the
+	// The trust step has its own budget, ended by Stop (ctx is the browser stage's budget on the reconcile path, the
 	// handshake's otherwise). A certutil write starts only with a full write budget left (machineguard).
 	trustCtx, cancel := context.WithTimeout(ctx, browserTrustBudget)
 	defer cancel()

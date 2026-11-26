@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -208,5 +209,63 @@ func TestALaterStagesTransientFailureIsRetriedAfterASlowEarlierStage(t *testing.
 	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.26", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err = c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil || dials != 2 {
 		t.Fatalf("err=%v dials=%d; want the policy apply retried on a fresh guard connection", err, dials)
+	}
+}
+
+// Several new browser routes share one stage budget: certificate calls that block never hold the reconcile (and
+// c.mu) for one budget per route; the routes left over stay pending and the retry issues them.
+func TestBrowserCertificatesShareOneStageBudget(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blocking atomic.Bool
+	blocking.Store(true)
+	c, err := NewCoordinator(CoordinatorConfig{
+		RetryBase: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond, ReconcileTimeout: 300 * time.Millisecond,
+		NameClient:  &coordinatorNameClient{},
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") },
+		IssueCertificate: func(ctx context.Context, name, _ string, _ int) (tls.Certificate, error) {
+			if blocking.Load() {
+				select { // a certificate call that ends only with its budget (capped so a regression fails, not hangs)
+				case <-ctx.Done():
+					return tls.Certificate{}, ctx.Err()
+				case <-time.After(3 * time.Second):
+				}
+			}
+			return ca.TLS(name)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.ctx, c.running = t.Context(), true
+	c.mu.Unlock()
+	t.Cleanup(c.resetReconcileRetry)
+	var peers []*daemonrpc.PeerUpdate
+	for i, name := range []string{"one", "two", "three"} {
+		peers = append(peers, &daemonrpc.PeerUpdate{PeerId: name, Alias: name, AssignedIp: fmt.Sprintf("127.100.0.%d", 30+i), Approved: true, Online: true, ExportedPorts: []int32{8080}})
+	}
+	started := time.Now()
+	if err := c.reconcileSnapshot(t.Context(), peers, 1); err != nil {
+		t.Fatalf("blocked browser certificates must keep native access: %v", err)
+	}
+	if took := time.Since(started); took > 2*time.Second {
+		t.Fatalf("reconcile took %v with 3 blocked certificate calls; want one shared stage budget", took)
+	}
+	blocking.Store(false)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c.mu.Lock()
+		pending, web := c.browserPending, len(c.webRoutes)
+		c.mu.Unlock()
+		if !pending && web == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the retry did not finish the browser routes: pending=%v webRoutes=%d", pending, web)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
