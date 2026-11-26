@@ -131,11 +131,23 @@ func TestManagedRelayRuntimeLifecycleAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := start(cred, "rogue-restart", 2); w.Code != 409 {
-		t.Fatal("restart undid operator drain", w.Code)
+	// The drain reaches the relay through its lease: the heartbeat is accepted and carries the drain, and the node
+	// stays drained and not ready however the process reports itself.
+	drained := func(w *httptest.ResponseRecorder, what string) {
+		t.Helper()
+		if !strings.Contains(w.Body.String(), `"draining":true`) {
+			t.Fatalf("%s: lease without the drain: %d %s", what, w.Code, w.Body.String())
+		}
+		var state string
+		var ready bool
+		if err := store.Pool().QueryRow(ctx, `SELECT state,ready FROM control_tunnel_nodes WHERE id=$1`, nodeID).Scan(&state, &ready); err != nil || state != "draining" || ready {
+			t.Fatalf("%s undid operator drain: state %s ready %v %v", what, state, ready, err)
+		}
 	}
-	if w := observe(cred, "epoch-1", 2, false); w.Code != 409 {
-		t.Fatal("heartbeat undid operator drain", w.Code)
+	if w := observe(cred, "epoch-1", 2, false); w.Code != 200 {
+		t.Fatal("heartbeat of a drained relay refused", w.Code)
+	} else {
+		drained(w, "heartbeat")
 	}
 	resumed, err := service.MutateNode(ctx, actor, "resume-"+suffix, NodeMutation{Action: "resume", NodeID: nodeID, Revision: rev(), Reason: "test"})
 	if err != nil || resumed.Node.Ready {
@@ -202,8 +214,10 @@ func TestManagedRelayRuntimeLifecycleAndAudit(t *testing.T) {
 	if w := observe(cred, "epoch-2", 3, true); w.Code != 200 {
 		t.Fatal("operator drain observation", w.Code)
 	}
-	if w := start(cred, "epoch-3", 3); w.Code != 409 {
-		t.Fatal("process shutdown cleared operator drain", w.Code)
+	if w := start(cred, "epoch-3", 3); w.Code != 200 {
+		t.Fatal("restart inside the drain refused", w.Code)
+	} else {
+		drained(w, "restart after process shutdown")
 	}
 	_, err = service.MutateNode(ctx, actor, "resume-restarted-"+suffix, NodeMutation{Action: "resume", NodeID: nodeID, Revision: rev(), Reason: "test"})
 	if err != nil {

@@ -830,6 +830,11 @@ func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 func (s *Server) Drain(deadline time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.drainLocked(deadline)
+}
+
+// drainLocked is Drain with s.mu held.
+func (s *Server) drainLocked(deadline time.Time) {
 	if !s.draining || deadline.Before(s.deadline) {
 		s.deadline = deadline
 	}
@@ -872,8 +877,8 @@ func (s *Server) DrainBeforeServe(deadline time.Time) error {
 		return ErrClosed
 	}
 	s.startDrained = true
+	s.drainLocked(deadline)
 	s.mu.Unlock()
-	s.Drain(deadline)
 	return nil
 }
 
