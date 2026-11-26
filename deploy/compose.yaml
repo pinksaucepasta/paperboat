@@ -1,21 +1,5 @@
 name: paperboat
 services:
-  postgres:
-    logging: {driver: json-file, options: {max-size: "50m", max-file: "4"}}
-    image: ${PAPERBOAT_POSTGRES_IMAGE:?set PAPERBOAT_POSTGRES_IMAGE}
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_DB: paperboat
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-    secrets: [postgres_password]
-    volumes: [postgres_data:/var/lib/postgresql/data]
-    ports: ["127.0.0.1:5432:5432"]
-    healthcheck:
-      test: [CMD-SHELL, "pg_isready -U postgres -d paperboat"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
   migrate:
     image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
     env_file: [server.env]
@@ -23,8 +7,6 @@ services:
       - ./secrets:/run/secrets:ro
       - ./releases:/srv/paperboat-releases:ro
     command: [paperboat-server, migrate]
-    depends_on:
-      postgres: {condition: service_healthy}
     restart: "no"
   server:
     logging: {driver: json-file, options: {max-size: "50m", max-file: "4"}}
@@ -71,11 +53,9 @@ services:
       - proxy_config:/config
     depends_on: [server, diagnostics]
 secrets:
-  postgres_password: {file: ./secrets/postgres_password}
   diagnostics_access_key: {file: ./secrets/diagnostics_access_key}
   diagnostics_secret_key: {file: ./secrets/diagnostics_secret_key}
 volumes:
-  postgres_data:
   diagnostics_data:
   proxy_data:
   proxy_config:

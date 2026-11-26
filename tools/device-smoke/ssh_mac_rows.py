@@ -450,14 +450,14 @@ def audit():
     marker = 'ssh-audit-%d' % began
     if marker not in cl('~/.local/bin/pb ssh %s -- echo %s </dev/null 2>&1' % (shlex.quote(ARGS.alias), marker)):
         return report(row, 'FAIL', 'pb ssh did not run')
-    db = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('deployment_host')
+    db = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('database_host')
     query = ("SELECT event_type, metadata->>'origin', metadata->>'session_id', metadata->>'outcome', coalesce(metadata->>'bytes_in','0'), "
              "coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events WHERE resource_id='%s' "
              "AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' "
              "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - began) + 90))
     rows = ''
     for _ in range(30):  # the host uploads within its 30 s cadence
-        rows = subprocess.run(['ssh', db, 'docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "|"'], input=query,
+        rows = subprocess.run(['ssh', db, 'runuser -u postgres -- psql -d paperboat -qAt -F "|"'], input=query,
                               capture_output=True, text=True).stdout
         if re.search(r'^machine.access_ended\|', rows, re.M):
             break
@@ -757,7 +757,7 @@ def offline_audit():
         return report(row, 'FAIL', 'could not verify the control-plane block from the target')
     if verified[0]:
         return report(row, 'FAIL', 'control-plane verify failed: %d of %d addresses still connect' % verified)
-    db = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('deployment_host')
+    db = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('database_host')
     # Scope the read to this run: sessions start at or after the block went up (the baseline is online and
     # filtered by origin anyway). A began-anchored window would re-read a previous run's offline rows when runs
     # follow within minutes and PASS on stale data.
@@ -767,7 +767,7 @@ def offline_audit():
              "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - blackholed_at) + 30))
     rows = ''
     for _ in range(84):  # up to 7 min: the host's uploader backs off after failing during the outage (measured: 5 min late)
-        rows = subprocess.run(['ssh', db, 'docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "|"'], input=query,
+        rows = subprocess.run(['ssh', db, 'runuser -u postgres -- psql -d paperboat -qAt -F "|"'], input=query,
                               capture_output=True, text=True).stdout
         if re.search(r'^machine.access_ended\|offline\|', rows, re.M):
             break

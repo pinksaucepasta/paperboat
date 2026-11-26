@@ -59,6 +59,7 @@ class ServerRolloutTest(unittest.TestCase):
         self.original = 'api.example.test {\n reverse_proxy server:8080\n}\nget.example.test {\n reverse_proxy server:8080\n}\n'
         (self.root / 'Caddyfile').write_text(self.original)
         (self.root / '.env').write_text('PAPERBOAT_SERVER_IMAGE=old\nUNCHANGED=fixture\n')
+        (self.root / 'server.env').write_text('PAPERBOAT_DATABASE_DSN=postgres://pb:p%40ss@db.example.test:5432/paperboat?sslmode=disable\n')
         self.rollout = module.Rollout(self.root)
         self.addCleanup(self.rollout.log.close)
         self.image = 'sha256:' + 'a' * 64
@@ -72,9 +73,10 @@ class ServerRolloutTest(unittest.TestCase):
         self.taken = set()  # container names that already exist
         self.schema_version, self.migrate_to = 477, 477
 
-    def docker(self, args, image=None, timeout=120):
+    def docker(self, args, image=None, timeout=120, extra_env=None):
         self.operations.append(args)
         if 'psql' in args:
+            self.schema_env = extra_env
             return f'{self.schema_version}\n'.encode()
         if args[-1] == 'migrate':
             self.schema_version = self.migrate_to
@@ -125,6 +127,37 @@ class ServerRolloutTest(unittest.TestCase):
             self.rollout.reap(state)
         self.assertEqual(state['retired'], [])
         self.assertIn(['docker', 'stop', '--time', '30', 'paperboat-server-1'], self.operations)
+
+    def test_schema_version_is_read_from_the_external_database_with_libpq_variables(self):
+        # 2026-11-27: the database moved to its own host; the version is read with the server's DSN, never in argv.
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.assertEqual(self.rollout.schema(), 477)
+        self.assertEqual(self.operations[-1][0], 'psql')
+        self.assertNotIn('p@ss', ' '.join(self.operations[-1]))
+        self.assertEqual({k: self.schema_env[k] for k in ('PGHOST', 'PGPORT', 'PGUSER', 'PGPASSWORD', 'PGDATABASE', 'PGSSLMODE')},
+                         {'PGHOST': 'db.example.test', 'PGPORT': '5432', 'PGUSER': 'pb', 'PGPASSWORD': 'p@ss',
+                          'PGDATABASE': 'paperboat', 'PGSSLMODE': 'disable'})
+
+    def test_database_env_refuses_dsns_it_cannot_read_and_keeps_tls_settings(self):
+        for bad in ('PAPERBOAT_DATABASE_DSN=\n', 'PAPERBOAT_DATABASE_DSN=host=db dbname=x\n',
+                    'PAPERBOAT_DATABASE_DSN=postgres://u:pa#ss@db/x\n', 'PAPERBOAT_DATABASE_DSN=postgres://u@db:99999/x\n'):
+            with self.assertRaises(module.RolloutError, msg=bad):
+                module.database_env(bad)
+        env = module.database_env('PAPERBOAT_DATABASE_DSN="postgresql://u@db/my%20db?sslmode=verify-full&sslrootcert=/ca.pem&x=1"\n')
+        self.assertEqual(env, {'PGHOST': 'db', 'PGPORT': '5432', 'PGUSER': 'u', 'PGDATABASE': 'my db', 'PGCONNECT_TIMEOUT': '10',
+                               'PGSSLMODE': 'verify-full', 'PGSSLROOTCERT': '/ca.pem'})
+
+    def test_bad_database_setting_refuses_before_migrations(self):
+        (self.root / 'server.env').write_text('PAPERBOAT_DATABASE_DSN=\n')
+        with patch.object(self.rollout, 'run', side_effect=self.docker), self.assertRaises(module.RolloutError):
+            self.rollout.deploy('new-image', commit=self.commit)
+        self.assertFalse(any(a[-1:] == ['migrate'] for a in self.operations))
+
+    def test_schema_version_without_a_database_setting_changes_nothing(self):
+        (self.root / 'server.env').write_text('OTHER=1\n')
+        with patch.object(self.rollout, 'run', side_effect=self.docker), self.assertRaises(module.RolloutError):
+            self.rollout.schema()
+        self.assertEqual(self.operations, [])
 
     def test_rollback_across_applied_migrations_needs_a_passing_schema_skew_check(self):
         # 2026-11-21 07:54 IST: the gate rolled the server back to .917 after migrations 477-490 ran; .917 could not
@@ -231,11 +264,11 @@ class ServerRolloutTest(unittest.TestCase):
         self.assertLess(reload, drain)
 
     def test_failed_drain_signal_keeps_the_new_server(self):
-        def docker(args, image=None, timeout=120):
+        def docker(args, image=None, timeout=120, extra_env=None):
             if args[:2] == ['docker', 'kill']:
                 self.operations.append(args)
                 raise module.RolloutError('no such container')
-            return self.docker(args, image, timeout)
+            return self.docker(args, image, timeout, extra_env)
         with patch.object(self.rollout, 'run', side_effect=docker):
             self.rollout.deploy('new-image', commit=self.commit)
         self.assertFalse(any(a[:3] == ['docker', 'rm', '-f'] for a in self.operations))

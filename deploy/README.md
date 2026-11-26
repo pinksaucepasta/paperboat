@@ -1,7 +1,7 @@
 # Managed control-plane deployment
 
 Run this stack only on the managed VPS. Set immutable image references in the
-owner-only `.env`: `PAPERBOAT_POSTGRES_IMAGE` (PostgreSQL 17),
+owner-only `.env`: `PAPERBOAT_POSTGRES_IMAGE` (PostgreSQL 17, the scratch database of `rehearse-migrations.sh`),
 `PAPERBOAT_SERVER_IMAGE`, `PAPERBOAT_DIAGNOSTICS_IMAGE` (MinIO), and
 `PAPERBOAT_PROXY_IMAGE` (Caddy). Configure `PAPERBOAT_API_HOST`,
 `PAPERBOAT_DOWNLOAD_HOST`, `PAPERBOAT_DIAGNOSTICS_HOST` and `PAPERBOAT_CONSOLE_HOST` (the production console, proxied to
@@ -10,15 +10,15 @@ one to a running stack means recreating the proxy (`docker compose up -d --no-de
 stream, so do it in a quiet window and not as part of a server rollout.
 
 Restore owner-only secret files into `secrets/`; keep `server.env` owner-only.
-Configure the server's database DSN with the `postgres` service hostname and
-`paperboat` database, every public domain, browser origin, provider secret file,
+Configure the server's database DSN (`PAPERBOAT_DATABASE_DSN`) with the database host's Tailscale address, the
+`paperboat` role and database, every public domain, browser origin, provider secret file,
 and certificate reference. Set its listener to `0.0.0.0:8080`. Its diagnostic
 object endpoint uses the configured diagnostics HTTPS host. Create the configured
 private diagnostics bucket before admitting uploads. Never print Compose's resolved
 environment or server secrets.
 
 `docker compose config --quiet` validates composition without printing values.
-For initial bootstrap only, `docker compose up -d` starts PostgreSQL, migrates from the repository schema, and
+For initial bootstrap only, `docker compose up -d` migrates the (external) database from the repository schema, and
 starts the server only after migrations succeed. Caddy owns API/download/object-store
 TLS; the server certificate coordinator owns the public/runtime edge wildcards.
 Configure DNS before starting the proxy. The release workflow publishes the three
@@ -28,19 +28,24 @@ Installer and metadata requests reach the server; binary URLs in the signed meta
 point to GitHub. The origin bundle keeps an empty `tuf/targets/` directory. Pairing
 custom builds is independent of this publication and needs no server release record.
 
-PostgreSQL is reachable only on VPS loopback and the private Compose network.
-Preserve the named volumes and protected secret files during upgrades; do not use
-`down --volumes` for ordinary teardown. Back up PostgreSQL and test a restore before
+## Database host
+
+PostgreSQL 17 (PGDG packages) runs on its own host, not in this stack. It listens on loopback and its Tailscale address
+only; `pg_hba.conf` admits the `paperboat` role from the server host's Tailscale address only, and ufw allows 5432 only from
+that address on `tailscale0` (set `tailscale set --netfilter-mode=nodivert` there, or Tailscale's own rules accept every
+tailnet peer before ufw sees them). SSH takes keys only; unattended-upgrades is on. The server host needs the
+distribution's `postgresql-client`: `rollout-server.py` reads the applied migration version with `psql`, passing the
+server's DSN as libpq variables. Preserve the named volumes and protected secret files during upgrades; do not use
+`down --volumes` for ordinary teardown. Back up the database and test a restore before
 calling this deployment complete. The self-host installer manages relay/edge
 nodes separately; this stack does not provide a self-hostable server.
 
-Install `paperboat-backup.service` and `paperboat-backup.timer` into systemd on
-the VPS and enable the timer. `backup-database.sh` publishes a mode-0600 custom
-PostgreSQL dump atomically into protected `backups/`, preserving previous backups
-on failure. Monitor disk capacity and retain backups according to your policy;
-the script does not silently delete existing backups.
+On the database host, install `backup-database.sh` as `/usr/local/sbin/paperboat-backup-database` and
+`paperboat-backup.service` + `paperboat-backup.timer` into systemd, and enable the timer. It publishes a mode-0600 custom
+dump atomically into `/var/backups/paperboat` daily, preserving previous backups on failure, and removes dumps older
+than 7 days only after a new one succeeded. Take one before a deploy with `ssh <database host> systemctl start paperboat-backup`.
 
-Run `verify-backup.sh <dump-file>` on the VPS to restore into a new
+Run `verify-backup.sh <dump-file>` on the database host to restore into a new
 `paperboat_restore_test`, verify schema count and migration version, and remove
 only the scratch database it created. It refuses an existing scratch database.
 
@@ -112,11 +117,11 @@ git archive HEAD -- . ':!console' ':!marketing' ':!tools' | tar x -C "$dir"
 cd "$dir" && docker build --build-arg PAPERBOAT_VERSION=<YYYY.MM.DD.N> -t <name>:<tag> -f <service>/deploy/Dockerfile .
 ```
 
-**Never build or compile on the database host while a deploy gate or watch runs** (2026-11-16: a server image build on deployment-host ran while `/v1/edge/*` answered in 2-9 s during an edge gate): build the amd64 server image on an x86_64 Docker host (linux-test-vm-2) and move it with `docker save <image> | ssh root@<db host> docker load`; build the arm64 edge and relay images on database-test-host.
+**Never build or compile on the server host while a deploy gate or watch runs** (2026-11-16: a server image build on deployment-host ran while `/v1/edge/*` answered in 2-9 s during an edge gate): build the amd64 server image on an x86_64 Docker host (linux-test-vm-2) and move it with `docker save <image> | ssh root@<server host> docker load`; build the arm64 edge and relay images on database-test-host.
 
 The server also needs `--build-arg PAPERBOAT_COMMIT=<40-hex HEAD>`; it is the commit that
 `GET /v1/server-version` reports and the image build refuses anything else. Take a database backup
-(`./backup-database.sh`) and rehearse any new migration against a restored copy in the isolated
+(`systemctl start paperboat-backup` on the database host) and rehearse any new migration against a restored copy in the isolated
 test PostgreSQL before rolling out. Never run test suites against the production database.
 
 Edges are `pbh`-managed. Copy the image to the host (`docker save | ssh host docker load`) and run,
@@ -166,7 +171,7 @@ C=$(git rev-parse origin/main)                   # the commit you deploy
 D=$(mktemp -d); git -C <your clone> archive $C -- . ':!console' ':!marketing' ':!tools' | tar x -C $D
 docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C \
   -t paperboat-server:$V -f $D/server/deploy/Dockerfile $D        # or copy the archive to deployment-host first
-cd /opt/paperboat && ./backup-database.sh                          # always, before the migration runs
+ssh <database host> systemctl start paperboat-backup              # always, before the migration runs
 # new migration? rehearse it first in the isolated test PostgreSQL (goose up on build-host's pb-test-pg)
 docker inspect --format '{{.Config.Image}}' $(python3 -c "import json;print(json.load(open('server-rollout.json'))['active'])")   # PREVIOUS image: note it
 python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:$V --commit <the commit it was built from>
@@ -351,8 +356,8 @@ On the production canary runner, add `CANARY_RESOURCE_HOSTS` to
 `~/.config/paperboat-canary.env`. List the production control plane, database,
 and every managed edge and relay host, using one entry per physical or virtual
 host. Use `local` for the runner itself and existing noninteractive SSH
-destinations for the others. The control plane and database currently share a
-host, so the current inventory is `CANARY_RESOURCE_HOSTS="root@coolify local ubuntu@anvit"`.
+destinations for the others. The control plane, the database and the console each have their own host, so the current
+inventory is `CANARY_RESOURCE_HOSTS="root@coolify root@db root@console local"` plus the managed edge hosts.
 The SSH user needs Python 3 and read access to the host's Linux counters.
 
 Install `paperboat-host-resources.service` and `paperboat-host-resources.timer`
@@ -415,7 +420,7 @@ server with a changed image label so the container is actually replaced.
 
 ## Shared endpoint engine: rehearsal plan and chaos-test spec (PLAN.md 3a; no code yet)
 
-**Migration rehearsal (every migration of the series).** Run `./backup-database.sh`; restore the newest dump into a new
+**Migration rehearsal (every migration of the series).** Run `paperboat-backup` on the database host; restore the newest dump into a new
 database in the isolated test PostgreSQL (`pg_restore --no-owner --no-privileges`); run `db.Migrate` against it and assert:
 goose version, row counts of `tunnels`, `tunnel_routes`, `tunnel_domains`, `tunnel_config_generations` equal the
 `endpoints`/`endpoint_routes`/`endpoint_hostnames` counts for kind=tunnel, ids unchanged, every live

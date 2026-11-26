@@ -53,7 +53,7 @@ def quote(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--host", help="ssh target running the database container")
+    parser.add_argument("--host", help="ssh target of the database host (root)")
     parser.add_argument("--account", action="append", help="test account id (repeatable); default: the shared test account")
     parser.add_argument("--stale", default="2 hours", help="revoke only machines unseen this long (PostgreSQL interval)")
     parser.add_argument("--apply", action="store_true", help="revoke; without it only list")
@@ -65,10 +65,10 @@ def main():
     scope.add_argument("--id", action="append", help="exact machine id to revoke (repeatable); still only a throwaway, unprotected machine")
     args = parser.parse_args()
     settings = load()
-    host = args.host or settings.get('deployment_host')
+    host = args.host or settings.get('database_host')
     protected = settings.get('cleanup_protected')
     if not host or not protected:
-        parser.error("set deployment_host and cleanup_protected in the local development targets")
+        parser.error("set database_host and cleanup_protected in the local development targets")
     throwaway = throwaway_regex(settings.get('cleanup_throwaway'))
     if args.prefix:
         if not re.fullmatch(r"[a-z][a-z0-9-]*-", args.prefix) or re.search(protected, args.prefix):
@@ -95,8 +95,8 @@ def main():
     if args.apply:
         sql += REVOKE
     sql += "\\copy (SELECT id FROM doomed ORDER BY id) TO STDOUT\n" + ("COMMIT;\n" if args.apply else "ROLLBACK;\n")
-    done = subprocess.run(["ssh", "--", host, "docker", "exec", "-i", "paperboat-postgres-1",
-                           "psql", "-U", "postgres", "-d", "paperboat", "-qAt"],
+    done = subprocess.run(["ssh", "--", host, "runuser", "-u", "postgres", "--",
+                           "psql", "-d", "paperboat", "-qAt"],
                           input=sql, capture_output=True, text=True, timeout=120)
     if done.returncode != 0 or "ERROR" in done.stderr:
         print("cleanup failed: " + done.stderr.strip()[:300], file=sys.stderr)

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
+import urllib.parse
 
 # Logs of retired server containers are kept this long under rollout-logs/.
 LOG_RETENTION_SECONDS = 7 * 24 * 3600
@@ -27,9 +28,33 @@ class SchemaSkewRefused(RolloutError):
     """A rollback across applied migrations without a passing schema-skew check (exit 3)."""
 
 
-# Applied goose version; the schema a deploy migrated from is kept in the state so a rollback can see it.
-SCHEMA = ['docker', 'compose', 'exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'paperboat', '-tAc',
-          'select max(version_id) from paperboat.goose_db_version']
+# Applied goose version; the schema a deploy migrated from is kept in the state so a rollback can see it. The database
+# runs on its own host: the host's psql reaches it with the server's DSN, passed as libpq variables (never in argv).
+SCHEMA = ['psql', '-X', '-tAc', 'select max(version_id) from paperboat.goose_db_version']
+
+
+def database_env(server_env):
+    """libpq variables of PAPERBOAT_DATABASE_DSN (a postgres:// URL) in server.env's text."""
+    match = re.search(r'^PAPERBOAT_DATABASE_DSN=(.*)$', server_env, flags=re.M)
+    value = match.group(1).strip().strip('\'"') if match else ''
+    refused = RolloutError('server.env needs PAPERBOAT_DATABASE_DSN as a postgres:// URL with a host (percent-encode '
+                           'reserved characters in the password); the schema version cannot be read. Nothing was changed.')
+    try:
+        dsn = urllib.parse.urlsplit(value)
+        port = dsn.port
+    except ValueError:
+        raise refused from None
+    if dsn.scheme not in ('postgres', 'postgresql') or not dsn.hostname or dsn.fragment:
+        raise refused
+    env = {'PGHOST': dsn.hostname, 'PGPORT': str(port or 5432), 'PGUSER': urllib.parse.unquote(dsn.username or ''),
+           'PGDATABASE': urllib.parse.unquote(dsn.path.lstrip('/')), 'PGCONNECT_TIMEOUT': '10'}
+    if dsn.password is not None:
+        env['PGPASSWORD'] = urllib.parse.unquote(dsn.password)
+    names = {'sslmode': 'PGSSLMODE', 'sslrootcert': 'PGSSLROOTCERT', 'sslcert': 'PGSSLCERT', 'sslkey': 'PGSSLKEY'}
+    for key, val in urllib.parse.parse_qsl(dsn.query):
+        if key in names:
+            env[names[key]] = val
+    return {k: v for k, v in env.items() if v}
 
 
 def connection_count(contents):
@@ -47,8 +72,8 @@ class Rollout:
         self.journal = self.root / 'server-rollout-pending.json'
         self.log = (self.root / 'server-rollout.log').open('ab')
 
-    def run(self, args, image=None, timeout=120):
-        env = dict(os.environ)
+    def run(self, args, image=None, timeout=120, extra_env=None):
+        env = dict(os.environ, **(extra_env or {}))
         if image:
             env['PAPERBOAT_SERVER_IMAGE'] = image
         result = subprocess.run(args, cwd=self.root, env=env, stdout=subprocess.PIPE,
@@ -170,7 +195,7 @@ class Rollout:
         self.journal.unlink()
 
     def schema(self):
-        return int(self.run(SCHEMA).strip() or 0)
+        return int(self.run(SCHEMA, timeout=30, extra_env=database_env((self.root / 'server.env').read_text())).strip() or 0)
 
     def deploy(self, image, rollback=False, commit='', schema_skew_ok=False):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}", image):
@@ -190,6 +215,7 @@ class Rollout:
         if self.reap(before) >= 2 and not rollback:
             raise RolloutError('Two previous servers still hold live connections. '
                                'Run --reap after those sessions finish; none were stopped.')
+        database_env((self.root / 'server.env').read_text())  # refuse a bad DSN before migrations run
         info = json.loads(self.run(['docker', 'image', 'inspect', image]))[0]
         # A tag can name an older build than the one just built (2026-11-19: .9 was rehearsed from the commit before
         # it). A forward deploy ships only the image built from the commit it was told to ship; a rollback restores a

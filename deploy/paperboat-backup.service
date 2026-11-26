@@ -1,10 +1,9 @@
 [Unit]
-Description=Paperboat protected database backup
-Requires=docker.service
-After=docker.service
+Description=Paperboat protected database backup (database host)
+After=postgresql.service
+
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/paperboat
-ExecStart=/opt/paperboat/backup-database.sh
-TimeoutStartSec=330
+ExecStart=/usr/local/sbin/paperboat-backup-database
+TimeoutStartSec=1900
 UMask=0077

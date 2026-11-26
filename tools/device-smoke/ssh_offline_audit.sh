@@ -24,8 +24,8 @@
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
-DB_HOST=${PB_AUDIT_DB_HOST:-$(python3 "$(dirname "$0")/dev_targets.py" deployment_host)}
-[ -n "$DB_HOST" ] || { echo 'configure deployment_host in local development targets' >&2; exit 2; }
+DB_HOST=${PB_AUDIT_DB_HOST:-$(python3 "$(dirname "$0")/dev_targets.py" database_host)}
+[ -n "$DB_HOST" ] || { echo 'configure database_host in local development targets' >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
 TARGET=test-soa-t-$STAMP CLIENT=test-soa-c-$STAMP ALIAS=test-soa-$STAMP
@@ -201,7 +201,7 @@ reconnected_at=$(date +%s)
 query="SELECT event_type, metadata->>'origin', metadata->>'session_id', metadata->>'outcome', coalesce(metadata->>'bytes_in','0'), coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events WHERE resource_id='$TARGET_ID' AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' ORDER BY created_at, id;"
 rows=
 for i in $(seq 1 30); do
-  rows=$(printf '%s\n' "$query" | ssh "$DB_HOST" docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "'|'" 2>/dev/null)
+  rows=$(printf '%s\n' "$query" | ssh "$DB_HOST" runuser -u postgres -- psql -d paperboat -qAt -F "'|'" 2>/dev/null)
   grep -q '|offline|' <<<"$rows" && break
   sleep 5
 done

@@ -454,7 +454,7 @@ def t_removal(team, o, m, oid):
 
 
 def sql(statement):
-    done = subprocess.run(['ssh', '--', get_setting('deployment_host'), "docker exec -i paperboat-postgres-1 sh -c 'psql -U \"$POSTGRES_USER\" -d \"${POSTGRES_DB:-$POSTGRES_USER}\" -v ON_ERROR_STOP=1'"],
+    done = subprocess.run(['ssh', '--', get_setting('database_host'), 'runuser -u postgres -- psql -d paperboat -v ON_ERROR_STOP=1'],
                           input=statement, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, 'sql: ' + done.stderr[-200:]
 

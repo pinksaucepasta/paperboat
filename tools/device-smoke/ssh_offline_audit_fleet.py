@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import xplat_fleet as fleet
 
-DB_HOST = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('deployment_host')
+DB_HOST = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('database_host')
 OUTAGE_SECONDS = 150
 ANCHOR = 'com.apple/pbsmoke-offline'
 RESOLVE = ("import socket,sys\n"
@@ -79,7 +79,7 @@ def audit_rows(target_id):
              "coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events "
              "WHERE resource_id='%s' AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' "
              "ORDER BY created_at, id;" % target_id)
-    done = subprocess.run(['ssh', DB_HOST, 'docker', 'exec', '-i', 'paperboat-postgres-1', 'psql', '-U', 'postgres', '-d', 'paperboat', '-qAt', '-F', '|'],
+    done = subprocess.run(['ssh', DB_HOST, 'runuser', '-u', 'postgres', '--', 'psql', '-d', 'paperboat', '-qAt', '-F', '|'],
                           input=query, capture_output=True, text=True, timeout=120)
     return [row.split('|') for row in done.stdout.splitlines() if row]
 
