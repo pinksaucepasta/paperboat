@@ -70,20 +70,7 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 				}
 			}
 		}
-		readyCtx, cancel := context.WithTimeout(validateCtx, timeout)
-		readyErr := readiness.waitReady(readyCtx, candidate.Source.Version, true)
-		cancel()
-		if readyErr != nil {
-			return readyErr
-		}
-		if err := validate(validateCtx); err != nil {
-			return err
-		}
-		probe, err := s.config.Participants.Probe(validateCtx)
-		if err != nil {
-			return participantFailure("probe", errors.Join(ErrParticipantReadiness, err))
-		}
-		return unixParticipantReady(probe, candidate.Source.Version, handoff.Baseline, handoff.RequireInventory)
+		return readiness.validateReady(validateCtx, candidate.Source.Version, timeout, validate)
 	}
 	committed, err := s.config.ApplyPrepared(ctx, candidate)
 	if err == nil {
@@ -155,3 +142,21 @@ func (s *Service) recoverPrepared(ctx context.Context) (installsource.Source, er
 
 // resolveUnixPreparedRelease keeps ordinary queued approval pinned to the current
 // candidate; only protected native progress permits resuming its original bytes.
+
+// validateReady waits for the candidate daemon, runs the signed health check, then waits again with the
+// same settle rules: the daemon may still be reconciling with a just-restarted machine guard, and a
+// single exact-"ready" probe there rolled back healthy updates (canary 2026-11-26, daemon_state).
+func (g *unixParticipantReadiness) validateReady(ctx context.Context, version string, timeout time.Duration, validate func(context.Context) error) error {
+	wait := func() error {
+		readyCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return g.waitReady(readyCtx, version, true)
+	}
+	if err := wait(); err != nil {
+		return err
+	}
+	if err := validate(ctx); err != nil {
+		return err
+	}
+	return wait()
+}

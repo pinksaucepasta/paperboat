@@ -62,3 +62,26 @@ func TestSignedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
 		t.Fatalf("recovery must keep waiting through a transient local degradation: %v", err)
 	}
 }
+
+// The check after signed health uses the same settle as the one before it: a daemon briefly degraded
+// while it reconciles with a restarted machine guard commits once ready (canary 2026-11-26 rolled back).
+func TestValidateReadyToleratesTransientDegradedAfterHealth(t *testing.T) {
+	settle := ParticipantSettle
+	ParticipantSettle = 2 * time.Second
+	t.Cleanup(func() { ParticipantSettle = settle })
+	handoff := &unixActivationHandoff{Baseline: UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "ready", Machines: 1}, RequireInventory: true}
+	ready := UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}
+	local := UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1}
+	readiness := &unixParticipantReadiness{participants: &sequencedParticipants{probes: []UnixParticipantProbe{ready, local, local, ready}}, handoff: handoff}
+	validated := false
+	err := readiness.validateReady(t.Context(), "2", 5*time.Second, func(context.Context) error { validated = true; return nil })
+	if err != nil || !validated {
+		t.Fatalf("transient degraded after signed health: validated=%v err=%v", validated, err)
+	}
+	stuck := &unixParticipantReadiness{participants: &sequencedParticipants{probes: []UnixParticipantProbe{ready, local}}, handoff: handoff}
+	ParticipantSettle = 300 * time.Millisecond
+	if err := stuck.validateReady(t.Context(), "2", 5*time.Second, func(context.Context) error { return nil }); !errors.Is(err, ErrParticipantReadiness) {
+		t.Fatalf("daemon degraded past the settle window must still fail: %v", err)
+	}
+}
+
