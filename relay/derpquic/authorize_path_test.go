@@ -54,6 +54,40 @@ func TestQUICAuthorizeSeparatesNetworkLossFromAnUnframeableGrant(t *testing.T) {
 	}
 }
 
+// A renewal write that fails while the QUIC connection is still up ends that connection at once: Connected drops (a
+// first handshake must not trust it until the 45 s idle timeout) and the next send redials without a fatal latch.
+func TestQUICLostReauthenticationDropsConnectedAndTheNextSendRedials(t *testing.T) {
+	f := newFixture(t)
+	_, address, stop := f.start("127.0.0.1:0")
+	defer stop()
+	k, cert := key.NewNode().Public(), certificate(t)
+	g := f.grant(k, cert, "a")
+	c := f.client(address, cert, g)
+	connect(t, c)
+	c.mu.Lock()
+	cc := c.current
+	c.mu.Unlock()
+	if !c.Connected() {
+		t.Fatal("not Connected after connect")
+	}
+	cc.stream.CancelWrite(0) // the control stream's writes now fail while the connection itself is up
+	if err := cc.authorize(f.token(g)); !errors.Is(err, errAuthorizeTransport) {
+		t.Fatalf("a renewal on a broken control stream gave %v, want errAuthorizeTransport", err)
+	}
+	if c.Connected() {
+		t.Fatal("Connected after a lost re-authentication")
+	}
+	if err := c.Send(key.NewNode().Public(), []byte("x")); err != nil {
+		t.Fatalf("the next send did not redial: %v", err)
+	}
+	c.mu.Lock()
+	redialed := c.current != nil && c.current != cc
+	c.mu.Unlock()
+	if !redialed || !c.Connected() {
+		t.Fatal("the next send did not open a new connection")
+	}
+}
+
 func TestWSSAuthorizeSeparatesNetworkLossFromAnUnframeableGrant(t *testing.T) {
 	near, far := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
