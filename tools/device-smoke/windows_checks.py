@@ -401,7 +401,10 @@ def run_check(check, argv, args, device):
     outcome = verdict(done.returncode, done.stdout)
     detail = ((done.stdout.strip().splitlines() or [''])[-1][:300] if outcome == 'PASS'
               else 'exit %s: %s' % (done.returncode, (done.stderr.strip() or done.stdout.strip())[-300:]))
-    return outcome, round(time.monotonic() - started), detail
+    took = round(time.monotonic() - started)
+    if outcome != 'PASS' and os.environ.get('SMOKE_ON_FAIL'):  # the devices' evidence at the failure, as smoke.sh does
+        subprocess.run([os.environ['SMOKE_ON_FAIL'], 'fail', check], timeout=900, check=False, capture_output=True)
+    return outcome, took, detail
 
 
 def build_parser():
