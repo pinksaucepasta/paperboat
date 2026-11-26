@@ -143,6 +143,23 @@ container_on() { # container_on HOST:CONTAINER CMD... : run as the enrolled user
 
 # on DEVICE CMD... : run a POSIX shell or PowerShell command and print its output.
 on() {
+  local at seconds=$SECONDS rc=0
+  at=$(date +%FT%T%z)
+  on_device "$@" || rc=$?
+  trace_command "$at" $((SECONDS - seconds)) "$rc" "$@"
+  return "$rc"
+}
+
+# The private command trace beside the log: when, seconds, exit code, device, command. Never stdin or output.
+trace_command() {
+  local line="$1 ${2}s rc=$3 $4: ${*:5}" secret
+  for secret in "${SMOKE_MACOS_PASSWORD:-}" "${SMOKE_WINDOWS_PASSWORD:-}" "${SMOKE_LINUX_PEER_PASSWORD:-}"; do
+    [ -z "$secret" ] || line=${line//"$secret"/***}
+  done
+  (umask 077; mkdir -p "$RESULTS_DIR/diagnostics" && printf '%s\n' "$line" >>"$RESULTS_DIR/diagnostics/$RUN_ID.commands") 2>/dev/null || true
+}
+
+on_device() {
   local device=$1 where; shift
   if where=$(ct_of "$device"); then container_on "$where" "$*"; return; fi
   case "$device" in

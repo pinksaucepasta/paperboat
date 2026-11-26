@@ -3,6 +3,7 @@ import sys
 import pairing_lifecycle
 import json
 import pathlib
+from pathlib import Path
 import subprocess
 import tempfile
 import time
@@ -769,6 +770,18 @@ TLIST=($DEVICES)
         body = text[text.index('update_target() {'):text.index('# Each source gets one compressed fixture upload')]
         self.assertNotIn('    return\n  fi\n  start_long_ssh', body)  # a dead terminal no longer ends the update early
         self.assertIn('terminal_ready=0', body)
+
+    def test_every_remote_command_is_traced_without_changing_its_result(self):
+        text = (HERE / 'smoke.sh').read_text()
+        body = text[text.index('on() {\n  local at'):text.index('on_device() {\n')]
+        with tempfile.TemporaryDirectory() as results:
+            done = subprocess.run(['bash', '-c', 'set -uo pipefail\nRESULTS_DIR=$1 RUN_ID=r SMOKE_MACOS_PASSWORD=pw-fixture\n' + body +
+                                   'on_device() { cat; echo " out"; return 7; }\nout=$(printf in | on dev "run pw-fixture now"); echo "$out/$?"', 'x', results],
+                                  capture_output=True, text=True)
+            self.assertEqual(done.stdout, 'in out/7\n')  # stdin, output and exit code pass through
+            trace = Path(results, 'diagnostics', 'r.commands')
+            self.assertRegex(trace.read_text(), r'^\S+ \d+s rc=7 dev: run \*\*\* now\n$')
+            self.assertEqual(trace.stat().st_mode & 0o77, 0)
 
     def test_exec_ssh_after_restart_needs_a_remote_answer_inside_the_deadline(self):
         import exec_ssh_after_restart as e
