@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
@@ -171,6 +172,13 @@ func TestControlStatusWhilePendingCarriesJournalCandidate(t *testing.T) {
 	}
 	if response, err = s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"}); err != nil || response.Activating {
 		t.Fatalf("pending status with a terminal-busy handoff: %+v %v", response, err)
+	}
+	// It holds no stability gate either, so `pb update check` still looks the release up (here it fails: no repository).
+	if s.scheduler, err = autoupdate.New(autoupdate.Config{Check: func(context.Context) (autoupdate.Result, error) { return autoupdate.Result{}, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Check(context.Background()); errors.Is(err, ErrActivationPending) {
+		t.Fatalf("check with a terminal-busy handoff was refused as an activation: %v", err)
 	}
 	if err := os.Remove(unixHandoffPath(root)); err != nil {
 		t.Fatal(err)

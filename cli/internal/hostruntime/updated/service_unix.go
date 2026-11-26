@@ -439,7 +439,8 @@ func (s *Service) Check(ctx context.Context) (workerupdate.Result, error) {
 		// No release lookup during an activation: it asks hostd's update gate for the failure domain, which waits
 		// behind the held stability check and keeps one of hostd's 8 socket slots for up to 31 minutes; a check
 		// every 30 s filled them and the stability gate's next connection failed EPIPE (rollback .12→.13).
-		if handoff, err := readUnixHandoff(s.config.StateRoot); err != nil || handoff != nil {
+		// A terminal-busy deferral holds no stability gate: its checks continue.
+		if handoff, err := readUnixHandoff(s.config.StateRoot); err != nil || handoff != nil && !handoff.ActiveTerminalBusy {
 			return workerupdate.Result{Version: handoffCandidate(handoff)}, errors.Join(ErrActivationPending, err)
 		}
 		return s.observeSignedRelease(ctx)

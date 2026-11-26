@@ -40,7 +40,7 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 		// As downloadWithResolver: no release lookup while an activation's handoff exists (Service.Check says why).
 		if handoff, err := readUnixHandoff(s.config.StateRoot); err != nil {
 			return autoupdate.Result{}, err
-		} else if handoff != nil {
+		} else if handoff != nil && !handoff.ActiveTerminalBusy { // a terminal-busy deferral holds no stability gate
 			return autoupdate.Result{Version: s.currentManager().ActiveVersion()}, nil
 		}
 		result, err := resolveRelease(ctx, s.currentManager().ActiveVersion(), s.source.Resolve)
