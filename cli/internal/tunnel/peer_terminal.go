@@ -99,12 +99,21 @@ func (t *PeerTerminalTunnel) WarmMachines(ctx context.Context, machines []api.Us
 		return nil
 	}
 	// Remote peers are authenticated by the native network bindings, so one verified local
-	// identity serves every machine; warming it is the only lookup to make.
+	// identity serves every machine. The native runtime (engine, relays) starts here, at daemon start, as
+	// tailscaled brings up its engine at start (~/ref/tailscale/cmd/tailscaled/tailscaled.go getLocalBackend): built
+	// by the first open it cost that open ~2 s. A live runtime is reused with no admission refresh (the open that
+	// needs one still asks), so later inventory refreshes add no server call.
 	authority, err := t.authorities.ResolveLocal(warmCtx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
 	if err != nil {
 		return err
 	}
-	authority.Clear()
+	_, consumed, err := t.acquireNativeRuntime(warmCtx, profile.Account.ID, profile.CLIClientSessionID, authority, func(*tailnet.Authority) bool { return true })
+	if !consumed {
+		authority.Clear()
+	}
+	if err != nil {
+		return err
+	}
 	return warmCtx.Err()
 }
 
