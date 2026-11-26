@@ -12,7 +12,6 @@ Limits: exec 5 s, ssh 10 s. Measured cold after a restart (p50/max, d0b4dc735): 
 Pool Macs share the image's SSH host keys: regenerate them before installing, or ssh legs fail on a host-key mismatch."""
 import argparse
 import json
-import json
 import random
 import subprocess
 import time

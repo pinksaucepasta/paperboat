@@ -864,7 +864,7 @@ TLIST=($DEVICES)
             e.main()  # a Unix or Mac client keeps the old flow
         windows.assert_not_called()
         calls = []
-        with is_windows, patch.object(e, 'restart_local', lambda b: calls.append('restart')), \
+        with is_windows, patch.object(e, 'registration', dict), patch.object(e, 'restart_local', lambda b: calls.append('restart')), \
                 patch.object(e, 'attempt', lambda b, c, t, a, x, started: calls.append(c + ' ' + t)), \
                 patch.object(e, 'run_all', lambda *steps: [f() for _, f in steps]), patch.object(e.winhost, 'pb_path', lambda: 'pb'), \
                 patch.object(sys, 'argv', ['x', 'peer', '--self', 'me']):
