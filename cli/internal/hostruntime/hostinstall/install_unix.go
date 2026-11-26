@@ -281,7 +281,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	resultErr = errors.Join(resultErr, carrierUpgrade.finish(ctx, resultErr != nil))
 	if resultErr != nil {
 		// A failed attempt leaves no session owner of its own version.
-		resultErr = errors.Join(resultErr, candidateOwner.withdraw(context.WithoutCancel(ctx), paths.metadata, request.UID))
+		resultErr = errors.Join(resultErr, service.RollbackIncomplete(candidateOwner.withdraw(context.WithoutCancel(ctx), paths.metadata, request.UID)))
 	}
 	if resultErr != nil {
 		return errors.Join(resultErr, finishMachineGuard(ctx, guardRestore, resultErr))

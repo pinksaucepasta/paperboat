@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"io"
 	"io/fs"
 	"os"
@@ -53,6 +54,11 @@ func NotReadyFromMessage(message string) *UpdateNotReadyError {
 }
 
 func (e *UpdateNotReadyError) Is(target error) bool { return target == ErrUpdateNotReady }
+
+// RestoredNotReady reports a not-ready install whose previous version is back: every restore step finished.
+func RestoredNotReady(err error) bool {
+	return errors.Is(err, ErrUpdateNotReady) && !errors.Is(err, service.ErrLifecycleRollbackIncomplete)
+}
 
 // UpdateNotReady is the rollback of a new version that failed validation; cause is the failed step.
 func UpdateNotReady(cause error) error {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
@@ -161,7 +162,7 @@ func finishMachineGuard(ctx context.Context, undo guardUndo, installErr error) e
 	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
 	if err := undo.Restore(restoreCtx); err != nil {
-		return hostInstallFailure("restore the previous Paperboat machine guard", err)
+		return service.RollbackIncomplete(hostInstallFailure("restore the previous Paperboat machine guard", err))
 	}
 	return nil
 }

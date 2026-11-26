@@ -37,7 +37,7 @@ func TestUpdateNotReadyWithUnfinishedRollbackIsNotReportedRestored(t *testing.T)
 	if code == UpdateNotReadyExitCode {
 		t.Fatalf("an unfinished rollback exited as restored: %q", output.String())
 	}
-	for _, want := range []string{"restoring the previous version did not finish", "pb install again", "the previous carrier did not start again"} {
+	for _, want := range []string{"restoring the previous state did not finish", "run the same command again", "the previous carrier did not start again"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("output lacks %q: %q", want, output.String())
 		}

@@ -28,7 +28,7 @@ var (
 	ErrLifecycleUncertain = errors.New("service lifecycle outcome is uncertain")
 	// ErrLifecycleRollbackIncomplete is a failed operation whose rollback did not finish: the previous version is
 	// not known to be back, and its journal stays for the next start or install to retry.
-	ErrLifecycleRollbackIncomplete = errors.New("restoring the previous version did not finish")
+	ErrLifecycleRollbackIncomplete = errors.New("restoring the previous state did not finish")
 )
 
 // NativeComponentStatus is the complete state which must survive a failed
@@ -470,10 +470,15 @@ func (m *LifecycleManager) rollbackAfter(err error, journal lifecycleJournal) er
 	if rollbackErr == nil {
 		rollbackErr = m.removeJournal()
 	}
-	if rollbackErr != nil {
-		rollbackErr = fmt.Errorf("%w: %w", ErrLifecycleRollbackIncomplete, rollbackErr)
+	return errors.Join(err, RollbackIncomplete(rollbackErr))
+}
+
+// RollbackIncomplete tags a failed restore step (nil stays nil): the previous state is then not known to be back.
+func RollbackIncomplete(err error) error {
+	if err == nil {
+		return nil
 	}
-	return errors.Join(err, rollbackErr)
+	return fmt.Errorf("%w: %w", ErrLifecycleRollbackIncomplete, err)
 }
 
 func (m *LifecycleManager) rollback(ctx context.Context, journal lifecycleJournal) error {

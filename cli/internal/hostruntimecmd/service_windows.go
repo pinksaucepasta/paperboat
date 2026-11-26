@@ -269,7 +269,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 			// The two refusals that leave the installation as it was cross the elevation boundary by code.
 			if errors.Is(resultErr, hostinstall.ErrInsufficientSpace) {
 				resultErr = &elevation.RemoteError{Code: "insufficient_disk_space", Message: hostinstall.ErrInsufficientSpace.Error()}
-			} else if errors.Is(resultErr, hostinstall.ErrUpdateNotReady) {
+			} else if hostinstall.RestoredNotReady(resultErr) {
 				// The failed step crosses too: nobody sees this helper's output, and Unix prints it ("pb: cause:").
 				resultErr = &elevation.RemoteError{Code: "update_not_ready", Message: hostinstall.ErrUpdateNotReady.Error() + "; failed step: " + causetext.Text(resultErr)}
 			}

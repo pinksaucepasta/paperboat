@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"os"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
@@ -138,7 +139,7 @@ func replaceCandidate(ctx context.Context, lifecycleReplace func(context.Context
 		return replace(ctx)
 	})
 	if err != nil {
-		err = errors.Join(err, withdraw(context.WithoutCancel(ctx)))
+		err = errors.Join(err, service.RollbackIncomplete(withdraw(context.WithoutCancel(ctx))))
 	}
 	return errors.Join(err, finishMachineGuard(ctx, guard, err))
 }

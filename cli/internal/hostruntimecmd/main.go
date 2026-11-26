@@ -192,7 +192,7 @@ func runtimeFailureMessage(err error) string {
 	}
 	switch {
 	case errors.Is(err, service.ErrLifecycleRollbackIncomplete):
-		return "Paperboat installation failed, and restoring the previous version did not finish, so this computer may run parts of both versions. Run pb doctor to see why, fix what it reports, then run pb install again: it finishes the restore first."
+		return "The command failed, and restoring the previous state did not finish, so parts of Paperboat may run different versions. Run pb doctor to see why, then run the same command again: it finishes the restore first."
 	case errors.Is(err, elevation.ErrElevationRestrictedJob):
 		return elevation.ErrElevationRestrictedJob.Error()
 	case errors.Is(err, bootstrap.ErrEnrollmentTokenExpired):
@@ -303,7 +303,7 @@ func serviceFailureExitCode(err error) int {
 		return InsufficientSpaceExitCode
 	}
 	// Exit 79 tells the caller the previous version was restored: never when that restore did not finish.
-	if errors.Is(err, hostinstall.ErrUpdateNotReady) && !errors.Is(err, service.ErrLifecycleRollbackIncomplete) {
+	if hostinstall.RestoredNotReady(err) {
 		return UpdateNotReadyExitCode
 	}
 	if errors.Is(err, hostinstall.ErrNoPendingInstallation) {
