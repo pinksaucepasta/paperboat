@@ -155,6 +155,8 @@ fi
 case $version in 20[0-9][0-9].[0-9][0-9].[0-9][0-9].*) ;; *) echo "pb installer: $version is not a release version like 2026.11.18.1" >&2; exit 1 ;; esac
 case ${version#????.??.??.} in 0) ;; ''|0*|*[!0123456789]*) echo "pb installer: $version is not a release version like 2026.11.18.1" >&2; exit 1 ;; esac
 release_url="https://github.com/$repository/releases/download/$version"
+echo "Installing Paperboat $version for $os/$arch" >&2
+echo "Downloading and verifying the release..." >&2
 # SHA256SUMS carries the release signature only when its first line names this version, so a signed file from
 # another release cannot be replayed here.
 download "$release_url/SHA256SUMS" 60 1048576 "$temporary/SHA256SUMS" || { echo "pb installer: could not download SHA256SUMS for $version; check the version and your network" >&2; exit 1; }
@@ -246,6 +248,7 @@ if [ "$resume" = true ]; then
   fi
 else
   install_result="$temporary/install.json"
+  echo "Installing the pb command..." >&2
   if [ "$os" = linux ]; then
     "$installer_pb" install --install-dir "$install_dir" --json > "$install_result"
   else

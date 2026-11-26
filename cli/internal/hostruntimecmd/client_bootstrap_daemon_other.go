@@ -111,6 +111,9 @@ func localAccessOnly(codes []string) bool {
 // still starting (C020, round 9: `pb doctor` right after setup said degraded, healthy seconds later).
 const daemonSettleWindow = 60 * time.Second
 
+// pairedReadyMessage is the settled pairing message; bootstrap names the machine and its next step in it.
+const pairedReadyMessage = "Paperboat machine runtime is ready."
+
 // pairedMessage is what pairing prints once the daemon is bound: ready when it settled within
 // daemonSettleWindow, otherwise that it is still starting and where to watch it.
 func pairedMessage(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error)) string {
@@ -120,7 +123,7 @@ func pairedMessage(ctx context.Context, probe func(context.Context) (localdaemon
 		if settled.State == "degraded" && len(settled.HealthTitles) > 0 {
 			return "Paperboat is paired, but its local service is degraded: " + strings.Join(settled.HealthTitles, "; ") + ". Paperboat retries it by itself; run `pb doctor` to follow it."
 		}
-		return "Paperboat machine runtime is ready."
+		return pairedReadyMessage
 	}
 	return "Paperboat is paired; its local service is still starting. Run `pb status` to see when it is ready."
 }

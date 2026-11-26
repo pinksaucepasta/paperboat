@@ -276,6 +276,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if err := approveAdministrator(ctx, stdin, stderr); err != nil {
 		return &installationStageError{Stage: "service_install", Cause: err}
 	}
+	fmt.Fprintln(stderr, "Starting the machine services...")
 	installCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	if err := authorizeServiceInstall(installCtx, executable, installRequest, stdin, stdout, stderr); err != nil {
@@ -324,6 +325,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			}
 			// Runtime startup and commit may consume their readiness budget.
 			// Canonical daemon cutover gets its own bounded readiness window.
+			fmt.Fprintln(stderr, "Connecting to Paperboat...")
 			daemonCtx, daemonCancel := context.WithTimeout(ctx, daemonBindWindow)
 			err := bindBootstrapDaemon(daemonCtx, material.ControlURL, source.Version)
 			daemonCancel()
@@ -331,6 +333,10 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 				return &installationStageError{Stage: "daemon_readiness", Cause: err}
 			}
 			paired := pairedMessage(ctx, localdaemon.ProbeCurrentUserForUpdate)
+			if paired == pairedReadyMessage && *name != "" {
+				paired = "Ready: this machine is " + *name + ". Open it from any device with: pb connect " + *name
+			}
+			fmt.Fprintln(stderr, "Setting up encrypted environment...")
 			environmentErr := hostruntime.PreparePairEnvironment(ctx, *stateRoot, material.ControlURL, httptransport.Default())
 			if err := bootstrap.ClearResume(*stateRoot); err != nil {
 				return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
