@@ -175,5 +175,5 @@ func (s *Service) reinviteTx(ctx context.Context, tx *db.Tx, account, inviterRol
 	if err = tx.QueryRow(ctx, `SELECT generation FROM teams WHERE team_id=$1`, out.TeamID).Scan(&out.Generation); err != nil {
 		return out, err
 	}
-	return out, AuditTx(ctx, tx, account, out.TeamID, "invitation_resent", r.OperationID, map[string]any{"recipient_account": out.AccountID})
+	return out, AuditTx(ctx, tx, account, out.TeamID, "invitation_resent", r.OperationID, map[string]any{"recipient_account": out.AccountID, "mail_queued": send})
 }

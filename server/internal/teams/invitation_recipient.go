@@ -50,8 +50,8 @@ func checkNewInvitation(ctx context.Context, tx *db.Tx, team string, r InviteReq
 	var pending string
 	if err = tx.QueryRow(ctx, `SELECT count(*),coalesce(min(invitation_id) FILTER (WHERE
  recipient_account=nullif($2,'') OR ($3<>'' AND
-  (paperboat.canonical_email_address(recipient_email)=$3 OR recipient_account IN
-   (SELECT id FROM users WHERE status='active' AND email_verified AND paperboat.canonical_email_address(primary_email)=$3)))
+  (paperboat.canonical_email_address(recipient_email)=$3 OR ($2='' AND recipient_account IN
+   (SELECT id FROM users WHERE status='active' AND email_verified AND paperboat.canonical_email_address(primary_email)=$3))))
  ),'') FROM team_invitations
  WHERE team_id=$1 AND accepted_at IS NULL AND cancelled_at IS NULL`, team, r.AccountID, email).Scan(&count, &pending); err != nil {
 		return "", err

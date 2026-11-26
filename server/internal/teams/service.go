@@ -374,8 +374,14 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 			return ErrSuspended
 		}
 		if done {
+			// A replay answers with the stored invitation, so authorize the role it holds
+			// (a re-invite keeps the pending invitation's role, which can differ from r.Role).
+			role := r.Role
+			if out.Role != "" {
+				role = out.Role
+			}
 			m, ok := member(t, account)
-			if !ok || t.Deleted || !mayGrantRole(m.Role, r.Role) {
+			if !ok || t.Deleted || !mayGrantRole(m.Role, role) {
 				return ErrForbidden
 			}
 			return nil
