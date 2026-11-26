@@ -739,8 +739,10 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	}))
 
 	// Wrap remote input with the file-paste interceptor.
+	remotePaste := &session.RemotePaste{}
 	interceptor := paste.NewWithPolicy(conn, pastePolicy,
 		paste.WithDirectInput(),
+		paste.WithRemoteBracketedPaste(remotePaste.Enabled),
 		paste.WithNotifier(statusNotifier(useStatusBar)),
 		paste.WithFailureReporter(func(cause error) string {
 			reference := reportTerminalAuxFailure(ctx, "delivery", "file_transfer_failed", cause)
@@ -773,6 +775,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 
 	runOptions := []session.RunOption{
 		session.WithOutputBufferBytes(d.cfg.Connect.TerminalOutputBufferBytes),
+		session.WithBracketedPaste(remotePaste),
 	}
 	if useStatusBar {
 		bar.SetViewportChanged(func(cols, rows uint16) {

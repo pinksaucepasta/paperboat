@@ -143,10 +143,6 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 			body = originalBody
 		}
 	}
-	framed := make([]byte, 0, len(startMarker)+len(body)+len(endMarker))
-	framed = append(framed, startMarker...)
-	framed = append(framed, body...)
-	framed = append(framed, endMarker...)
 	// Give bytes already accepted by Write a chance to reach the worker before
 	// publishing the replacement. This preserves terminal stream order when a
 	// paste upload completes between two small input writes.
@@ -162,7 +158,7 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 		}
 	}
 	select {
-	case i.completed <- uploadCompletion{seq: seq, framed: framed, err: err, uploaded: uploaded, closeFailed: closeFailed}:
+	case i.completed <- uploadCompletion{seq: seq, body: body, err: err, uploaded: uploaded, closeFailed: closeFailed}:
 	case <-i.ctx.Done():
 	}
 }

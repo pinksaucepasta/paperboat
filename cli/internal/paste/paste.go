@@ -5,7 +5,8 @@
 //
 // Guarantees:
 //   - Pasted text that is not a validated absolute file path passes through untouched.
-//   - Paste framing (ESC[200~ … ESC[201~) and ordering are preserved.
+//   - Ordering is preserved, and so is paste framing (ESC[200~ … ESC[201~) unless the remote program has not asked
+//     for bracketed paste: it then gets the plain text.
 //   - Upload holds only the affected paste; the rest of the stream keeps
 //     flowing, and remote output runs on a separate goroutine so the PTY never
 //     deadlocks.
@@ -72,6 +73,7 @@ type Interceptor struct {
 	destMu          sync.Mutex
 	directInput     bool
 	lifecycle       func(LifecycleEvent)
+	remoteBracketed func() bool
 	stateMu         sync.Mutex
 	errMu           sync.Mutex
 	err             error
@@ -292,7 +294,7 @@ func (i *Interceptor) run() {
 				}
 				delete(completionBuffer, nextCompletion)
 				nextCompletion++
-				_, writeErr := i.writeDest(ready.framed)
+				_, writeErr := i.writeDest(i.frame(ready.body, true))
 				if errors.Is(writeErr, tunnel.ErrWriteUncertain) {
 					handleWriteErr(writeErr)
 					writeErr = nil
@@ -370,9 +372,25 @@ func (i *Interceptor) run() {
 }
 
 func (i *Interceptor) writeDest(p []byte) (int, error) {
+	if len(p) == 0 { // an empty paste to a remote without bracketed paste
+		return 0, nil
+	}
 	i.destMu.Lock()
 	defer i.destMu.Unlock()
 	return i.dest.Write(p)
+}
+
+// frame returns a paste body as dest takes it: between the markers (without the end one for a paste cut off at close),
+// or alone when the remote program has not asked for bracketed paste.
+func (i *Interceptor) frame(body []byte, ended bool) []byte {
+	if i.remoteBracketed != nil && !i.remoteBracketed() {
+		return body
+	}
+	framed := append(append([]byte(nil), startMarker...), body...)
+	if ended {
+		framed = append(framed, endMarker...)
+	}
+	return framed
 }
 
 func (i *Interceptor) flush() error {
@@ -381,11 +399,10 @@ func (i *Interceptor) flush() error {
 	}
 	// Emit whatever remains: if mid-paste, re-add the start marker so framing
 	// stays well-formed for the remote.
-	var out []byte
+	out := i.buf
 	if i.inPaste {
-		out = append(out, startMarker...)
+		out = i.frame(i.buf, false)
 	}
-	out = append(out, i.buf...)
 	i.buf = nil
 	i.inPaste = false
 	_, err := i.writeDest(out)
@@ -476,11 +493,7 @@ func (i *Interceptor) drainPaste() (done bool, err error) {
 	if pending {
 		return true, nil
 	}
-	framed := make([]byte, 0, len(startMarker)+len(out)+len(endMarker))
-	framed = append(framed, startMarker...)
-	framed = append(framed, out...)
-	framed = append(framed, endMarker...)
-	if _, err := i.writeDest(framed); err != nil {
+	if _, err := i.writeDest(i.frame(out, true)); err != nil {
 		return false, err
 	}
 	return true, nil

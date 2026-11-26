@@ -22,8 +22,6 @@ import (
 
 const terminalOutputBufferBytes = 128 * 1024
 
-// pb never turns bracketed paste (2004) on itself: the remote program's DECSET passes through to the local terminal
-// and cleanup turns it off, as in mosh (src/terminal/terminaldisplay.cc:278). Forced on, macOS bash 3.2 got the markers.
 const terminalCleanupSequence = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1049l\x1b[?25h"
 
 type RunOption func(*runOptions)
@@ -33,6 +31,7 @@ type runOptions struct {
 	output            io.Writer
 	remoteSize        func() (uint16, uint16)
 	readOnly          func() bool
+	paste             *RemotePaste
 }
 
 // WithReadOnly keeps input and resize local. Ctrl-C detaches without signaling the shell.
@@ -87,6 +86,12 @@ func WithRemoteSize(size func() (uint16, uint16)) RunOption {
 	return func(options *runOptions) { options.remoteSize = size }
 }
 
+// WithBracketedPaste keeps bracketed paste on in the local terminal while attached and records in remote whether the
+// remote program asked for it. Without a local terminal, input passes as it is: remote stays Enabled.
+func WithBracketedPaste(remote *RemotePaste) RunOption {
+	return func(options *runOptions) { options.paste = remote }
+}
+
 // Run wires the local terminal to conn. stdinSink is the writer local input is
 // copied into — typically the paste interceptor wrapping conn. Run blocks until
 // the remote session ends (or ctx is cancelled) and returns the remote exit
@@ -113,6 +118,11 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		resetTerminalEmulator := func() { _, _ = options.output.Write([]byte(terminalCleanupSequence)) }
 		resetTerminalEmulator()
 		defer resetTerminalEmulator()
+		if options.paste != nil {
+			_, _ = options.output.Write([]byte(bracketedPasteEnableSequence))
+		}
+	} else if options.paste != nil {
+		options.paste.enabled.Store(true)
 	}
 
 	// Propagate the initial size and subsequent resizes.
@@ -142,7 +152,11 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 				diagnostics.TerminalHop("client_terminal_read", "local", outputOffset, outputOffset+uint64(n), time.Now())
 				diagnostics.TerminalHop("client_terminal_write_start", "local", outputOffset, outputOffset+uint64(n), time.Now())
 				started := time.Now()
-				if _, writeErr := sink.Write(buf[:n]); writeErr != nil {
+				shown := buf[:n]
+				if isTerminal && options.paste != nil {
+					shown = options.paste.follow(shown)
+				}
+				if _, writeErr := sink.Write(shown); writeErr != nil {
 					streamErr <- fmt.Errorf("write terminal output: %w", writeErr)
 					return
 				}

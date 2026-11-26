@@ -56,7 +56,7 @@ class SessionLifecycleShell(unittest.TestCase):
         self.assertIn('stty -echo; ', typed)
         self.assertIn("PB_DURABLE='abc123'; printf", typed)
         self.assertIn('printf \'\\nPB_REATTACHED_%s\\n\' "$PB_DURABLE"', typed)
-        self.assertEqual(session_lifecycle.ATTACHED, terminal.expected[0])
+        self.assertEqual(b'\x1b[?2004h', terminal.expected[0])
 
 
 if __name__ == '__main__':

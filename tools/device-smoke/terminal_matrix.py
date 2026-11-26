@@ -33,7 +33,7 @@ import uuid
 sys.path.insert(0, Path(__file__).resolve().parent.as_posix())
 from session_cleanup import cleanup, inventory  # noqa: E402
 from session_lifecycle import selected  # noqa: E402
-from terminal_lifecycle import ATTACHED, Terminal  # noqa: E402
+from terminal_lifecycle import Terminal  # noqa: E402
 from network_drop import pf_block, pf_release  # noqa: E402
 import windows_target  # noqa: E402
 import winhost  # noqa: E402
@@ -128,7 +128,8 @@ class Client(Terminal):
                     if 'closed' in str(error) or time.monotonic() >= deadline:
                         raise
                     self.send('\r')
-        self.expect(ATTACHED, timeout)
+        # Keys typed before the shell enables bracketed paste are lost by its line editor.
+        self.expect(b'\x1b[?2004h', timeout)
         self.expect(self.marker('READY', 'stty -echo; '), timeout)
 
     def run(self, command, timeout=60):
@@ -220,7 +221,7 @@ def attach(target, session, rows=24, cols=80, typing=True):
     if typing:
         c.ready()
     else:  # ready() types its marker, which is activity; a silent reconnect only waits for the replayed prompt
-        c.expect(ATTACHED, 90)
+        c.expect(b'\x1b[?2004h', 90)
     return c
 
 
@@ -979,11 +980,11 @@ def large_paste(a, sessions):
         digest = 'shasum -a 256 ' if target_darwin(a.target) else 'sha256sum '
         out = c1.run(digest + path + '; rm -f ' + path, 120)
         row('N8 256 KiB paste arrives byte for byte', want.encode() in out)
+        if b'PB_SHELL=3.' in c1.run('echo PB_SHELL=$BASH_VERSION'):  # pb sends such a shell the plain lines, which run
+            row('N8b bracketed paste at the prompt waits for Enter, then runs each line once', None, 'macOS bash 3.2 has no bracketed paste')
+            return
         c1.send('stty echo\r')
         c1.settle(1)
-        if not c1.bracketed():
-            row('N8b bracketed paste at the prompt waits for Enter, then runs each line once', None, 'the shell has no bracketed paste')
-            return
         one, two = uuid.uuid4().hex, uuid.uuid4().hex
         c1.send("\x1b[200~printf '%s_%s\\n' PB_P1 " + one + "\nprintf '%s_%s\\n' PB_P2 " + two + "\x1b[201~")
         c1.settle(2)

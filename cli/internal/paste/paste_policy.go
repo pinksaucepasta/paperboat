@@ -22,7 +22,7 @@ type BatchUploader interface {
 
 type uploadCompletion struct {
 	seq         uint64
-	framed      []byte
+	body        []byte
 	err         error
 	uploaded    bool
 	closeFailed bool
@@ -107,6 +107,12 @@ func WithMaxQueuedBytes(n int) Option {
 		}
 		i.queueChunks = (n + i.queueChunkSize - 1) / i.queueChunkSize
 	}
+}
+
+// WithRemoteBracketedPaste frames a paste for dest only while enabled reports true, asked as each paste is written;
+// otherwise dest gets the plain text. Without it every paste is framed.
+func WithRemoteBracketedPaste(enabled func() bool) Option {
+	return func(i *Interceptor) { i.remoteBracketed = enabled }
 }
 
 // WithDirectInput sends ordinary non-paste bytes to the destination inline.

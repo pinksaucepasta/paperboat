@@ -22,7 +22,7 @@ import time
 import uuid
 
 from session_cleanup import cleanup
-from terminal_lifecycle import ATTACHED, Terminal
+from terminal_lifecycle import Terminal
 import winhost
 
 PB = winhost.pb_path()
@@ -127,7 +127,7 @@ def main():
     failsafe = block = None
     try:
         terminal = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
-        terminal.expect(ATTACHED)
+        terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         terminal.send("pb_hold=$$; printf '\\nPB_PID_%s\\n' \"$$\"\r")
         terminal.expect('PB_PID_')

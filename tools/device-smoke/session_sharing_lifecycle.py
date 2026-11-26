@@ -11,7 +11,7 @@ from machine_lifecycle import restore_all
 from pairing_lifecycle import command_diagnostic, command_result, invoke
 from session_cleanup import cleanup
 from session_lifecycle import selected
-from terminal_lifecycle import ATTACHED, Terminal
+from terminal_lifecycle import Terminal
 import winhost
 
 
@@ -45,7 +45,7 @@ def main():
             invoke(pb, *prefix, 'team', 'create', team, '--json')
             created = True
         terminal = Terminal(winhost.terminal_argv(pb, [*prefix, 'connect', args.target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(pb))
-        terminal.expect(ATTACHED)
+        terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         _, session = selected(pb, args.target, name)
         identifier = session['id']

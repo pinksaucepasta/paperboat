@@ -1010,3 +1010,41 @@ func FuzzBracketedPasteStreamPreservesUnknownInput(f *testing.F) {
 		}
 	})
 }
+
+// A remote program that did not ask for bracketed paste gets the plain text, and a dropped file is still uploaded.
+func TestPasteIsFramedOnlyForARemoteThatAsked(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "drop.png")
+	if err := os.WriteFile(file, []byte("image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, asked := range []bool{false, true} {
+		frame := func(body string) string {
+			if asked {
+				return wrap(body)
+			}
+			return body
+		}
+		var dest bytes.Buffer
+		i := New(&dest, fixedUploader{"/vm/drop.png"}, defaultLimits(), WithRemoteBracketedPaste(func() bool { return asked }))
+		input := wrap("one\rtwo") + wrap("") + wrap(file) + "typed" + "\x1b[200~cut off"
+		if _, err := i.Write([]byte(input)); err != nil {
+			t.Fatal(err)
+		}
+		if err := i.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// The upload ends whenever it ends; the cut-off paste is flushed at close, before it.
+		got := dest.String()
+		dropped := frame("/vm/drop.png")
+		if strings.Count(got, dropped) != 1 {
+			t.Fatalf("asked=%v: dropped file missing from %q", asked, got)
+		}
+		cut := "cut off"
+		if asked {
+			cut = "\x1b[200~cut off"
+		}
+		if rest, want := strings.Replace(got, dropped, "", 1), frame("one\rtwo")+frame("")+"typed"+cut; rest != want {
+			t.Fatalf("asked=%v: remote got %q, want %q", asked, rest, want)
+		}
+	}
+}

@@ -17,7 +17,7 @@ import time
 
 import pairing_lifecycle as p
 from session_cleanup import cleanup
-from terminal_lifecycle import ATTACHED, Terminal, wait_windows_shell
+from terminal_lifecycle import Terminal, wait_windows_shell
 import windows_target
 import winhost
 
@@ -120,7 +120,7 @@ def main():
         return windows_pid(terminal) if windows else terminal.expect('\n', timeout=10).decode().strip()
     try:
         if not windows:
-            terminal.expect(ATTACHED)
+            terminal.expect(b'\x1b[?2004h')
             terminal.expect(terminal.marker('READY', 'stty -echo; '))
         else:  # no bracketed paste under cmd.exe: wait for a printed marker, not for a quiet pty (typed bytes before attach are swallowed)
             wait_windows_shell(terminal)

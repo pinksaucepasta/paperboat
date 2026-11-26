@@ -13,7 +13,7 @@ import re
 import time
 
 from session_cleanup import cleanup
-from terminal_lifecycle import ATTACHED, Terminal
+from terminal_lifecycle import Terminal
 
 
 def utc():
@@ -55,7 +55,7 @@ def main():
     result = dict(started=utc())
     rows = []
     try:
-        terminal.expect(ATTACHED, timeout=90)
+        terminal.expect(b'\x1b[?2004h', timeout=90)
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         terminal.send("printf '\\nPB_GAP_PID_%s\\n' \"$$\"\r")
         terminal.expect('PB_GAP_PID_')

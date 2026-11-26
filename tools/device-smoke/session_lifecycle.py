@@ -11,7 +11,7 @@ from install_lifecycle import registration
 from machine_lifecycle import restore_all
 from pairing_lifecycle import await_external_action, command_diagnostic, invoke
 from session_cleanup import cleanup, inventory, mutate
-from terminal_lifecycle import ATTACHED, Terminal
+from terminal_lifecycle import Terminal
 import windows_target
 import winhost
 
@@ -34,7 +34,7 @@ def ready(terminal, windows):
     """Wait until the target's shell takes input. Windows: cmd.exe under ConPTY, no PowerShell (its first start can take
     seconds on a loaded machine), and the wait is 60 s (expect defaults to 45) for ConPTY and cmd themselves to come up."""
     if not windows:
-        terminal.expect(ATTACHED)
+        terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         return
     terminal.wait_raw()
@@ -88,7 +88,7 @@ def qualify(pb, target, check):
         if windows:
             terminal.wait_raw()
         else:
-            terminal.expect(ATTACHED)
+            terminal.expect(b'\x1b[?2004h')
         if check in ('replay', 'cross'):
             terminal.expect('PB_DURABLE_' + nonce, timeout=15)
         show_state(terminal, windows, nonce)
@@ -132,7 +132,7 @@ def resume(pb, target, identifier, nonce, account):
         raise RuntimeError('cross-device fixture does not identify an exact owned non-default terminal')
     terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']), env=winhost.terminal_env(pb))
     try:
-        terminal.expect(ATTACHED)
+        terminal.expect(b'\x1b[?2004h')
         terminal.expect('PB_DURABLE_' + nonce, timeout=15)
         terminal.send("printf '\\nPB_OTHER_DEVICE_%s\\n' \"$PB_DURABLE\"\r")
         terminal.expect('PB_OTHER_DEVICE_' + nonce)

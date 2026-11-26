@@ -12,7 +12,7 @@ import uuid
 
 from session_cleanup import cleanup
 from session_lifecycle import selected
-from terminal_lifecycle import ATTACHED, Terminal
+from terminal_lifecycle import Terminal
 import windows_target
 import winhost
 
@@ -61,7 +61,7 @@ def establish(terminal, nonce, windows):
                     raise
         terminal.send('set PB_IDLE=%s\r' % nonce)
         return windows_marker(terminal, 'PB_SET', nonce, 60)
-    terminal.expect(ATTACHED)
+    terminal.expect(b'\x1b[?2004h')
     terminal.expect(terminal.marker('READY', 'stty -echo; '))
     terminal.send("PB_IDLE='%s'; pb_shell=$$; printf '\\nPB_SET_%%s_%%s\\n' \"$PB_IDLE\" \"$$\"\r" % nonce)
     terminal.expect('PB_SET_' + nonce + '_')
@@ -72,7 +72,7 @@ def confirm(terminal, nonce, windows):
     """After the idle time: the shell variable and the shell's pid, as the reattached session reports them."""
     if windows:
         return windows_marker(terminal, 'PB_BACK', nonce, 90)
-    terminal.expect(ATTACHED, timeout=90)
+    terminal.expect(b'\x1b[?2004h', timeout=90)
     terminal.send("printf '\\nPB_BACK_%s_%s\\n' \"$PB_IDLE\" \"$$\"\r")
     terminal.expect('PB_BACK_' + nonce + '_', timeout=90)
     return terminal.expect('\n').decode().strip()

@@ -32,7 +32,7 @@ import uuid
 from session_cleanup import cleanup
 
 PB = str(Path.home() / '.local/bin/pb')
-READY_SEQ = b'\x1b[?2004l'  # pb's mode reset: the session is attached (terminal_lifecycle.ATTACHED)
+READY_SEQ = b'\x1b[?2004h'  # the shell enabled bracketed paste: it is at its prompt
 WINDOWS_PROMPT = re.compile(rb'[A-Za-z]:\\[^>\r\n]*>')  # cmd's prompt, the ready sign of a Windows host
 WINDOWS = False  # --host-os windows
 QUERIES = [(b'\x1b[6n', b'\x1b[1;1R'),
