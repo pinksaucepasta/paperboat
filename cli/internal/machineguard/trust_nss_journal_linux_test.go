@@ -4,6 +4,7 @@ package machineguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,6 +35,26 @@ func TestNSSWriteSurvivesACancelledCaller(t *testing.T) {
 	}
 	if _, err := runNSSCommand(ctx, "-L", "-d", "sql:/nowhere"); err == nil {
 		t.Fatal("a read must still follow the caller's deadline")
+	}
+}
+
+// A write never starts with less than its full budget left: it is deferred to the next retry instead.
+func TestNSSWriteNeedsItsFullBudgetToStart(t *testing.T) {
+	bin, marker := t.TempDir(), filepath.Join(t.TempDir(), "ran")
+	if err := os.WriteFile(filepath.Join(bin, "certutil"), []byte("#!/bin/sh\necho > "+marker+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(context.Background(), nssWriteBudget/2)
+	defer cancel()
+	if _, err := runNSSCommand(ctx, "-A", "-d", "sql:/nowhere"); !errors.Is(err, ErrNSSWriteDeferred) {
+		t.Fatalf("write with half its budget left: %v, want deferred", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("certutil started without its full budget")
+	}
+	if _, err := runNSSCommand(ctx, "-L", "-d", "sql:/nowhere"); err != nil {
+		t.Fatalf("a read needs no write budget: %v", err)
 	}
 }
 
@@ -73,8 +94,8 @@ func TestNSSHotJournalIsRolledBackBeforeTheReadOnlyListing(t *testing.T) {
 	}
 }
 
-// With real certutil: a write killed midway leaves a hot journal; the heal rolls it back and -L lists again.
-func TestNSSHealsARealHotJournal(t *testing.T) {
+// With real certutil: a write killed at its bound leaves a hot journal; the next pass heals it and -L lists again.
+func TestNSSHealsAWriteKilledAtItsBound(t *testing.T) {
 	if _, err := exec.LookPath("certutil"); err != nil {
 		t.Skip("certutil (NSS tools) is not installed")
 	}
@@ -93,18 +114,16 @@ func TestNSSHealsARealHotJournal(t *testing.T) {
 	if _, err = runNSSCommand(t.Context(), "-A", "-d", "sql:"+database, "-t", "C,,", "-n", localTrustNickname(root), "-i", pemPath); err != nil {
 		t.Fatal(err)
 	}
+	budget := nssWriteBudget
+	t.Cleanup(func() { nssWriteBudget = budget })
 	for attempt := 0; !nssHotJournal(database); attempt++ {
 		if attempt == 300 {
-			t.Skip("could not interrupt a certutil write at the right moment on this host")
+			t.Skip("could not cut a certutil write at the right moment on this host")
 		}
-		command := exec.Command("certutil", "-A", "-d", "sql:"+database, "-t", "C,,", "-n", fmt.Sprintf("interrupted %d", attempt), "-i", pemPath)
-		if err = command.Start(); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(time.Duration(attempt%40) * time.Millisecond / 2)
-		_ = command.Process.Kill()
-		_ = command.Wait()
+		nssWriteBudget = time.Duration(1+attempt%40) * time.Millisecond / 2
+		_, _ = runNSSCommand(t.Context(), "-A", "-d", "sql:"+database, "-t", "C,,", "-n", fmt.Sprintf("interrupted %d", attempt), "-i", pemPath)
 	}
+	nssWriteBudget = budget
 	present, err := nssLocalRoot(t.Context(), database, root, runNSSCommand, true)
 	if err != nil || !present {
 		t.Fatalf("after the heal: present=%v err=%v", present, err)

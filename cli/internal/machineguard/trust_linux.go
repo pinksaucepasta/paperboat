@@ -253,20 +253,34 @@ func linuxDistributionIDs() (string, []string, error) {
 
 // NSS output consists of public certificate metadata, but its size and runtime
 // are bounded even if a browser store is corrupt or contains excessive entries.
+// nssWriteBudget bounds one certutil write; a write never starts with less of the caller's budget left.
+var nssWriteBudget = 10 * time.Second
+
+// ErrNSSWriteDeferred means a browser-store write was not started because the step's budget could not cover it;
+// the next reconcile retries it.
+var ErrNSSWriteDeferred = errors.New("browser certificate store write deferred to the next retry: not enough time left")
+
+func nssWriteMayStart(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrNSSWriteDeferred, err)
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < nssWriteBudget {
+		return ErrNSSWriteDeferred
+	}
+	return nil
+}
+
 func runNSSCommand(parent context.Context, args ...string) ([]byte, error) {
 	timeout := 5 * time.Second
 	if len(args) > 0 && args[0] != "-L" {
-		// A write killed midway leaves hot journals that read-only certutil cannot roll back ("bad database"
-		// for good, in the user's own browser store): once started, a caller's cancellation never kills it. The
-		// caller's deadline still bounds the step: no write starts after it, and none runs past it.
-		if err := parent.Err(); err != nil {
+		// A write killed midway leaves hot journals that read-only certutil cannot roll back ("bad database" for
+		// good, in the user's own browser store). So a write starts only with its full budget left, and then a
+		// caller's cancellation (Stop) never kills it. One that still runs past nssWriteBudget is killed at the
+		// bound; the next pass heals its journal before listing (nssLocalRoot, TestNSSHealsAWriteKilledAtItsBound).
+		if err := nssWriteMayStart(parent); err != nil {
 			return nil, err
 		}
-		timeout = 30 * time.Second
-		if deadline, ok := parent.Deadline(); ok && time.Until(deadline) < timeout {
-			timeout = time.Until(deadline)
-		}
-		parent = context.WithoutCancel(parent)
+		parent, timeout = context.WithoutCancel(parent), nssWriteBudget
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()

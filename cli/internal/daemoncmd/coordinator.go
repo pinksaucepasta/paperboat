@@ -25,7 +25,11 @@ import (
 )
 
 type Coordinator struct {
-	cfg               CoordinatorConfig
+	cfg CoordinatorConfig
+	// lifeMu guards lifeCancel apart from mu: Stop cancels every running stage before it waits for mu (a
+	// reconcile holds mu while a stage runs). Prior art: Tailscale's shutdownCertRefreshLoop runs without b.mu.
+	lifeMu            sync.Mutex
+	lifeCancel        context.CancelFunc
 	rpcServer         *daemonrpc.Server
 	rpcListener       net.Listener
 	rpcBackend        *daemonrpc.LiveDaemonBackend
@@ -163,6 +167,9 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 	// original failure remains observable rather than disappearing on restart.
 	defer func() { c.observe(parent, "lifecycle", cleanupErr) }()
 	c.ctx, c.cancel = context.WithCancel(parent)
+	c.lifeMu.Lock()
+	c.lifeCancel = c.cancel
+	c.lifeMu.Unlock()
 	c.mu.Unlock()
 	if c.cfg.ConnectNameClient != nil {
 		connectCtx, cancel := context.WithTimeout(parent, connectTimeout)
@@ -657,6 +664,14 @@ func (c *Coordinator) Stop() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer shutdownCancel()
 	c.resetReconcileRetry()
+	// Cancel first: every reconcile stage ends at once, so mu is free after at most one in-flight certutil write
+	// (machineguard nssWriteBudget, 10 s) and a cancelled guard call; cleanup then has connectTimeout (5 s): Stop
+	// takes at most ~16 s, under systemd's 60 s stop timeout (TestStopEndsAReconcileStagePromptly).
+	c.lifeMu.Lock()
+	if c.lifeCancel != nil {
+		c.lifeCancel()
+	}
+	c.lifeMu.Unlock()
 	c.mu.Lock()
 	server, listener, cancel := c.rpcServer, c.rpcListener, c.cancel
 	c.rpcServer, c.rpcListener, c.ctx, c.cancel, c.running = nil, nil, nil, nil, false

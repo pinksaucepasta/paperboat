@@ -66,7 +66,7 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	if err := client.ReplaceAliases(ctx, aliases); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
 	}
-	if err := c.issueBrowserRouteCertificates(ctx, client, routes, nil); err != nil {
+	if err := c.issueBrowserRouteCertificates(c.ctx, client, routes, nil); err != nil {
 		return guardedWebRoute{}, err
 	}
 	state := &browserGatewayState{}
@@ -182,7 +182,7 @@ func (c *Coordinator) updateBrowserGatewayLocked(ctx context.Context, client gua
 	if err := client.ReplaceAliases(ctx, aliases); err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_aliases", err)
 	}
-	if err := c.issueBrowserRouteCertificates(ctx, client, routes, old.browserRoutes); err != nil {
+	if err := c.issueBrowserRouteCertificates(c.ctx, client, routes, old.browserRoutes); err != nil {
 		return guardedWebRoute{}, err
 	}
 	if err := old.proxy.SetRoutes(routes, denied); err != nil {
@@ -290,7 +290,9 @@ func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guarde
 		if served[port] {
 			continue
 		}
-		listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, port)
+		acquireCtx, cancel := c.stageCtx(guardCallBudget) // its own budget: browser trust may have run long before it
+		listener, err := client.Acquire(acquireCtx, splitdns.BrowserGatewayHostname, ip, port)
+		cancel()
 		if errors.Is(err, machineguard.ErrPortInUse) {
 			// Another program (sshd on 22) or a Windows excluded port range owns the port: permanent, like a
 			// native port conflict. Retrying and a doctor warning cannot fix it (Windows test machine, 2026-11-14).
@@ -351,7 +353,7 @@ func browserRouteForHostDomain(routes map[string]splitdns.BrowserRoute, host, do
 }
 
 // browserTrustBudget bounds the whole browser-trust step (every certutil write in the user's stores).
-const browserTrustBudget = 30 * time.Second
+const browserTrustBudget = 20 * time.Second
 
 func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guardedNameClient, hostname, machineID string, port int) (returned tls.Certificate, resultErr error) {
 	defer func() { resultErr = coordinatorOperationFailure("browser_certificate", resultErr) }()
@@ -364,7 +366,9 @@ func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guarde
 	if !ok {
 		return tls.Certificate{}, errors.New("local browser certificate service is unavailable; reinstall Paperboat")
 	}
-	bundle, err := issuer.Certificate(ctx, hostname)
+	callCtx, cancelCall := context.WithTimeout(ctx, guardCallBudget) // its own budget: never a trust step's leftovers
+	bundle, err := issuer.Certificate(callCtx, hostname)
+	cancelCall()
 	if err != nil {
 		return tls.Certificate{}, err
 	}
@@ -389,9 +393,9 @@ func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guarde
 	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: hostname}); err != nil {
 		return tls.Certificate{}, err
 	}
-	// The trust step has its own budget: a certutil write is never cancelled midway, so the caller's deadline
-	// must not decide it. Stop() may wait for it on c.mu for up to this long, under systemd's 60 s stop timeout.
-	trustCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), browserTrustBudget)
+	// The trust step has its own budget, ended by Stop (ctx is the coordinator's lifetime on the reconcile path, the
+	// handshake's otherwise). A certutil write starts only with a full write budget left (machineguard).
+	trustCtx, cancel := context.WithTimeout(ctx, browserTrustBudget)
 	defer cancel()
 	if err = machineguard.InstallUserTrust(trustCtx, bundle.RootCAPEM); err != nil {
 		return tls.Certificate{}, fmt.Errorf("install browser certificate trust: %w", err)

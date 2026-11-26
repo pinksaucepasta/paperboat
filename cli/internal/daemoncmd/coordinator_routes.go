@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
@@ -109,6 +110,20 @@ func transientGuardFailure(ctx context.Context, err error) bool {
 		(errors.As(err, &netErr) && netErr.Timeout())
 }
 
+// guardCallBudget bounds one guard call of the browser gateway (Acquire, Certificate) on its own.
+const guardCallBudget = 5 * time.Second
+
+// stageCtx is one reconcile stage's budget, derived from the coordinator's lifetime so Stop ends it at once. c.mu
+// is held (c.ctx is only read under it).
+func (c *Coordinator) stageCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if c.ctx == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // not running: every stage ends before it starts
+		return ctx, cancel
+	}
+	return context.WithTimeout(c.ctx, timeout)
+}
+
 func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonrpc.PeerUpdate) (err error) {
 	c.mu.Lock()
 	defer func() {
@@ -118,17 +133,23 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	if c.ctx == nil {
 		return errors.New("coordinator is not running")
 	}
-	err = c.replaceGuardedRoutesLocked(ctx, peers)
+	// Each stage has its own budget from the coordinator's lifetime (stageCtx), so a slow stage never spends a later
+	// one's, and Stop ends them all. The caller's ctx only decides whether to start.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stage, cancelStage := c.stageCtx(c.cfg.ReconcileTimeout)
+	defer cancelStage()
+	err = c.replaceGuardedRoutesLocked(stage, peers)
 	// A guard that restarted (an update or self-heal replaced it) or answered too slowly leaves this connection
 	// dead (the failed step dropped it): on a timeout or closed connection, dial once more within this reconcile.
 	var op coordinatorOperationError
-	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(ctx, err) && errors.As(err, &op) &&
+	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(stage, err) && errors.As(err, &op) &&
 		(op.LocalAccessStep() == "guard_status" || op.LocalAccessStep() == "native_listener") {
 		diagnosticlog.TryWarn("machine guard did not answer; dialing it again", "error", err)
-		// The failed attempt spent most of ctx's budget: the retry gets a full one of its own, ended by Stop.
-		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.ReconcileTimeout)
+		// The failed attempt spent most of its budget: the retry gets a full one of its own, ended by Stop.
+		retryCtx, cancel := c.stageCtx(c.cfg.ReconcileTimeout)
 		defer cancel()
-		defer context.AfterFunc(c.ctx, cancel)()
 		c.resetNameGenerationLocked(retryCtx)
 		err = c.replaceGuardedRoutesLocked(retryCtx, peers)
 	}
@@ -316,11 +337,10 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 	} else {
 		c.browserPending = false
 	}
-	// The browser step above may have spent the reconcile's budget on browser trust; native access never pays for
-	// that, so the policy and aliases get a fresh budget of their own.
-	ctx, cancelRest := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.ReconcileTimeout)
+	// The browser step above may have spent this stage's budget on browser trust; native access never pays for
+	// that, so the policy and aliases are a stage of their own.
+	ctx, cancelRest := c.stageCtx(c.cfg.ReconcileTimeout)
 	defer cancelRest()
-	defer context.AfterFunc(c.ctx, cancelRest)()
 	// One policy transaction for every listener acquired above (one WFP Apply for N peers on Windows; Windows test machine
 	// with ~20 peers timed out applying one per acquire). Until it lands the new addresses stay denied.
 	if err := nameClient.ApplyPolicy(ctx); err != nil {
