@@ -34,7 +34,7 @@ func TestUpdateNotReadyWithUnfinishedRollbackIsNotReportedRestored(t *testing.T)
 	err := errors.Join(hostinstall.UpdateNotReady(cause), rollback)
 	var output bytes.Buffer
 	code := finishRuntimeCommand(context.Background(), "service", &output, err, serviceFailureExitCode(err))
-	if code == UpdateNotReadyExitCode {
+	if code != RollbackIncompleteExitCode {
 		t.Fatalf("an unfinished rollback exited as restored: %q", output.String())
 	}
 	for _, want := range []string{"restoring the previous state did not finish", "run the same command again", "the previous carrier did not start again"} {

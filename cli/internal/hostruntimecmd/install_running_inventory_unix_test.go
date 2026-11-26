@@ -280,3 +280,34 @@ func TestFailedInstallStepKeepsItsPrintedReasonInTheCause(t *testing.T) {
 		t.Fatalf("cause text of a failed install step = %q (err %v), want the step's printed reason", causetext.Text(err), err)
 	}
 }
+
+// A restore that did not finish crossed sudo as exit 1: pb told the user to approve administrator access, and the
+// inventory then pruned the previous version's files that the restore still needs. It now has its own exit status.
+func TestUnfinishedRestoreIsReportedAndRunsNoInventory(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(layout.Binary); err == nil {
+		t.Skip("a Paperboat installation exists on this machine; the test must not touch its services")
+	}
+	directory := filepath.Join(home, "bin")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := privilegedInstallCommand
+	t.Cleanup(func() { privilegedInstallCommand = original })
+	var operations []string
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		operations = append(operations, arguments[len(arguments)-1])
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null; exit "+strconv.Itoa(RollbackIncompleteExitCode))
+	}
+	_, err = InstallRunningBinary(t.Context(), executable, source, directory, "")
+	if !errors.Is(err, service.ErrLifecycleRollbackIncomplete) || !strings.Contains(err.Error(), "restoring the previous state did not finish") || strings.Contains(err.Error(), "administrator access") {
+		t.Fatalf("unfinished restore = %v, want its own recovery message", err)
+	}
+	if want := []string{"install-supplied"}; !reflect.DeepEqual(operations, want) {
+		t.Fatalf("privileged steps = %v, want %v (no inventory)", operations, want)
+	}
+}

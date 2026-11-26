@@ -175,6 +175,8 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 					return &hostinstall.UpdateNotReadyError{Step: notReadyStep(reason.String())}
 				case NoPendingInstallationExitCode:
 					return hostinstall.ErrNoPendingInstallation
+				case RollbackIncompleteExitCode:
+					return runtimeFailure(rollbackIncompleteMessage, service.ErrLifecycleRollbackIncomplete, stderrReason(reason))
 				}
 			}
 			if refused := sudoRefusal("Installing the supplied Paperboat executable", err, reason.String()); refused != nil {
@@ -234,6 +236,10 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		if ctx.Err() != nil {
 			// Cancelled (Ctrl-C, or a caller that ended): start no new privileged child; the next pb install
 			// runs the inventory.
+			return "", err
+		}
+		if errors.Is(err, service.ErrLifecycleRollbackIncomplete) {
+			// The previous version's files are still needed to finish the restore: no inventory may prune them.
 			return "", err
 		}
 		return "", KeepInstallFailureOwner(err, inventory(ctx))

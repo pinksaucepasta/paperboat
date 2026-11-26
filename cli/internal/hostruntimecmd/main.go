@@ -36,6 +36,11 @@ const UpdateNotReadyExitCode = 79
 // across Unix elevation.
 const NoPendingInstallationExitCode = 80
 
+// RollbackIncompleteExitCode preserves "the command failed and restoring the previous state did not finish".
+const RollbackIncompleteExitCode = 81
+
+const rollbackIncompleteMessage = "The command failed, and restoring the previous state did not finish, so parts of Paperboat may run different versions. Run pb doctor to see why, then run the same command again: it finishes the restore first."
+
 // ServiceUsageExitCode (sysexits EX_USAGE) is a privileged service asked for an operation it does not
 // have: a newer pb driving an older build. The caller maps it to a typed error; it never parses output.
 const ServiceUsageExitCode = 64
@@ -192,7 +197,7 @@ func runtimeFailureMessage(err error) string {
 	}
 	switch {
 	case errors.Is(err, service.ErrLifecycleRollbackIncomplete):
-		return "The command failed, and restoring the previous state did not finish, so parts of Paperboat may run different versions. Run pb doctor to see why, then run the same command again: it finishes the restore first."
+		return rollbackIncompleteMessage
 	case errors.Is(err, elevation.ErrElevationRestrictedJob):
 		return elevation.ErrElevationRestrictedJob.Error()
 	case errors.Is(err, bootstrap.ErrEnrollmentTokenExpired):
@@ -290,6 +295,9 @@ func finishRuntimeCommand(ctx context.Context, operation string, output io.Write
 // Only a direct refusal proves that no independent failure changed installation
 // state. Joined or wrapped failures retain the generic uncertain exit status.
 func serviceFailureExitCode(err error) int {
+	if errors.Is(err, service.ErrLifecycleRollbackIncomplete) {
+		return RollbackIncompleteExitCode
+	}
 	if runtimeCausesOnly(err, hostinstall.ErrLegacyCarrierRunning) {
 		return LegacyCarrierRunningExitCode
 	}

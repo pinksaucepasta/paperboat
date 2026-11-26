@@ -16,6 +16,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -175,6 +176,8 @@ func TestServiceRefusalExitStatusPreservesIndependentFailures(t *testing.T) {
 		{"joined cold carrier failure", errors.Join(hostinstall.ErrLegacyCarrierRunning, syscall.EIO), 1},
 		{"joined verification", errors.Join(hostinstall.ErrUpdateVerificationFailed, errors.New("independent IO")), 1},
 		{"joined failure", errors.Join(hostdproto.ErrMaintenanceBusy, errors.New("independent IO failure")), 1},
+		{"unfinished restore", service.RollbackIncomplete(syscall.EIO), RollbackIncompleteExitCode},
+		{"not ready with an unfinished restore", errors.Join(hostinstall.ErrUpdateNotReady, service.RollbackIncomplete(syscall.EIO)), RollbackIncompleteExitCode},
 		{"wrapped uncertain failure", fmt.Errorf("operation failed: %w", hostdproto.ErrMaintenanceBusy), 1},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {

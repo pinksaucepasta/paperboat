@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
@@ -118,6 +119,8 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 				return "", hostinstall.ErrInsufficientSpace
 			case "update_not_ready":
 				return "", hostinstall.NotReadyFromMessage(remote.Message)
+			case "rollback_incomplete":
+				return "", runtimeFailure(rollbackIncompleteMessage, service.ErrLifecycleRollbackIncomplete, remote)
 			}
 		}
 		if diskspace.IsFull(err) {
