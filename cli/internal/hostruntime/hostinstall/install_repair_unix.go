@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
@@ -35,13 +34,6 @@ func checkPendingInstallation(journal installJournal, request Request) error {
 		return hostInstallFailure("the pending installation is a different executable than the one being committed", ErrInvalidRequest)
 	}
 	return nil
-}
-
-// sameCommittedArtifact compares the executable and its provenance, not the update policy: a
-// paired bundle update records the policy itself (ReplaceBundleSource) while the client cannot
-// know it, so a differing policy alone made a finished update report an unconfirmed commit.
-func sameCommittedArtifact(recorded, requested installsource.Source) bool {
-	return recorded.SameArtifact(requested) && recorded.Distribution == requested.Distribution
 }
 
 func commitPreparedInstallationLocked(ctx context.Context, request Request, paths installPaths, nativeLockHeld bool) (resultErr error) {

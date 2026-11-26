@@ -737,7 +737,7 @@ func PrepareWindowsReplacement(ctx context.Context, request Request) (func(), er
 		if statErr == nil {
 			return
 		}
-		if installed, err := LoadWindowsRuntimeConfigForInstance(layout.Instance); err == nil && installed.Source == request.Source {
+		if installed, err := LoadWindowsRuntimeConfigForInstance(layout.Instance); err == nil && sameCommittedArtifact(installed.Source, request.Source) {
 			return
 		}
 		// A session owner or SSH generation of the candidate that could not be

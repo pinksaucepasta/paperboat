@@ -177,3 +177,10 @@ func ReplaceBundleSource(previous installsource.Source, previousPending bool, ca
 	}
 	return candidate, nil
 }
+
+// sameCommittedArtifact compares the executable and its provenance, not the update policy: a
+// paired bundle update records the policy itself (ReplaceBundleSource) while the client cannot
+// know it, so a differing policy alone made a finished update report an unconfirmed commit.
+func sameCommittedArtifact(recorded, requested installsource.Source) bool {
+	return recorded.SameArtifact(requested) && recorded.Distribution == requested.Distribution
+}

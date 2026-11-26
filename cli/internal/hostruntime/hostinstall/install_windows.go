@@ -1769,7 +1769,7 @@ func Commit(request Request) error {
 		}
 		return err
 	}
-	if config.OwnerSID != request.OwnerSID || config.MachineID != request.UserMachineID || config.Source != request.Source {
+	if config.OwnerSID != request.OwnerSID || config.MachineID != request.UserMachineID || !sameCommittedArtifact(config.Source, request.Source) {
 		return ErrInvalidRequest
 	}
 	config.Committed = true
@@ -2200,7 +2200,7 @@ func repairWindows(ctx context.Context, ownerSID string, identity *WindowsRollba
 		if err != nil {
 			return err
 		}
-		if identity != nil && identity.Source != installed.Source {
+		if identity != nil && !sameCommittedArtifact(installed.Source, identity.Source) {
 			return ErrInvalidRequest
 		}
 		request, err := windowsCarrierInstallRequest(ctx, installed)
@@ -2256,7 +2256,7 @@ func repairWindows(ctx context.Context, ownerSID string, identity *WindowsRollba
 	if err != nil {
 		return err
 	}
-	if identity != nil && identity.Source != config.Source {
+	if identity != nil && !sameCommittedArtifact(config.Source, identity.Source) {
 		if identity.Source.Validate() != nil || identity.Source.Platform != "windows" || identity.Source.Architecture != config.Source.Architecture {
 			return ErrInvalidRequest
 		}
