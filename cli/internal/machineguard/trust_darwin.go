@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 const darwinSystemKeychain = darwinSystemKeychainPath
@@ -21,7 +22,9 @@ type darwinTrustRunner func(context.Context, string, ...string) ([]byte, error)
 
 func installLocalTrust(ctx context.Context, cfg Config, certificatePEM []byte) error {
 	return installDarwinLocalTrust(ctx, cfg, certificatePEM, func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+		command := exec.CommandContext(ctx, name, args...)
+		command.WaitDelay = 5 * time.Second // a killed child's leftover output holders cannot stall the wait
+		return command.CombinedOutput()
 	})
 }
 
@@ -66,7 +69,11 @@ func ensureDarwinSystemTrust(ctx context.Context, pemPath string, consoleUID int
 	if !ok {
 		return trustPending(ctx, darwinTrustHeadless(pemPath))
 	}
+	fmt.Fprintf(os.Stderr, "Approve the Paperboat certificate prompt on this Mac's screen to enable browser URLs (waiting up to %s).\n", guardTrustTimeout)
 	if output, err := run(ctx, name, args...); err != nil {
+		if ctx.Err() != nil {
+			err = fmt.Errorf("nobody approved the prompt on the Mac's screen in time; sign in at the Mac and retry `pb install`: %w", err)
+		}
 		return trustPending(ctx, fmt.Errorf("install Paperboat HTTPS root in the macOS System keychain: %w: %s", err, bytes.TrimSpace(output)))
 	}
 	if err := verifyDarwinSystemTrust(ctx, pemPath, run); err != nil {

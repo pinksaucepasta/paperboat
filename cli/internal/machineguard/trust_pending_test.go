@@ -85,4 +85,10 @@ func TestTrustPendingClassification(t *testing.T) {
 	if errors.Is(err, ErrTrustPending) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled trust step was classified as pending: %v", err)
 	}
+	expired, cancelExpired := context.WithTimeout(t.Context(), 0)
+	defer cancelExpired()
+	<-expired.Done()
+	if err = trustPending(expired, errors.New(cause)); !errors.Is(err, ErrTrustPending) {
+		t.Fatalf("an unanswered approval past the trust bound must be pending, not an install failure: %v", err)
+	}
 }

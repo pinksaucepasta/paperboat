@@ -16,11 +16,12 @@ var ErrTrustPending = errors.New("browser HTTPS trust is pending approval")
 
 // trustPending classifies an operating-system trust failure as pending. Context
 // cancellation is never pending: it aborts the installation like any other failure.
+// A reached deadline is pending: an approval prompt nobody answered (a remote Mac) must not fail the install.
 func trustPending(ctx context.Context, cause error) error {
 	if cause == nil {
 		return nil
 	}
-	if err := ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 	return fmt.Errorf("%w: %v", ErrTrustPending, cause)
