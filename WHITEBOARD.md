@@ -208,6 +208,14 @@ honest support limitations; the beta must not block native SSH/editor workflows.
 
 ## Install and platforms
 
+### `pb pair` below 8 s on Linux
+
+After the 2026-11-26 fixes pb pair takes ~11.5 s in a container (was ~19 s). What is left, measured
+(journal, ms from pair start): enrollment and sudo ~2.9 s, carrier start ~1.3 s, hostd start ~1.2 s
+(Type=notify after the worker boots), remaining systemd reloads ~0.4 s, bind restart to return ~2 s.
+Also: nothing is printed between "Administrator approval is required..." and "ready" (now ~8 s);
+progress text is a product call. Evidence: paperboat-private fix-batch-1122/pair-timing.
+
 ### Tunnel-only mode without a Paperboat machine (and an official container image)
 
 `pb tunnel run --token <token>` for a Docker container, Kubernetes pod or CI job, like
