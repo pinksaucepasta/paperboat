@@ -31,7 +31,14 @@ try {
   await (await field("Security code")).fill("123")
   await (await field("First and last name")).fill("Paperboat Smoke")
   const terms = await find("terms checkbox", (f) => f.getByRole("checkbox", { name: /Start the service now/ }))
-  await terms.check()
+  // Stripe's consent box (#paymentForm-termsOfServiceConsentInput) is a React-controlled input: right after the click its
+  // DOM state can still read unchecked, so locator.check() reported "Clicking the checkbox did not change its state" for a
+  // box that read checked a moment later (1 of 6 runs, 2026-11-27). Click once, then wait for the state; fail only if it never turns checked.
+  await terms.click()
+  for (let i = 0; !(await terms.isChecked()); i++) {
+    if (i >= 50) fail("the terms checkbox did not turn checked within 5 s")
+    await page.waitForTimeout(100)
+  }
   await (await find("Subscribe button", (f) => f.getByRole("button", { name: /^(Subscribe|Pay)/ }))).click()
   await page.waitForURL((u) => u.hostname !== "checkout.stripe.com", { timeout: 120000 }).catch(() => fail("Checkout did not accept the payment: " + page.url().slice(0, 40)))
   console.log("paid")
