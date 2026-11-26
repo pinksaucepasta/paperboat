@@ -44,7 +44,7 @@ rsync -az --checksum --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remo
 echo "remote-test: $host: go test -p 2 $* ($module)" >&2
 printf -v quoted ' %q' "$@"
 exec ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
-  "cap=; systemctl --user show-environment >/dev/null 2>&1 && cap='systemd-run --user --scope -q -p MemoryMax=60%'; GITHUB_SHA=$(git rev-parse HEAD) \$cap flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $worktree$quoted" <<'REMOTE'
+  "cap=; systemctl --user show-environment >/dev/null 2>&1 && cap='systemd-run --user --scope -q -p MemoryMax=60%'; lock='flock -w 3600'; command -v flock >/dev/null || lock='lockf -t 3600'; GITHUB_SHA=$(git rev-parse HEAD) \$cap \$lock \$HOME/pb-remote-test/host.lock bash -s -- $module $worktree$quoted" <<'REMOTE'
 set -euo pipefail
 umask 022 # a host default of 002 makes every t.TempDir group-writable, which the daemon socket check refuses
 module=$1 worktree=$2
