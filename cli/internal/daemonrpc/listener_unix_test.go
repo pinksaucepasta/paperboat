@@ -148,9 +148,12 @@ func TestDaemonSocketPeerCheckAcceptsThisUser(t *testing.T) {
 	}
 	defer listener.Close()
 	accepted := make(chan error, 1)
+	checked := make(chan struct{})
 	go func() {
 		conn, err := listener.Accept()
 		if err == nil {
+			// Closing before the client reads its peer credentials makes macOS answer ENOTCONN.
+			<-checked
 			_ = conn.Close()
 		}
 		accepted <- err
@@ -160,7 +163,9 @@ func TestDaemonSocketPeerCheckAcceptsThisUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if err := checkPeer(conn); err != nil {
+	err = checkPeer(conn)
+	close(checked)
+	if err != nil {
 		t.Fatalf("client-side peer check: %v", err)
 	}
 	if err := <-accepted; err != nil {
