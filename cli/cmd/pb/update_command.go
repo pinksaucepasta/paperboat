@@ -233,6 +233,14 @@ func updateStatusCommandResult(cliVersion string, response updated.ControlRespon
 	if installed == "" {
 		installed = cliVersion
 	}
+	// Checks from before the installed version (failed while an activation held the updater) are not current: the
+	// installed release is the latest known, and their failure is dropped unless a check after the install failed too.
+	if older, err := signedUpdateAvailable(result.LatestVersion, installed); err == nil && older {
+		result.LatestVersion = installed
+		if !result.LastCheck.After(response.Transaction.UpdatedAt) {
+			result.LastFailure = ""
+		}
+	}
 	if available, err := signedUpdateAvailable(installed, result.LatestVersion); err == nil {
 		result.UpdateAvailable = available
 	}

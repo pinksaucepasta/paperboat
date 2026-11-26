@@ -18,9 +18,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 	"github.com/spf13/cobra"
 )

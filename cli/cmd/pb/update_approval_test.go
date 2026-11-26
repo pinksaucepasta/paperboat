@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
@@ -566,5 +567,23 @@ func TestUpdateDuringAnActivationRefusesAtOnceAsBusy(t *testing.T) {
 			}
 			requireUpdateRequests(t, fixture)
 		})
+	}
+}
+
+// Smoke rehearsal: after the .11 activation committed, status showed latest .10 and check_failed from checks made
+// during the activation. The installed release is the latest known; only a check after the install keeps its failure.
+func TestUpdateStatusAfterCommitDropsChecksFromBeforeTheInstall(t *testing.T) {
+	committed := time.Now()
+	response := updated.ControlResponse{
+		Observation: autoupdate.Observation{Version: "2026.11.26.10", Failure: "check_failed", CheckedAt: committed.Add(-time.Minute)},
+		Transaction: workerupdate.TransactionState{ActiveVersion: "2026.11.26.11", UpdatedAt: committed},
+	}
+	result := updateStatusCommandResult("2026.11.26.11", response, nil)
+	if result.LatestVersion != "2026.11.26.11" || result.LastFailure != "" || result.UpdateAvailable {
+		t.Fatalf("status after commit kept stale checks: %+v", result)
+	}
+	response.Observation.CheckedAt = committed.Add(time.Minute)
+	if result = updateStatusCommandResult("2026.11.26.11", response, nil); result.LastFailure != "check_failed" {
+		t.Fatalf("a failed check after the install was hidden: %+v", result)
 	}
 }
