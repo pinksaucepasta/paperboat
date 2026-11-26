@@ -78,8 +78,8 @@ func connectDirectlyWithoutARelay(t *testing.T, lateHost, noInboundEndpoints boo
 	if err := dialer.SetPeerContacts(map[key.NodePublic]PeerContact{hostKey.Public(): {Disco: host.lb.discoPublic(), Endpoints: endpoints(host)}}); err != nil {
 		t.Fatal(err)
 	}
-	// No relay means no CallMeMaybe: the host gets a path back only when its first handshake response finds
-	// none and it pings, so the second WireGuard attempt (5 s later) connects, as in Tailscale without DERP.
+	// No relay means no CallMeMaybe and no DERP fallback: the host's first handshake response finds no trusted
+	// path. It goes to the dialer's signed endpoints instead of being dropped until wireguard-go's 5 s retry.
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -89,12 +89,28 @@ func connectDirectlyWithoutARelay(t *testing.T, lateHost, noInboundEndpoints boo
 	}
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(14 * time.Second))
-	if _, err := connection.Write([]byte("direct")); err != nil {
-		t.Fatal(err)
-	}
+	// Resend like a QUIC Initial until the echo comes back.
+	resend := time.NewTicker(200 * time.Millisecond)
+	defer resend.Stop()
+	go func() {
+		for {
+			if _, err := connection.Write([]byte("direct")); err != nil {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-resend.C:
+			}
+		}
+	}()
 	buffer := make([]byte, 6)
 	if n, err := connection.Read(buffer); err != nil || string(buffer[:n]) != "direct" {
 		t.Fatalf("echo %q err %v: no direct path without a relay", buffer[:n], err)
+	}
+	if took := time.Since(started); !lateHost && !noInboundEndpoints && took > 700*time.Millisecond {
+		// Over 1 s the dialer's QUIC handshake times out and the peer is redialed (peerquic HandshakeTimeout).
+		t.Fatalf("first echo after %v, want well under 1 s: the host's first handshake response was lost", took)
 	}
 	if path := dialer.PeerPath(hostKey.Public()); path != "direct" {
 		t.Fatalf("path %q, want direct", path)
