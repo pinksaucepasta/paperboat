@@ -179,16 +179,52 @@ func TestDialUsesAKeptAddressWithoutALookup(t *testing.T) {
 	_ = connection.CloseWithError(0, "")
 }
 
-// A relay or edge is verified by its pin, not a WebPKI chain: a finished handshake under a pin counts, skipped checks never.
-func TestVerifiedAcceptsAPinButNotSkippedVerification(t *testing.T) {
-	pinned := &tls.Config{InsecureSkipVerify: true, VerifyConnection: func(tls.ConnectionState) error { return nil }}
-	if !verified(pinned, "relay.example.test", tls.ConnectionState{}) {
-		t.Fatal("a pinned handshake is not verified")
+// A relay or edge is verified by its pin, not a WebPKI chain; a handshake that checked nothing, is unfinished, names
+// another host, or resumed past VerifyPeerCertificate never counts.
+func TestVerifiedAcceptsOnlyAFinishedCheckForTheHost(t *testing.T) {
+	host := "relay.example.test"
+	done := tls.ConnectionState{HandshakeComplete: true}
+	connection := &tls.Config{ServerName: host, InsecureSkipVerify: true, VerifyConnection: func(tls.ConnectionState) error { return nil }}
+	peer := &tls.Config{ServerName: host, InsecureSkipVerify: true, VerifyPeerCertificate: func([][]byte, [][]*x509.Certificate) error { return nil }}
+	chain := tls.ConnectionState{HandshakeComplete: true, VerifiedChains: [][]*x509.Certificate{{}}}
+	for _, c := range []struct {
+		name   string
+		config *tls.Config
+		state  tls.ConnectionState
+		want   bool
+	}{
+		{"pinned by VerifyConnection", connection, done, true},
+		{"pinned by VerifyPeerCertificate", peer, done, true},
+		{"resumed past VerifyPeerCertificate", peer, tls.ConnectionState{HandshakeComplete: true, DidResume: true}, false},
+		{"unfinished", connection, tls.ConnectionState{}, false},
+		{"pin for another name", &tls.Config{ServerName: "other.example.test", InsecureSkipVerify: true, VerifyConnection: connection.VerifyConnection}, done, false},
+		{"nothing checked", &tls.Config{ServerName: host, InsecureSkipVerify: true}, done, false},
+		{"WebPKI chain", &tls.Config{ServerName: host}, chain, true},
+		{"chain for another name", &tls.Config{ServerName: "other.example.test"}, chain, false},
+	} {
+		if got := verified(c.config, host, c.state); got != c.want {
+			t.Errorf("%s: verified = %v, want %v", c.name, got, c.want)
+		}
 	}
-	if verified(&tls.Config{InsecureSkipVerify: true}, "relay.example.test", tls.ConnectionState{}) {
-		t.Fatal("a handshake that checked nothing is verified")
+}
+
+// A kept address that never answers, under a 2 s budget (the HTTP/3 attempt's), still connects through the lookup.
+func TestShortBudgetReachesTheLookup(t *testing.T) {
+	certificate := serverCertificate(t)
+	port := listen(t, "udp4", net.IPv4(127, 0, 0, 1), certificate)
+	defer func(previous func(context.Context, string) ([]net.IPAddr, error)) { lookup = previous }(lookup)
+	lookup = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}}, nil
 	}
-	if verified(&tls.Config{ServerName: "other.example.test"}, "relay.example.test", tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{}}}) {
-		t.Fatal("a chain for another name is verified")
+	defer func() { cached = dnscap.Cached }()
+	cached = func(string) netip.Addr { return netip.MustParseAddr("192.0.2.1") }
+	conf := trusting(certificate)
+	conf.ServerName = "localhost"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	connection, err := Dial(ctx, net.JoinHostPort("blackholed.example.test", strconv.Itoa(port)), conf, nil, false)
+	if err != nil {
+		t.Fatal(err)
 	}
+	_ = connection.CloseWithError(0, "")
 }

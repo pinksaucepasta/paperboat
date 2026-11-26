@@ -54,7 +54,11 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	}
 	keptAddress := net.UDPAddrFromAddrPort(netip.AddrPortFrom(kept, uint16(port)))
 	connection, err := race(ctx, func(ctx context.Context) (*quic.Conn, error) {
-		return dialRemote(ctx, keptAddress, tlsConf, conf, early)
+		connection, err := dialRemote(ctx, keptAddress, tlsConf, conf, early)
+		if err != nil && ctx.Err() == nil { // refused, not abandoned for the looked-up winner
+			dnscap.Forget(host, kept)
+		}
+		return connection, err
 	}, byName)
 	if err == nil && connection.RemoteAddr().String() == keptAddress.String() {
 		dnscap.Refresh(host, func(ctx context.Context) {
@@ -69,10 +73,13 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 // verified: the handshake proved the server is host's: a WebPKI chain for the name, or the caller's own pin (relays and
 // edges are verified by VerifyConnection/VerifyPeerCertificate, so a handshake that finished passed it).
 func verified(config *tls.Config, host string, state tls.ConnectionState) bool {
-	if config.InsecureSkipVerify {
-		return config.VerifyConnection != nil || config.VerifyPeerCertificate != nil
+	if !state.HandshakeComplete || config.ServerName != host {
+		return false
 	}
-	return config.ServerName == host && len(state.VerifiedChains) > 0
+	if config.InsecureSkipVerify { // VerifyPeerCertificate is skipped on a resumed session; VerifyConnection is not
+		return config.VerifyConnection != nil || config.VerifyPeerCertificate != nil && !state.DidResume
+	}
+	return len(state.VerifiedChains) > 0
 }
 
 // cached is the address host last verified at; tests replace it (dnscap never keeps the loopback a test listens on).
@@ -93,7 +100,11 @@ func race(ctx context.Context, kept, byName func(context.Context) (*quic.Conn, e
 		go func() { c, err := dial(ctx); results <- result{c, err} }()
 	}
 	start(kept)
-	wait := time.NewTimer(dnscap.KeptDialWait)
+	after := dnscap.KeptDialWait
+	if deadline, ok := ctx.Deadline(); ok {
+		after = min(after, time.Until(deadline)/2) // a short budget still reaches the lookup
+	}
+	wait := time.NewTimer(after)
 	defer wait.Stop()
 	running, named, errs := 1, false, []error(nil)
 	for running > 0 {

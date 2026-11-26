@@ -97,6 +97,11 @@ func Verified(host string, remote net.Addr) {
 		hosts[host] = entry{Address: address, Verified: time.Now()}
 	}
 	mu.Unlock()
+	persist()
+}
+
+// persist hands the kept addresses to the file writer, outside mu.
+func persist() {
 	saving.Lock()
 	defer saving.Unlock()
 	mu.Lock()
@@ -106,6 +111,19 @@ func Verified(host string, remote net.Addr) {
 	if err == nil && write != nil {
 		write(body) // shortcut: the last process to write wins, another's newer host is verified and written again
 	}
+}
+
+// Forget drops host's kept address after a dial to it failed, so the next dial looks the name up at once.
+func Forget(host string, address netip.Addr) {
+	host = strings.ToLower(host)
+	mu.Lock()
+	if hosts[host].Address != address {
+		mu.Unlock()
+		return
+	}
+	delete(hosts, host)
+	mu.Unlock()
+	persist()
 }
 
 // Persist loads what an earlier process verified and hands every later change to write.

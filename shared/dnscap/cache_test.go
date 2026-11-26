@@ -74,6 +74,19 @@ func TestAPrivateAnswerDropsTheKeptPublicAddress(t *testing.T) {
 	}
 }
 
+func TestForgetDropsOnlyTheFailedAddress(t *testing.T) {
+	reset(t)
+	Verified("f.example.test", tcp("203.0.113.1"))
+	Forget("f.example.test", netip.MustParseAddr("203.0.113.9"))
+	if !Cached("f.example.test").IsValid() {
+		t.Fatal("another address's failure dropped this one")
+	}
+	Forget("f.example.test", netip.MustParseAddr("203.0.113.1"))
+	if Cached("f.example.test").IsValid() {
+		t.Fatal("the failed address is still kept")
+	}
+}
+
 func TestConcurrentUseIsBounded(t *testing.T) {
 	reset(t)
 	Persist(nil, func([]byte) {})
