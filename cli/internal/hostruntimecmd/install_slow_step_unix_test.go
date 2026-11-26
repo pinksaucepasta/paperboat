@@ -23,7 +23,9 @@ func TestASlowPrivilegedInstallStepIsNotReportedAsFailed(t *testing.T) {
 	original := privilegedInstallCommand
 	t.Cleanup(func() { privilegedInstallCommand = original })
 	finished := filepath.Join(home, "install-supplied-finished")
+	var operations []string
 	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		operations = append(operations, arguments[len(arguments)-1])
 		if arguments[len(arguments)-1] == "install-supplied" {
 			return exec.CommandContext(ctx, "/bin/sh", "-c", "sleep 0.5 && touch "+finished)
 		}
@@ -35,8 +37,10 @@ func TestASlowPrivilegedInstallStepIsNotReportedAsFailed(t *testing.T) {
 	if _, statErr := os.Stat(finished); statErr != nil {
 		t.Fatalf("the privileged step was killed at the caller's deadline: %v (install error: %v)", statErr, err)
 	}
-	if err != nil && strings.Contains(runtimeFailureMessage(err), "installing the supplied Paperboat executable failed") {
-		t.Fatalf("a privileged step that finished was reported as failed: %v", err)
+	// The install went on past the finished step with a budget of its own (this fixture's later steps fail and
+	// roll back); before, the killed step ended the install with only the inventory after it.
+	if len(operations) < 2 || operations[1] == "inventory" {
+		t.Fatalf("install stopped at the slow step: privileged operations %v (%v)", operations, err)
 	}
 }
 
