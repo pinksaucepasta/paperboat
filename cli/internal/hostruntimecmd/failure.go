@@ -376,6 +376,9 @@ func (e *installationStageError) Error() string {
 			}
 			step = "installing system services"
 		case "service_readiness":
+			if reason := privilegedReason(e.Cause); reason != "" {
+				return "Machine pairing failed while confirming system service readiness: " + reason + ". Run pb doctor, then retry pairing with the same enrollment token file."
+			}
 			step = "confirming system service readiness"
 		case "daemon_readiness":
 			cause := ""
