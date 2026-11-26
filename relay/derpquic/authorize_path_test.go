@@ -70,8 +70,18 @@ func TestQUICLostReauthenticationDropsConnectedAndTheNextSendRedials(t *testing.
 	if !c.Connected() {
 		t.Fatal("not Connected after connect")
 	}
-	cc.stream.CancelWrite(0) // the control stream's writes now fail while the connection itself is up
-	if err := cc.authorize(f.token(g)); !errors.Is(err, errAuthorizeTransport) {
+	// The write must fail while only authorize can end the connection: cancelling c's own stream let the relay see
+	// the reset and close it first, so the test passed without the fix. A second carrier's cancelled stream fails the
+	// same way and the relay learns nothing about c.
+	otherCert := certificate(t)
+	other := f.client(address, otherCert, f.grant(key.NewNode().Public(), otherCert, "b"))
+	connect(t, other)
+	other.mu.Lock()
+	broken := other.current.stream
+	other.mu.Unlock()
+	broken.CancelWrite(0)
+	lost := &clientConn{conn: cc.conn, stream: broken}
+	if err := lost.authorize(f.token(g)); !errors.Is(err, errAuthorizeTransport) {
 		t.Fatalf("a renewal on a broken control stream gave %v, want errAuthorizeTransport", err)
 	}
 	if c.Connected() {
