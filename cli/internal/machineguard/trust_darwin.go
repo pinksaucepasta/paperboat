@@ -49,10 +49,15 @@ func installDarwinLocalTrust(ctx context.Context, cfg Config, certificatePEM []b
 	if err = writeOwnedTrustState(pemPath, certificatePEM, 0644); err != nil {
 		return err
 	}
+	return ensureDarwinSystemTrust(ctx, pemPath, darwinPromptUID(ctx, cfg), run)
+}
+
+// darwinPromptUID is who may be asked at the screen: nobody (-1, check only) unless an explicit install asks.
+func darwinPromptUID(ctx context.Context, cfg Config) int {
 	if !cfg.promptTrust {
-		return ensureDarwinSystemTrust(ctx, pemPath, -1, run)
+		return -1
 	}
-	return ensureDarwinSystemTrust(ctx, pemPath, darwinConsoleUID(ctx), run)
+	return darwinConsoleUID(ctx)
 }
 
 // darwinConsoleUID is the user signed in at the Mac's screen; 0 (root, the login window) or an error means nobody.

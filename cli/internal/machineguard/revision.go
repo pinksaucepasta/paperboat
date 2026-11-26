@@ -10,4 +10,4 @@ const Revision = 32
 
 // RevisionSourceSHA256 is the hash of this package's code (non-test .go files except this one) that
 // Revision describes. Update it together with Revision.
-const RevisionSourceSHA256 = "b6d411df4cef636efe3198714abf46565ec7ab8781133615b73c365267996c9a"
+const RevisionSourceSHA256 = "fadea2de90f3157636fc296dc4340f6813801695517deb8739d0070bb02acbe1"

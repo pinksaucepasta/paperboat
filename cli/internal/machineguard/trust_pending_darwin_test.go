@@ -72,14 +72,21 @@ func TestDarwinTrustUnansweredPromptIsPendingWithinBound(t *testing.T) {
 // apple 2026-11-26: after the install's prompt was killed the guard's own start raised a second one. A guard start
 // only checks trust; only an explicit install asks at the screen.
 func TestDarwinGuardStartNeverPrompts(t *testing.T) {
+	if uid := darwinPromptUID(t.Context(), Config{}); uid != -1 {
+		t.Fatalf("a guard start may prompt user %d", uid)
+	}
 	_, _, rootPEM := renewalFixture(t, 365)
+	pemPath := filepath.Join(t.TempDir(), "root.pem")
+	if err := os.WriteFile(pemPath, rootPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
 	runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name != "/usr/bin/security" || args[0] != "verify-cert" {
 			t.Fatalf("guard start ran %s %v; want only the trust check", name, args)
 		}
 		return nil, errors.New("exit status 1")
 	}
-	err := installDarwinLocalTrust(t.Context(), Config{StateDir: t.TempDir()}, rootPEM, runner)
+	err := ensureDarwinSystemTrust(t.Context(), pemPath, darwinPromptUID(t.Context(), Config{}), runner)
 	if !errors.Is(err, ErrTrustPending) || !strings.Contains(err.Error(), "pb install") {
 		t.Fatalf("guard start trust: %v", err)
 	}
