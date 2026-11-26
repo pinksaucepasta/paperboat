@@ -595,3 +595,34 @@ func transferUpdateBusy(err error) bool {
 	var failure *filetransfer.Error
 	return errors.As(err, &failure) && (failure.Code == filetransfer.ResourceLimit || failure.Code == filetransfer.UpdateInProgress)
 }
+
+// A stability observation holds the gate for its whole window; a release check's target lookup must answer at once,
+// not queue (queued lookups kept hostd socket slots until the stability gate's next connection failed EPIPE).
+func TestStandaloneUpdateGateTargetLookupDoesNotWaitBehindStability(t *testing.T) {
+	health := http.NewServeMux()
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
+	gate, err := newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: filepath.Join(t.TempDir(), "gate.json"), Health: health, Workloads: func() hostdproto.WorkloadStatus { return hostdproto.WorkloadStatus{Generation: 1} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate.mu.Lock() // as the stability loop does
+	defer gate.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		response, err := gate.HandleUpdateGate(ctx, standaloneGateRequest(hostdproto.UpdateGateTarget, nil))
+		if err == nil && response.Target != gate.target() {
+			err = errors.New("wrong target")
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("target lookup waited behind the held gate")
+	}
+}

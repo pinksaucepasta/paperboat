@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -103,11 +104,24 @@ func (g *standaloneUpdateGate) target() hostdproto.UpdateGateTargetBinding {
 	return hostdproto.UpdateGateTargetBinding{Scope: hostdproto.UpdateGateScopeStandalone, MachineID: g.config.MachineID, FailureDomain: "standalone"}
 }
 
-func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hostdproto.UpdateGateRequest) (hostdproto.UpdateGateResponse, error) {
+func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hostdproto.UpdateGateRequest) (response hostdproto.UpdateGateResponse, err error) {
 	if g == nil || ctx == nil || request.Validate() != nil {
 		return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 	}
-	g.mu.Lock()
+	started := time.Now()
+	slog.Info("update gate operation started", "operation", request.Operation, "transaction", request.TransactionID)
+	defer func() {
+		slog.Info("update gate operation ended", "operation", request.Operation, "transaction", request.TransactionID, "duration", time.Since(started), "error", err)
+	}()
+	if !g.mu.TryLock() {
+		// A stability observation holds the gate for its whole window. A target lookup (a release check's failure
+		// domain) answers from configuration instead of waiting: queued lookups each kept a hostd socket slot until
+		// the slots ran out and the stability gate's next connection failed EPIPE (rollback .12→.13).
+		if request.Operation == hostdproto.UpdateGateTarget {
+			return hostdproto.UpdateGateResponse{Target: g.target()}, nil
+		}
+		g.mu.Lock()
+	}
 	defer g.mu.Unlock()
 	g.purge()
 	target := g.target()
