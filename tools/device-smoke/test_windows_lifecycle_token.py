@@ -1,5 +1,6 @@
 import unittest
 
+from unittest import mock
 import windows_lifecycle
 
 
@@ -28,6 +29,13 @@ class EnrollmentTokenTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'no windows_command'):
             windows_lifecycle.enrollment_token_from_add('{"ok":true,"data":{"linux_macos_command":"x"}}')
 
+    def test_failed_mint_says_why_without_a_token(self):
+        out = "Error: rate limited, support_700b85e2-cb11 $env:PB_TOKEN='0123456789ABCDEFGHIJKLMNOP'"
+        with mock.patch.object(windows_lifecycle, 'linux', return_value=(1, out)):
+            with self.assertRaises(RuntimeError) as caught:
+                windows_lifecycle.mint_token('linux', 'win')
+        self.assertIn('exit 1): Error: rate limited, support_700b85e2-cb11', str(caught.exception))
+        self.assertNotIn('0123456789ABCDEF', str(caught.exception))
 
 if __name__ == '__main__':
     unittest.main()

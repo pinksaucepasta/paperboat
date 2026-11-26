@@ -116,8 +116,9 @@ def enrollment_token_from_add(output):
 def mint_token(host, alias):
     """Mint an enrollment token on a paired Linux machine, stage it on the Windows device owner-only; return nothing printed."""
     code, out = linux(f'{PB_LINUX} machine add --json --name {alias}') if host == 'linux' else (1, '')
-    if code:
-        raise RuntimeError('could not mint an enrollment token on ' + host)
+    if code:  # say why; a token must never reach the log
+        said = re.sub(r'[A-Za-z0-9]{16,}', '<redacted>', out)[-400:]  # tokens are one long alphanumeric run
+        raise RuntimeError(f'could not mint an enrollment token on {host} (exit {code}): {said.strip()}')
     token = enrollment_token_from_add(out)
     code, _ = powershell_on_device(
         f"Set-Content -NoNewline -Path '{TOKEN_FILE}' -Value '{token}'; "
