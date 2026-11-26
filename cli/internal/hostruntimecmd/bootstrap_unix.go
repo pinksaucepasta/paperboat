@@ -279,14 +279,18 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	defer starting.end(false)
 	installCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	if err := authorizeServiceInstall(installCtx, executable, installRequest, stdin, stdout, stderr); err != nil {
+	// Spin through the install only when sudo cannot prompt; the first helper byte stops the frames.
+	if sudoWithoutPrompt(installCtx) {
+		starting.spin()
+	} else {
+		starting.plain()
+	}
+	if err := authorizeServiceInstall(installCtx, executable, installRequest, stdin, starting.stopOnWrite(stdout), starting.stopOnWrite(stderr)); err != nil {
 		// Missing or delayed administrator approval is locally retryable. The
 		// protected journal and runtime identity must survive so the next run
 		// does not need the already-consumed one-shot token.
 		return &installationStageError{Stage: "service_install", Cause: err}
 	}
-	// sudo has returned, so no password prompt can show while the frames run.
-	starting.spin()
 	workerCommand, err := installWorkerCommand(commandDirectory, systemWorkerExecutable())
 	if err != nil {
 		if resumingWorker {

@@ -22,6 +22,7 @@ type pairStep struct {
 	stop     chan struct{}
 	done     chan struct{}
 	stopOnce sync.Once
+	settled  bool
 }
 
 func newPairStep(w io.Writer, text string) *pairStep {
@@ -39,7 +40,7 @@ func newPairStepFor(w io.Writer, text string, tty bool) *pairStep {
 
 // spin starts the frames; a no-op off a terminal or once started.
 func (s *pairStep) spin() {
-	if !s.tty || s.stop != nil {
+	if !s.tty || s.stop != nil || s.settled {
 		return
 	}
 	s.stop, s.done = make(chan struct{}), make(chan struct{})
@@ -61,7 +62,20 @@ func (s *pairStep) spin() {
 
 // end stops the frames and leaves the finished line; later calls do nothing.
 func (s *pairStep) end(ok bool) {
+	mark := "✓ "
+	if !ok {
+		mark = "✗ "
+	}
+	s.finish(mark)
+}
+
+// plain stops the frames and leaves the plain line, so a prompt or other output can follow; spin
+// and end do nothing afterwards.
+func (s *pairStep) plain() { s.finish("") }
+
+func (s *pairStep) finish(mark string) {
 	s.stopOnce.Do(func() {
+		s.settled = true
 		if !s.tty {
 			return
 		}
@@ -69,10 +83,18 @@ func (s *pairStep) end(ok bool) {
 			close(s.stop)
 			<-s.done
 		}
-		mark := "✓"
-		if !ok {
-			mark = "✗"
-		}
-		fmt.Fprintf(s.w, "\r\x1b[2K%s %s\n", mark, s.text)
+		fmt.Fprintf(s.w, "\r\x1b[2K%s%s\n", mark, s.text)
 	})
 }
+
+// stopOnWrite returns w, which first leaves the plain line on its first byte.
+func (s *pairStep) stopOnWrite(w io.Writer) io.Writer {
+	return writerFunc(func(p []byte) (int, error) {
+		s.plain()
+		return w.Write(p)
+	})
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // sudoCommand starts /usr/bin/sudo with sudoHome's flags first (none on Linux). As root it runs the
@@ -18,3 +19,13 @@ func sudoCommand(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 var runningAsRoot = func() bool { return os.Geteuid() == 0 }
+
+// sudoWithoutPrompt reports whether sudo would run now without asking for a password.
+func sudoWithoutPrompt(ctx context.Context) bool {
+	if runningAsRoot() {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return sudoCommand(ctx, "-n", "true").Run() == nil
+}

@@ -38,3 +38,18 @@ func TestPairStepOnATerminalSpinsThenLeavesOneFinishedLine(t *testing.T) {
 		}
 	}
 }
+
+func TestPairStepStopsSpinningAtTheFirstHelperByte(t *testing.T) {
+	var out bytes.Buffer
+	step := newPairStepFor(&out, "Starting the machine services...", true)
+	step.spin()
+	time.Sleep(100 * time.Millisecond)
+	if _, err := step.stopOnWrite(&out).Write([]byte("helper says hi\n")); err != nil {
+		t.Fatal(err)
+	}
+	step.spin()
+	step.end(true)
+	if got := out.String(); !strings.HasSuffix(got, "\r\x1b[2KStarting the machine services...\nhelper says hi\n") {
+		t.Fatalf("helper output not after a plain line, or frames resumed: %q", got)
+	}
+}
