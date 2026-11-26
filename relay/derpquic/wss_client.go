@@ -24,6 +24,7 @@ import (
 
 type WSSClientConfig struct {
 	URL             string
+	DialAddress     string // host:port a direct connection to URL's host dials instead (its verified address); "" looks it up
 	TLS             *tls.Config
 	Credential      func(context.Context) (string, error)
 	RenewCredential func(context.Context) (string, error) // nil uses Credential for live renewals
@@ -145,6 +146,15 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		proxy = http.ProxyFromEnvironment
 	}
 	transport := &http.Transport{Proxy: proxy, TLSClientConfig: c.config.TLS.Clone(), ForceAttemptHTTP2: false}
+	if parsed, err := url.Parse(c.config.URL); err == nil && c.config.DialAddress != "" {
+		named := parsed.Host
+		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			if address == named { // not a proxy's address
+				address = c.config.DialAddress
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		}
+	}
 	defer transport.CloseIdleConnections()
 	ws, response, err := websocket.Dial(dialCtx, c.config.URL, &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{WSSSubprotocol}, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {

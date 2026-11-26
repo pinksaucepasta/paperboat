@@ -3,6 +3,7 @@ package tailnet
 import (
 	"context"
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
@@ -68,9 +69,14 @@ func (a *Authority) awaitRelayAnswer(ctx context.Context) bool {
 				continue
 			}
 			// A resolver of its own: the shared one would join a lookup sent into the outage.
-			lookup, cancel := context.WithTimeout(ctx, time.Second)
-			ips, err := dnscap.New().LookupNetIP(lookup, "ip", n.EndpointHost)
-			cancel()
+			ips, err := []netip.Addr(nil), error(nil)
+			if address, parseErr := netip.ParseAddr(n.DialHost()); parseErr == nil {
+				ips = []netip.Addr{address} // the server's verified address: no lookup
+			} else {
+				lookup, cancel := context.WithTimeout(ctx, time.Second)
+				ips, err = dnscap.New().LookupNetIP(lookup, "ip", n.EndpointHost)
+				cancel()
+			}
 			if err == nil && len(ips) > 0 {
 				_, _ = socket.WriteToUDP(stun.Request(stun.NewTxID()), &net.UDPAddr{IP: ips[0].AsSlice(), Port: int(n.EndpointTCPPort)})
 			}

@@ -2,6 +2,7 @@ package peernetwork
 
 import (
 	"encoding/base64"
+	"net/netip"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
@@ -24,24 +25,38 @@ const (
 
 // RegionalNode is one relay of a regional candidate set.
 type RegionalNode struct {
-	TLSSPKISHA256      string   `json:"tls_spki_sha256,omitempty"`
-	NodeID             string   `json:"node_id"`
-	NodeGeneration     uint64   `json:"node_generation"`
-	ProcessEpoch       string   `json:"process_epoch"`
-	Region             string   `json:"region"`
-	FailureDomain      string   `json:"failure_domain"`
-	Roles              []string `json:"roles"`
-	Transports         []string `json:"transports"`
-	EndpointHost       string   `json:"endpoint_host"`
-	EndpointTCPPort    uint16   `json:"endpoint_tcp_port"`
-	EndpointQUICPort   uint16   `json:"endpoint_quic_port"`
-	State              string   `json:"state"`
-	ObservedAt         int64    `json:"observed_at"`
-	ExpiresAt          int64    `json:"expires_at"`
-	CapacityUsed       uint64   `json:"capacity_used"`
-	CapacityObservedAt int64    `json:"capacity_observed_at"`
-	DrainDeadline      *int64   `json:"drain_deadline,omitempty"`
-	Hosting            string   `json:"hosting,omitempty"`
+	TLSSPKISHA256  string   `json:"tls_spki_sha256,omitempty"`
+	NodeID         string   `json:"node_id"`
+	NodeGeneration uint64   `json:"node_generation"`
+	ProcessEpoch   string   `json:"process_epoch"`
+	Region         string   `json:"region"`
+	FailureDomain  string   `json:"failure_domain"`
+	Roles          []string `json:"roles"`
+	Transports     []string `json:"transports"`
+	EndpointHost   string   `json:"endpoint_host"`
+	// EndpointIPv4/IPv6 are the addresses the server verified the node answers at: dialed instead of a lookup of
+	// EndpointHost, which TLS still verifies (Tailscale tailcfg.DERPNode IPv4/IPv6).
+	EndpointIPv4       string `json:"endpoint_ipv4,omitempty"`
+	EndpointIPv6       string `json:"endpoint_ipv6,omitempty"`
+	EndpointTCPPort    uint16 `json:"endpoint_tcp_port"`
+	EndpointQUICPort   uint16 `json:"endpoint_quic_port"`
+	State              string `json:"state"`
+	ObservedAt         int64  `json:"observed_at"`
+	ExpiresAt          int64  `json:"expires_at"`
+	CapacityUsed       uint64 `json:"capacity_used"`
+	CapacityObservedAt int64  `json:"capacity_observed_at"`
+	DrainDeadline      *int64 `json:"drain_deadline,omitempty"`
+	Hosting            string `json:"hosting,omitempty"`
+}
+
+// DialHost is what the node is dialed at: its verified IPv4, else its IPv6, else its name.
+func (n RegionalNode) DialHost() string {
+	for _, raw := range []string{n.EndpointIPv4, n.EndpointIPv6} {
+		if address, err := netip.ParseAddr(raw); err == nil && address.IsGlobalUnicast() && address.Zone() == "" {
+			return address.String()
+		}
+	}
+	return n.EndpointHost
 }
 
 // SelfHosted reports whether the account runs this relay itself. A node that does not say is managed.

@@ -37,3 +37,11 @@ func TestRegionalRelayAdvertisesSTUNOnWSSPort(t *testing.T) {
 		t.Fatalf("incorrect regional relay ports: %+v", region.Nodes)
 	}
 }
+
+// The region carries the server's verified address, so magicsock, netcheck and STUN dial it without a lookup.
+func TestRegionalRelayCarriesTheVerifiedAddress(t *testing.T) {
+	region := regionForNode(RegionalNode{NodeID: "relay-1", Region: "in", EndpointHost: "relay.example.test", EndpointIPv4: "152.67.0.60", EndpointIPv6: "2001:db8::1", EndpointTCPPort: 28443, EndpointQUICPort: 28444})
+	if n := region.Nodes[0]; n.IPv4 != "152.67.0.60" || n.IPv6 != "2001:db8::1" || n.HostName != "relay.example.test" {
+		t.Fatalf("region node %+v", n)
+	}
+}

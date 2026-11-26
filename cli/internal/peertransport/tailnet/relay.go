@@ -296,7 +296,7 @@ func regionalID(node string) tailcfg.DERPRegionID {
 }
 func regionForNode(node RegionalNode) *tailcfg.DERPRegion {
 	id := regionalID(node.NodeID)
-	return &tailcfg.DERPRegion{RegionID: id, RegionCode: node.Region, RegionName: fmt.Sprintf("%s/%d/%s", node.NodeID, node.NodeGeneration, node.ProcessEpoch), Nodes: []*tailcfg.DERPNode{{Name: node.NodeID, RegionID: id, HostName: node.EndpointHost, DERPPort: int(node.EndpointQUICPort), STUNPort: int(node.EndpointTCPPort)}}}
+	return &tailcfg.DERPRegion{RegionID: id, RegionCode: node.Region, RegionName: fmt.Sprintf("%s/%d/%s", node.NodeID, node.NodeGeneration, node.ProcessEpoch), Nodes: []*tailcfg.DERPNode{{Name: node.NodeID, RegionID: id, HostName: node.EndpointHost, IPv4: node.EndpointIPv4, IPv6: node.EndpointIPv6, DERPPort: int(node.EndpointQUICPort), STUNPort: int(node.EndpointTCPPort)}}}
 }
 func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]*tailcfg.DERPRegion, error) {
 	if config == nil || len(config.Certificates) != 1 || len(config.Certificates[0].Certificate) != 1 {
@@ -637,11 +637,14 @@ func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byt
 			nodeTLS = config.Clone()
 			nodeTLS.VerifyConnection = func(tls.ConnectionState) error { return nodetls.ErrIdentity }
 		}
-		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointQUICPort))), TLS: nodeTLS.Clone(), Credential: credential, RenewCredential: renew, Namespace: namespace, GenerationDisco: disco})
+		if nodeTLS.ServerName == "" {
+			nodeTLS.ServerName = node.EndpointHost // dialed at its verified address, still verified as its name
+		}
+		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.DialHost(), strconv.Itoa(int(node.EndpointQUICPort))), TLS: nodeTLS.Clone(), Credential: credential, RenewCredential: renew, Namespace: namespace, GenerationDisco: disco})
 		var carrier magicsock.DERPCarrier = client
 		if node.EndpointTCPPort != 0 && contains(node.Transports, "derp_wss") {
 			u := (&url.URL{Scheme: "wss", Host: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointTCPPort))), Path: "/derp"}).String()
-			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: nodeTLS.Clone(), Credential: credential, RenewCredential: renew, Namespace: namespace, GenerationDisco: disco}), 5*time.Second)
+			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, DialAddress: net.JoinHostPort(node.DialHost(), strconv.Itoa(int(node.EndpointTCPPort))), TLS: nodeTLS.Clone(), Credential: credential, RenewCredential: renew, Namespace: namespace, GenerationDisco: disco}), 5*time.Second)
 		}
 		if a.options.TestOnlyDERPCarrier != nil {
 			carrier = a.options.TestOnlyDERPCarrier(carrier)

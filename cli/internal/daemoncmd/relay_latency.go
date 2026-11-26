@@ -50,7 +50,7 @@ func relayTargets(nodes []tailnet.RegionalNode) []netlatency.Target {
 		if !slices.Contains(node.Roles, "relay") || node.NodeID == "" || node.EndpointHost == "" || node.EndpointTCPPort == 0 {
 			continue
 		}
-		targets = append(targets, netlatency.Target{NodeID: node.NodeID, Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointTCPPort)))})
+		targets = append(targets, netlatency.Target{NodeID: node.NodeID, Address: net.JoinHostPort(node.DialHost(), strconv.Itoa(int(node.EndpointTCPPort)))})
 	}
 	return targets
 }
