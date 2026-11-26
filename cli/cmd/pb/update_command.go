@@ -377,6 +377,9 @@ func updateInputIsTerminal(command *cobra.Command) bool {
 var updateApprovalIDPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 func actionUpdate(command *cobra.Command, _ []string) error {
+	if err := refuseMacRootInstall(runtime.GOOS, os.Geteuid()); err != nil {
+		return err
+	}
 	from, _ := command.Flags().GetString("from")
 	force, _ := command.Flags().GetBool("force")
 	if from != "" {

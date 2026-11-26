@@ -73,7 +73,7 @@ func (e commandRejection) valid() bool {
 func (e commandRejection) Error() string {
 	switch e.reason {
 	case commandRejectMacRootInstall:
-		return "On macOS, Paperboat installs for your own user, not root. Run `pb install` (or the install command) as your normal macOS user without sudo; it asks for administrator approval when it needs it."
+		return "On macOS, Paperboat installs for your own user, not root. Run `pb install`, `pb pair` and `pb update` (or the install command) as your normal macOS user without sudo; it asks for administrator approval when it needs it."
 	case commandRejectPreviewExpired:
 		return "The preview's time limit ended before it was ready. Retry with a longer --ttl; publishing can take up to a minute."
 	case commandRejectPreviewTimeout:

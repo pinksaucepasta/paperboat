@@ -56,6 +56,9 @@ func pairCommand() *cobra.Command {
 		Example: "  pb pair pbr_k7f3q9xa2m_...\n  PB_RECIPE=pbr_k7f3q9xa2m_... pb pair\n  pb pair --enrollment-token-file /root/pb-token",
 		Args:    commandArgs(cobra.MaximumNArgs(1)),
 		RunE: func(command *cobra.Command, args []string) error {
+			if err := refuseMacRootInstall(runtime.GOOS, os.Geteuid()); err != nil {
+				return err
+			}
 			jsonOutput, _ := command.Flags().GetBool("json")
 			if hostruntimecmd.NoSystemd() {
 				// No service can be installed: change nothing (the token stays unused) and say how to run.

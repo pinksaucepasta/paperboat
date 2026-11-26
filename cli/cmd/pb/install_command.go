@@ -76,7 +76,7 @@ func selectedInstallServer(command *cobra.Command) string {
 	return server
 }
 
-// refuseMacRootInstall stops `pb install` as root on macOS before any step: the install is per user (launchd
+// refuseMacRootInstall stops `pb install`, `pb pair` and `pb update` as root on macOS before any step: the install is per user (launchd
 // agents in the user's session), and a root install failed midway at the machine guard step.
 func refuseMacRootInstall(platform string, euid int) error {
 	if platform == "darwin" && euid == 0 {
