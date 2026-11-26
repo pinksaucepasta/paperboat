@@ -11,6 +11,8 @@ packages="./internal/hostruntime/service ./internal/hostruntime/hostinstall ./in
   ./internal/hostruntime/environmentkey ./internal/machineguard ./internal/machineservices"
 # The two-OS-user gateway checks (F23-01, F23-02) run processes under these uids; they need no account.
 # Root gets its own build cache, so the job's cache stays owned by the runner user.
+# The Linux pool's user-scoped Go 1.27.4 (tools/remote-test.sh does the same; the image's Go is older).
+export PATH=$HOME/.local/go1.27.4/bin:$PATH
 exec sudo env "PATH=$PATH" GOTOOLCHAIN=local GOCACHE=/tmp/pb-root-gocache GOMODCACHE="$(go env GOMODCACHE)" \
   PB_TWO_USER_UIDS=64001,64002 \
   go test -count=1 -timeout 30m "$@" $packages
