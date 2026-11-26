@@ -137,9 +137,6 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	}
 	// Each stage has its own budget (stageCtx), so a slow stage never spends a later one's; the caller's ctx and
 	// Stop end them all.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	c.stageParent = ctx
 	defer func() { c.stageParent = nil }()
 	stage, cancelStage := c.stageCtx(c.cfg.ReconcileTimeout)
