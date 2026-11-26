@@ -700,13 +700,18 @@ func nssHotJournal(database string) bool {
 
 func nssLocalRoot(ctx context.Context, database string, certificate *x509.Certificate, run nssCommand, requireSSLTrust bool) (bool, error) {
 	nickname := localTrustNickname(certificate)
+	var recoveryErr error
 	if nssHotJournal(database) {
 		// Read-only -L cannot roll a hot journal back; a write-mode open can. Deleting a nickname nobody uses
-		// opens the store for writing and changes nothing (it fails with "not found", which is expected).
-		_, _ = run(ctx, "-D", "-d", "sql:"+database, "-n", nssJournalRecoveryNickname)
+		// opens the store for writing and changes nothing (its "not found" failure is expected and kept only to
+		// explain a listing that still fails).
+		_, recoveryErr = run(ctx, "-D", "-d", "sql:"+database, "-n", nssJournalRecoveryNickname)
 	}
 	listing, err := run(ctx, "-L", "-d", "sql:"+database)
 	if err != nil {
+		if recoveryErr != nil {
+			return false, fmt.Errorf("roll back an interrupted NSS write: %w (then listing failed: %v)", recoveryErr, err)
+		}
 		return false, fmt.Errorf("list NSS certificates: %w", err)
 	}
 	for _, line := range strings.Split(string(listing), "\n") {

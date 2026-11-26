@@ -4,10 +4,13 @@ package machineguard
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A cancelled caller deadline must not kill a certutil write midway (it left the user's Chrome store unreadable).
@@ -64,5 +67,46 @@ func TestNSSHotJournalIsRolledBackBeforeTheReadOnlyListing(t *testing.T) {
 				t.Fatal("the journal must never be deleted by Paperboat")
 			}
 		})
+	}
+}
+
+// With real certutil: a write killed midway leaves a hot journal; the heal rolls it back and -L lists again.
+func TestNSSHealsARealHotJournal(t *testing.T) {
+	if _, err := exec.LookPath("certutil"); err != nil {
+		t.Skip("certutil (NSS tools) is not installed")
+	}
+	_, _, rootPEM := renewalFixture(t, 365)
+	root, err := parseLocalTrustRoot(rootPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, pemPath := t.TempDir(), filepath.Join(t.TempDir(), "root.pem")
+	if err = os.WriteFile(pemPath, rootPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runNSSCommand(t.Context(), "-N", "-d", "sql:"+database, "--empty-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runNSSCommand(t.Context(), "-A", "-d", "sql:"+database, "-t", "C,,", "-n", localTrustNickname(root), "-i", pemPath); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; !nssHotJournal(database); attempt++ {
+		if attempt == 300 {
+			t.Skip("could not interrupt a certutil write at the right moment on this host")
+		}
+		command := exec.Command("certutil", "-A", "-d", "sql:"+database, "-t", "C,,", "-n", fmt.Sprintf("interrupted %d", attempt), "-i", pemPath)
+		if err = command.Start(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Duration(attempt%40) * time.Millisecond / 2)
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}
+	present, err := nssLocalRoot(t.Context(), database, root, runNSSCommand, true)
+	if err != nil || !present {
+		t.Fatalf("after the heal: present=%v err=%v", present, err)
+	}
+	if _, err = runNSSCommand(t.Context(), "-L", "-d", "sql:"+database); err != nil {
+		t.Fatalf("store still unreadable: %v", err)
 	}
 }

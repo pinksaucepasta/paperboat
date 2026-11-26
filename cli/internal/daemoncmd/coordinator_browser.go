@@ -385,7 +385,7 @@ func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guarde
 	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: hostname}); err != nil {
 		return tls.Certificate{}, err
 	}
-	if err = machineguard.InstallUserTrust(ctx, bundle.RootCAPEM); err != nil {
+	if err = c.trust.install(bundle.RootCAPEM); err != nil {
 		return tls.Certificate{}, fmt.Errorf("install browser certificate trust: %w", err)
 	}
 	return cert, nil

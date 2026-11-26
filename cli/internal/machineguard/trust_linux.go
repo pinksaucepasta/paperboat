@@ -257,18 +257,26 @@ func runNSSCommand(parent context.Context, args ...string) ([]byte, error) {
 	timeout := 5 * time.Second
 	if len(args) > 0 && args[0] != "-L" {
 		// A write killed midway leaves hot journals that read-only certutil cannot roll back ("bad database"
-		// for good, in the user's own browser store), so a caller's deadline never cancels it.
+		// for good, in the user's own browser store): once started, a caller's deadline never cancels it. The
+		// caller's budget still bounds the step: no write starts after it ran out.
+		if err := parent.Err(); err != nil {
+			return nil, err
+		}
 		parent, timeout = context.WithoutCancel(parent), 30*time.Second
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "certutil", args...)
 	command.WaitDelay = time.Second
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // a terminal Ctrl-C to pb never reaches a write
 	output := &boundedNSSOutput{}
 	command.Stdout, command.Stderr = output, output
 	err := command.Run()
 	if output.exceeded {
 		return output.bytes.Bytes(), errors.New("browser certificate command output exceeds limit")
+	}
+	if err != nil {
+		err = fmt.Errorf("certutil %s: %w: %s", args[0], err, trimTrustCommandOutput(output.bytes.Bytes()))
 	}
 	return output.bytes.Bytes(), err
 }
