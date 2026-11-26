@@ -18809,6 +18809,9 @@
             "type": "string",
             "format": "date-time"
           },
+          "install_required": {
+            "type": "boolean"
+          },
           "config_repo_provisioned": {
             "type": "boolean"
           },
@@ -18826,7 +18829,8 @@
           "connected",
           "scopes",
           "missing_scopes",
-          "config_repo_provisioned"
+          "config_repo_provisioned",
+          "install_required"
         ]
       },
       "MachineEnrollment": {
@@ -25901,6 +25905,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
           }
         },
         "operationId": "get_v1_config_repositories_candidates",
@@ -32428,6 +32435,9 @@
             }
           },
           "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           }
         },

@@ -200,7 +200,7 @@ func validProductionConfig() Config {
 	cfg.Secrets.WorkOSClientID = "workos-client-id"
 	cfg.Secrets.GitHubClientID = "github-client-id"
 	cfg.Secrets.GitHubClientSecret = "github-client-secret"
-	cfg.GitHub.AppID = "12345"
+	cfg.GitHub.AppID, cfg.GitHub.AppSlug = "12345", "paperboat-test"
 	cfg.Secrets.EdgeControlCredential = "edge-control-credential-0123456789"
 	cfg.LocalAccessBaseDomain = "local.example.test"
 	cfg.ReleaseDirectory = "/srv/paperboat-releases"
@@ -279,6 +279,20 @@ func TestProductionValidationAllowsConnectedUserRepositoryAccessWithoutGitHubApp
 	cfg.ConfigSync.Mode = "read_only"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("enabled config sync rejected connected-user credentials: %v", err)
+	}
+}
+
+func TestGitHubAppRequiresItsSlug(t *testing.T) {
+	cfg := validProductionConfig()
+	for _, slug := range []string{"", "Not A Slug", "evil/../path"} {
+		cfg.GitHub.AppSlug = slug
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "github.app_slug") {
+			t.Fatalf("slug %q accepted: %v", slug, err)
+		}
+	}
+	cfg.GitHub.AppSlug = "paperboat-test"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid slug rejected: %v", err)
 	}
 }
 

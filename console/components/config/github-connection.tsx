@@ -1,9 +1,9 @@
 "use client"
 
 import { GithubLogoIcon } from "@phosphor-icons/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { useApiQuery } from "@/lib/api"
-import { disconnectGitHub, githubLive, githubStatusQuery, startConnect } from "@/lib/github"
+import { disconnectGitHub, githubLive, githubStatusQuery, useGitHubConnect } from "@/lib/github"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Section } from "@/components/section"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -20,10 +20,7 @@ export function GitHubConnection() {
   const queryClient = useQueryClient()
   const status = useApiQuery(githubStatusQuery)
   const [disconnecting, setDisconnecting] = useShellState("config/github-connection.tsx:disconnecting", false)
-  const connect = useMutation({
-    mutationFn: () => startConnect("/config"),
-    onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
-  })
+  const connect = useGitHubConnect("/config")
   if (!githubLive) return null
   if (status.isPending)
     return (
@@ -55,16 +52,19 @@ export function GitHubConnection() {
     <Section
       title="GitHub account"
       action={
-        data.connected ? (
-          <Button variant="outline" size="lg" onClick={() => setDisconnecting(true)}>
-            Disconnect
-          </Button>
-        ) : (
-          <Button size="lg" disabled={connect.isPending} onClick={() => connect.mutate()}>
-            <GithubLogoIcon data-icon="inline-start" weight="fill" />
-            {connect.isPending ? "Opening GitHub…" : "Connect GitHub"}
-          </Button>
-        )
+        <div className="flex gap-2">
+          {data.connected && (
+            <Button variant="outline" size="lg" onClick={() => setDisconnecting(true)}>
+              Disconnect
+            </Button>
+          )}
+          {(!data.connected || data.install_required) && (
+            <Button size="lg" disabled={connect.isPending} onClick={() => connect.mutate()}>
+              <GithubLogoIcon data-icon="inline-start" weight="fill" />
+              {connect.isPending ? "Opening GitHub…" : "Connect GitHub"}
+            </Button>
+          )}
+        </div>
       }
     >
       <div
@@ -85,6 +85,11 @@ export function GitHubConnection() {
           <span className="text-muted-foreground">Connect GitHub to pick your private repositories.</span>
         )}
       </div>
+      {data.install_required && (
+        <p className="py-2 text-sm text-destructive">
+          The Paperboat app isn’t installed on this GitHub account. Connect GitHub to install it.
+        </p>
+      )}
       {data.missing_scopes.length > 0 && (
         <p className="py-2 text-sm text-destructive">
           GitHub is missing access Paperboat needs; connect again to grant it.

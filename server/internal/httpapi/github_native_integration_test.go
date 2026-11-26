@@ -55,6 +55,7 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	cfg.HTTP.PublicBaseURL = "https://api.example.test"
 	cfg.HTTP.BrowserLoginOrigin = "https://login.example.test"
 	cfg.Secrets.GitHubClientID = "native-test-client"
+	cfg.GitHub.AppID, cfg.GitHub.AppSlug = "123", "paperboat-test"
 	cfg.Secrets.EncryptionKey = "native-test-encryption-key"
 	writer := audit.NewWriter(store)
 	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"native-github-session"}, true, "https://login.example.test")
@@ -194,6 +195,13 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 		t.Fatal("poll completion invalid")
 	}
 	request("DELETE", path, first.AccessToken, "", nil, 200)
+	// Connected without the App on the account: Approve goes to its installation, with this request's state.
+	provider.NotInstalled = true
+	uninstalled := start(first.AccessToken)
+	if body := decide(uninstalled, "approve", cookies, 200).Body.String(); !strings.Contains(body, "https://github.com/apps/paperboat-test/installations/new?state=pbnative_"+uninstalled.ID+".") {
+		t.Fatalf("approve without the app = %s", body)
+	}
+	provider.NotInstalled = false
 	// The console's Cancel ends the request for the CLI too.
 	item = start(first.AccessToken)
 	decide(item, "cancel", cookies, 200)

@@ -47,6 +47,8 @@ type Client interface {
 	CreateRepo(context.Context, string, RepoCreateInput) (Repo, error)
 	GetFile(context.Context, string, string, string, string, string) (File, error)
 	PutFile(context.Context, string, string, string, PutFileInput) error
+	// AppInstalled reports whether this GitHub App is installed on the account with this login.
+	AppInstalled(ctx context.Context, token, login string) (bool, error)
 }
 
 type OAuthRefreshInput struct {
@@ -107,6 +109,9 @@ type Status struct {
 	ConfigRepoOwner       string    `json:"config_repo_owner,omitempty"`
 	ConfigRepoName        string    `json:"config_repo_name,omitempty"`
 	ConfigRepoBranch      string    `json:"config_repo_branch,omitempty"`
+	// InstallRequired: connected, but the GitHub App is not installed on this account, so nothing can be
+	// listed or created there. Connecting again installs it.
+	InstallRequired bool `json:"install_required"`
 }
 
 func (s Status) normalized() Status {
@@ -170,6 +175,38 @@ func (s *Service) OAuthAuthorizeURL(state, redirectURI string) (string, error) {
 	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
+}
+
+// ConnectURL is where "Connect GitHub" sends the person: GitHub's authorization or, once connected without the
+// App on their account, the App's installation page (which authorizes in the same step and returns the state).
+func (s *Service) ConnectURL(ctx context.Context, userID, state, redirectURI string) (string, error) {
+	status, err := s.Status(ctx, userID)
+	if err != nil {
+		// A broken token is repaired by authorizing again, so only a known missing installation changes the page.
+		supportreport.ObserveFromContext(ctx, "paperboat-server", "provider_github", "provider_call", "github_connection_unavailable", err)
+	}
+	if !status.InstallRequired {
+		return s.OAuthAuthorizeURL(state, redirectURI)
+	}
+	u, err := url.Parse(s.cfg.GitHub.OAuthAuthorizeURL)
+	if err != nil {
+		return "", err
+	}
+	u.Path = "/apps/" + s.cfg.GitHub.AppSlug + "/installations/new"
+	u.RawQuery = url.Values{"state": {state}}.Encode()
+	return u.String(), nil
+}
+
+// requireApp refuses, with AppNotInstalledError, when a GitHub App is configured and missing from the account.
+func (s *Service) requireApp(ctx context.Context, token, login string) error {
+	if strings.TrimSpace(s.cfg.GitHub.AppID) == "" {
+		return nil
+	}
+	installed, err := s.client.AppInstalled(ctx, token, login)
+	if err != nil || installed {
+		return err
+	}
+	return AppNotInstalledError{ConnectAt: s.ConsoleOrigin() + "/config"}
 }
 
 func (s *Service) CompleteOAuth(ctx context.Context, userID, code, redirectURI string) (Status, error) {
@@ -261,7 +298,8 @@ func (s *Service) completeOAuth(ctx context.Context, userID, code, redirectURI s
 		}
 		return Status{}, statusErr
 	}
-	if provisionErr != nil {
+	// A missing installation is the next step of connecting (Status.InstallRequired), not a fault.
+	if provisionErr != nil && !errors.Is(provisionErr, ErrAppNotInstalled) {
 		supportreport.ObserveFromContext(ctx, "paperboat-server", "provider_github", "provider_call", "github_connection_unavailable", provisionErr)
 	}
 	return status, nil
@@ -269,7 +307,8 @@ func (s *Service) completeOAuth(ctx context.Context, userID, code, redirectURI s
 
 func (s *Service) Status(ctx context.Context, userID string) (Status, error) {
 	var status Status
-	if _, _, _, err := s.githubTokenWithExpiry(ctx, userID); errors.Is(err, ErrNotConnected) {
+	token, _, _, err := s.githubTokenWithExpiry(ctx, userID)
+	if errors.Is(err, ErrNotConnected) {
 		return status.normalized(), nil
 	} else if err != nil && !errors.Is(err, ErrMissingScopes) {
 		return Status{}, err
@@ -294,6 +333,12 @@ func (s *Service) Status(ctx context.Context, userID string) (Status, error) {
 	status.Scopes = connection.Scopes
 	status.LastValidatedAt = connection.LastValidatedAt.Time
 	status.MissingScopes = missingScopes(connection.Scopes, s.requiredOAuthScopes())
+	if err := s.requireApp(ctx, token, status.Login); errors.Is(err, ErrAppNotInstalled) {
+		status.InstallRequired = true
+	} else if err != nil {
+		// GitHub being unreachable must not hide the connection; listing repositories reports it.
+		supportreport.ObserveFromContext(ctx, "paperboat-server", "provider_github", "provider_call", "github_connection_unavailable", err)
+	}
 	repo, err := s.db.Queries().GetGitHubConfigRepoStatus(ctx, userID)
 	if err == nil {
 		status.ConfigRepoOwner, status.ConfigRepoName, status.ConfigRepoBranch = repo.Owner.String, repo.Name, repo.DefaultBranch.String
@@ -317,6 +362,9 @@ func (s *Service) ProvisionConfigRepo(ctx context.Context, userID, idempotencyKe
 	}
 	repoName := s.cfg.GitHub.ConfigRepoName
 	branch := s.cfg.GitHub.ConfigRepoBranch
+	if err := s.requireApp(ctx, accessToken, owner); err != nil {
+		return ConfigRepo{}, err
+	}
 	if err := s.recordAttempt(ctx, userID, idempotencyKey, "started", owner, repoName, ""); err != nil {
 		return ConfigRepo{}, err
 	}
@@ -632,6 +680,33 @@ func (c HTTPClient) ListRepos(ctx context.Context, token string) ([]Repo, error)
 	return repos, nil
 }
 
+// AppInstalled looks for the account among the App's installations a user token can see
+// (GET /user/installations lists only the token's App). A suspended installation grants nothing.
+func (c HTTPClient) AppInstalled(ctx context.Context, token, login string) (bool, error) {
+	client, err := c.sdkClient(token)
+	if err != nil {
+		return false, err
+	}
+	options := &gh.ListOptions{Page: 1, PerPage: 100}
+	// Bounded: the account's own installation is among the first thousand.
+	for range 10 {
+		items, response, err := client.Apps.ListUserInstallations(ctx, options)
+		if err != nil {
+			return false, normalizeGitHubError(err)
+		}
+		for _, item := range items {
+			if item.SuspendedAt == nil && strings.EqualFold(item.GetAccount().GetLogin(), login) {
+				return true, nil
+			}
+		}
+		if response == nil || response.NextPage == 0 {
+			break
+		}
+		options.Page = response.NextPage
+	}
+	return false, nil
+}
+
 func (c HTTPClient) CreateRepo(ctx context.Context, token string, input RepoCreateInput) (Repo, error) {
 	client, err := c.sdkClient(token)
 	if err != nil {
@@ -820,6 +895,12 @@ type FakeClient struct {
 	PutFiles    []string
 	ExchangeErr error
 	CreateErr   error
+	// NotInstalled: the App is missing from the account.
+	NotInstalled bool
+}
+
+func (f *FakeClient) AppInstalled(context.Context, string, string) (bool, error) {
+	return !f.NotInstalled, nil
 }
 
 func (f *FakeClient) ExchangeOAuthCode(_ context.Context, input OAuthExchangeInput) (OAuthToken, error) {
@@ -932,7 +1013,14 @@ var (
 	ErrFileNotFound                = errors.New("github file not found")
 	ErrIdempotencyKeyRequired      = errors.New("idempotency key is required")
 	ErrRepositoryAccessUnavailable = errors.New("repository-scoped access is unavailable")
+	ErrAppNotInstalled             = errors.New("github app is not installed on the account")
 )
+
+// AppNotInstalledError is ErrAppNotInstalled with the console page where connecting installs the App.
+type AppNotInstalledError struct{ ConnectAt string }
+
+func (AppNotInstalledError) Error() string { return ErrAppNotInstalled.Error() }
+func (AppNotInstalledError) Unwrap() error { return ErrAppNotInstalled }
 
 // ErrConnectionInUse means the GitHub connection cannot be removed while an active config
 // repository syncs through it.

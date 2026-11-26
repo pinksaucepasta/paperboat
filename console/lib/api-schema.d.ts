@@ -14652,6 +14652,7 @@ export interface components {
             missing_scopes: string[];
             /** Format: date-time */
             last_validated_at?: string;
+            install_required: boolean;
             config_repo_provisioned: boolean;
             config_repo_owner?: string;
             config_repo_name?: string;
@@ -17639,6 +17640,7 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     get_config_repository: {
@@ -21159,6 +21161,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     get_v1_operation: {

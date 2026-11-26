@@ -3,7 +3,7 @@
 import { PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useApiQuery, useWorkspace } from "@/lib/api"
+import { ApiError, useApiQuery, useWorkspace } from "@/lib/api"
 import {
   adoptTeamDefault,
   clearTeamConfigDefault,
@@ -17,7 +17,7 @@ import {
   unadoptTeamDefault,
   type ConfigRepository,
 } from "@/lib/config-sync"
-import { githubStatusQuery } from "@/lib/github"
+import { githubStatusQuery, useGitHubConnect } from "@/lib/github"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
 import { ChooseTeamDefault } from "@/components/team/team-config-default"
@@ -161,6 +161,8 @@ function GitHubPicker({ onDone }: { onDone: () => void }) {
   })
   const next = query.data?.next_cursor
   const items = query.data?.items ?? []
+  if (query.error instanceof ApiError && query.error.code === "github_app_not_installed")
+    return <InstallGitHubApp message={query.error.message} />
   return (
     <div className="flex flex-col">
       {query.isError ? (
@@ -198,6 +200,24 @@ function GitHubPicker({ onDone }: { onDone: () => void }) {
             Next
           </Button>
         </div>
+      )}
+    </div>
+  )
+}
+
+/** The picker's state for a GitHub account without the Paperboat app: nothing to list until it is installed. */
+function InstallGitHubApp({ message }: { message: string }) {
+  const connect = useGitHubConnect("/config")
+  return (
+    <div className="flex flex-col items-start gap-3 text-sm">
+      <p className="text-muted-foreground">{message}</p>
+      <Button size="lg" disabled={connect.isPending} onClick={() => connect.mutate()}>
+        {connect.isPending ? "Opening GitHub…" : "Connect GitHub"}
+      </Button>
+      {connect.isError && (
+        <p className="text-destructive">
+          <ErrorMessage error={connect.error} />
+        </p>
       )}
     </div>
   )

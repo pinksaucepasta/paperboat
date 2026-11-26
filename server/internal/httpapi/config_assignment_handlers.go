@@ -108,6 +108,9 @@ func configRepositoryCandidates(service *controlplane.ConfigAssignmentService) h
 			return
 		}
 		items, next, err := service.RepositoryCandidateInventory(r.Context(), p.User.ID, r.URL.Query().Get("cursor"), query.Limit)
+		if writeGitHubAppNotInstalled(w, r, err) {
+			return
+		}
 		if err != nil {
 			if writeConfigAssignmentFailure(w, r, err, "Repository candidates are unavailable.") {
 				return

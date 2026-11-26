@@ -182,6 +182,7 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_GITHUB_OAUTH_AUTHORIZE_URL", &c.GitHub.OAuthAuthorizeURL)
 	setString("PAPERBOAT_GITHUB_OAUTH_TOKEN_URL", &c.GitHub.OAuthTokenURL)
 	setString("PAPERBOAT_GITHUB_APP_ID", &c.GitHub.AppID)
+	setString("PAPERBOAT_GITHUB_APP_SLUG", &c.GitHub.AppSlug)
 	setString("PAPERBOAT_GITHUB_CONFIG_REPO_NAME", &c.GitHub.ConfigRepoName)
 	setString("PAPERBOAT_GITHUB_CONFIG_REPO_BRANCH", &c.GitHub.ConfigRepoBranch)
 	setString("PAPERBOAT_RUNTIME_BASE_DOMAIN", &c.RuntimeBaseDomain)

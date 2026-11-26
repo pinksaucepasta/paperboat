@@ -42,7 +42,7 @@ func (s *Service) RepositoryInventory(ctx context.Context, account, cursor strin
 		}
 		page = value.Page
 	}
-	token, _, err := s.githubToken(ctx, account)
+	token, login, err := s.githubToken(ctx, account)
 	if err != nil {
 		return nil, "", err
 	}
@@ -53,6 +53,12 @@ func (s *Service) RepositoryInventory(ctx context.Context, account, cursor strin
 	items, next, err := pager.ListReposPage(ctx, token, page, limit, private)
 	if err != nil {
 		return nil, "", err
+	}
+	// An App token lists nothing until the App is installed: say so instead of "no repositories".
+	if page == 1 && len(items) == 0 {
+		if err := s.requireApp(ctx, token, login); err != nil {
+			return nil, "", err
+		}
 	}
 	nextCursor := ""
 	if next > 0 {

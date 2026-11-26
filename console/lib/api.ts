@@ -148,6 +148,7 @@ export function checked<T>(method: string | undefined, path: string, data: T): T
 const sentences: Record<string, string> = {
   team_private_access_off:
     "The team has not allowed private access to its shared machines. Ask a team owner or admin to turn it on.",
+  github_app_not_installed: "Install the Paperboat app on your GitHub account to use its repositories.",
   github_connection_in_use:
     "Config sync is using GitHub right now. Stop syncing config on your machines first, then disconnect.",
   transfer_too_large:

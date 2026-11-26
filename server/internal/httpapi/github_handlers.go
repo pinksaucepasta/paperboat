@@ -47,7 +47,12 @@ func githubOAuthStart(authService *auth.Service, service *pbgithub.Service) http
 			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
 			return
 		}
-		url, err := service.OAuthAuthorizeURL(state, body.RedirectURI)
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		url, err := service.ConnectURL(r.Context(), p.User.ID, state, body.RedirectURI)
 		if errors.Is(err, pbgithub.ErrClientNotConfigured) {
 			writeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", "GitHub OAuth is not configured.", err)
 			return
@@ -109,7 +114,7 @@ func githubOAuthBrowserCallback(service *pbgithub.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		noStore(w)
 		query := url.Values{}
-		for _, key := range []string{"code", "state", "error"} {
+		for _, key := range []string{"code", "state", "error", "setup_action"} {
 			if value := r.URL.Query().Get(key); value != "" && len(value) <= 512 {
 				query.Set(key, value)
 			}
@@ -219,6 +224,8 @@ func githubRepositories(service *pbgithub.Service) http.HandlerFunc {
 		}
 		repos, next, err := service.RepositoryInventory(r.Context(), p.User.ID, r.URL.Query().Get("cursor"), query.Limit, false)
 		switch {
+		case writeGitHubAppNotInstalled(w, r, err):
+			return
 		case errors.Is(err, pbgithub.ErrNotConnected):
 			writeError(w, r, http.StatusConflict, "github_required", "Connect GitHub before listing repositories.")
 			return
@@ -254,6 +261,8 @@ func githubProvisionConfigRepo(service *pbgithub.Service) http.HandlerFunc {
 		}
 		repo, err := service.ProvisionConfigRepo(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"))
 		switch {
+		case writeGitHubAppNotInstalled(w, r, err):
+			return
 		case errors.Is(err, pbgithub.ErrIdempotencyKeyRequired):
 			writeError(w, r, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required.")
 			return
@@ -269,4 +278,15 @@ func githubProvisionConfigRepo(service *pbgithub.Service) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: repo})
 	}
+}
+
+// writeGitHubAppNotInstalled answers a request that needs the GitHub App on the account with where to install it.
+func writeGitHubAppNotInstalled(w http.ResponseWriter, r *http.Request, err error) bool {
+	var missing pbgithub.AppNotInstalledError
+	if !errors.As(err, &missing) {
+		return false
+	}
+	writeError(w, r, http.StatusConflict, "github_app_not_installed",
+		"The Paperboat app is not installed on your GitHub account. Choose Connect GitHub at "+missing.ConnectAt+" and try again.")
+	return true
 }

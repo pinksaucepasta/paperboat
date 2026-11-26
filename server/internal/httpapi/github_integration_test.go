@@ -254,7 +254,79 @@ func TestGitHubProvisionRetriesAfterCreateFailure(t *testing.T) {
 	}
 }
 
-func newGitHubIntegrationRouter(t *testing.T, tokenScopes []string) (*db.DB, http.Handler, *pbgithub.FakeClient) {
+// A connected account without the GitHub App is sent to install it by the same Connect GitHub, and nothing is
+// listed or created there until it has.
+func TestGitHubConnectWithoutAppSendsToInstall(t *testing.T) {
+	_, router, fake := newGitHubIntegrationRouter(t, []string{"repo"}, func(cfg *config.Config) {
+		cfg.GitHub.AppID, cfg.GitHub.AppSlug = "123", "paperboat-test"
+	})
+	fake.NotInstalled = true
+	cookies := loginCookies(t, router, "workos_github_app:github-app@example.com:GitHub App")
+	csrf := csrfCookie(t, cookies)
+	serve := func(method, path, body string, jar []*http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		addCookies(req, jar)
+		req.Header.Set(auth.CSRFHeaderName, csrf)
+		req.Header.Set("Idempotency-Key", "github-app-test")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	// One Connect GitHub: start, GitHub returns the code and state, the console finishes.
+	connect := func() (destination, state, finished string) {
+		start := serve(http.MethodPost, "/v1/github/oauth/start", `{"return_to":"/config"}`, cookies)
+		if start.Code != http.StatusOK {
+			t.Fatalf("start = %d %s", start.Code, start.Body.String())
+		}
+		state = jsonField(t, start.Body.Bytes(), "state")
+		jar := replaceCookie(cookies, cookieByName(t, start.Result().Cookies(), auth.OAuthStateCookieName))
+		callback := serve(http.MethodPost, "/v1/github/oauth/callback", `{"code":"github-code","state":"`+state+`"}`, jar)
+		if callback.Code != http.StatusOK {
+			t.Fatalf("callback = %d %s", callback.Code, callback.Body.String())
+		}
+		return jsonField(t, start.Body.Bytes(), "authorization_url"), state, callback.Body.String()
+	}
+
+	first, _, connected := connect()
+	if !strings.HasPrefix(first, "https://github.com/login/oauth/authorize?") {
+		t.Fatalf("first connect went to %s", first)
+	}
+	if !strings.Contains(connected, `"install_required":true`) || fake.Created != 0 {
+		t.Fatalf("connected without the app = %s, created %d", connected, fake.Created)
+	}
+	for _, refused := range []*httptest.ResponseRecorder{
+		serve(http.MethodPost, "/v1/github/config-repositories/provision", "", cookies),
+		serve(http.MethodGet, "/v1/github/repositories", "", cookies),
+	} {
+		if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "github_app_not_installed") {
+			t.Fatalf("without the app = %d %s", refused.Code, refused.Body.String())
+		}
+	}
+
+	// Disconnect, then Connect GitHub, is the same path again: authorize, then the installation.
+	if disconnected := serve(http.MethodDelete, "/v1/github/connection", "", cookies); disconnected.Code != http.StatusOK {
+		t.Fatalf("disconnect = %d %s", disconnected.Code, disconnected.Body.String())
+	}
+	if again, _, body := connect(); !strings.HasPrefix(again, "https://github.com/login/oauth/authorize?") || !strings.Contains(body, `"install_required":true`) {
+		t.Fatalf("connect after disconnect went to %s and answered %s", again, body)
+	}
+
+	second, state, _ := connect()
+	if want := "https://github.com/apps/paperboat-test/installations/new?state=" + url.QueryEscape(state); second != want {
+		t.Fatalf("connect again went to %s, want %s", second, want)
+	}
+
+	fake.NotInstalled = false // installed on GitHub
+	_, _, installed := connect()
+	if !strings.Contains(installed, `"install_required":false`) || !strings.Contains(installed, `"config_repo_provisioned":true`) || fake.Created != 1 {
+		t.Fatalf("connected after installing = %s, created %d", installed, fake.Created)
+	}
+	if listed := serve(http.MethodGet, "/v1/github/repositories", "", cookies); listed.Code != http.StatusOK {
+		t.Fatalf("repositories after installing = %d %s", listed.Code, listed.Body.String())
+	}
+}
+
+func newGitHubIntegrationRouter(t *testing.T, tokenScopes []string, configure ...func(*config.Config)) (*db.DB, http.Handler, *pbgithub.FakeClient) {
 	t.Helper()
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -283,6 +355,9 @@ func newGitHubIntegrationRouter(t *testing.T, tokenScopes []string) (*db.DB, htt
 	cfg.HTTP.PublicBaseURL = "https://unified-camel-humorous.ngrok-free.app"
 	cfg.Secrets.EncryptionKey = "test-encryption-key-for-github-tests"
 	cfg.Secrets.GitHubClientID, cfg.Secrets.GitHubClientSecret = "test-github-client", "test-github-secret"
+	for _, change := range configure {
+		change(&cfg)
+	}
 	fake := &pbgithub.FakeClient{
 		Token: pbgithub.OAuthToken{AccessToken: "fake-gh-token", Scopes: tokenScopes},
 		User:  pbgithub.GitHubUser{Login: "paperboat-test-user"},

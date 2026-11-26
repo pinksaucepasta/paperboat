@@ -517,8 +517,10 @@ type GitHub struct {
 	OAuthTokenURL     string   `json:"oauth_token_url"`
 	OAuthScopes       []string `json:"oauth_scopes"`
 	AppID             string   `json:"app_id"`
-	ConfigRepoName    string   `json:"config_repo_name"`
-	ConfigRepoBranch  string   `json:"config_repo_branch"`
+	// AppSlug is the App's name in its GitHub address; people install it from there.
+	AppSlug          string `json:"app_slug"`
+	ConfigRepoName   string `json:"config_repo_name"`
+	ConfigRepoBranch string `json:"config_repo_branch"`
 }
 
 type Providers struct {
@@ -600,6 +602,8 @@ type LoadOptions struct {
 	LookupEnv   func(string) (string, bool)
 	ReadFile    func(string) ([]byte, error)
 }
+
+var githubAppSlug = regexp.MustCompile(`^[a-z0-9-]{1,100}$`)
 
 // DefaultSentryDSN and DefaultSentryRelease are populated only in official
 // release artifacts. Source builds leave both empty and keep reporting off.
@@ -1022,6 +1026,9 @@ func (c Config) Validate() error {
 	}
 	if len(c.GitHub.OAuthScopes) == 0 {
 		errs = append(errs, fmt.Errorf("github.oauth_scopes is required"))
+	}
+	if strings.TrimSpace(c.GitHub.AppID) != "" && !githubAppSlug.MatchString(c.GitHub.AppSlug) {
+		errs = append(errs, fmt.Errorf("github.app_slug is required with github.app_id: the App's name in its GitHub address"))
 	}
 	if strings.TrimSpace(c.GitHub.ConfigRepoName) == "" || strings.TrimSpace(c.GitHub.ConfigRepoBranch) == "" {
 		errs = append(errs, fmt.Errorf("github config repo name and branch are required"))

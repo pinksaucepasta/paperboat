@@ -146,7 +146,7 @@ func (s *Service) ApproveNativeLink(ctx context.Context, viewer, id, token strin
 	if err := s.decideNativeLink(ctx, viewer, id, token, "authorizing", nativeHash(state)); err != nil {
 		return "", err
 	}
-	return s.OAuthAuthorizeURL(state, s.DefaultCallbackURL())
+	return s.ConnectURL(ctx, viewer, state, s.DefaultCallbackURL())
 }
 
 // CancelNativeLink spends the request without connecting; the CLI's poll sees canceled.

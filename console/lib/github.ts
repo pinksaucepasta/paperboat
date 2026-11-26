@@ -1,6 +1,6 @@
 "use client"
 
-import { queryOptions } from "@tanstack/react-query"
+import { queryOptions, useMutation } from "@tanstack/react-query"
 import { traceFrom } from "@/lib/error-reference"
 import { api, ApiError, checked, send, type Data, type Schemas } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
@@ -55,6 +55,16 @@ export const startConnect = (returnTo: string) =>
     method: "POST",
     headers: json,
     body: JSON.stringify({ return_to: returnTo }),
+  })
+
+/**
+ * "Connect GitHub": leaves for GitHub's authorization or, for a connected account without the Paperboat app
+ * (`install_required`), for the app's installation. The server picks which.
+ */
+export const useGitHubConnect = (returnTo: string) =>
+  useMutation({
+    mutationFn: () => startConnect(returnTo),
+    onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
   })
 
 /**
