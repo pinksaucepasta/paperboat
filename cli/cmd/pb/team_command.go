@@ -255,6 +255,10 @@ func teamInviteCommand() *cobra.Command {
 		if jsonOutput {
 			return json.NewEncoder(c.OutOrStdout()).Encode(invite)
 		}
+		if invite.Resent {
+			_, err = fmt.Fprintf(c.OutOrStdout(), "Invitation re-sent to %s; invitation %s now expires %s.\n", email, invite.InvitationID, invite.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
+			return err
+		}
 		_, err = fmt.Fprintf(c.OutOrStdout(), "Invited %s to %s as member; invitation %s expires %s. Recipient must sign in and verify this email to accept.\n", invite.Email, invite.TeamID, invite.InvitationID, invite.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
 		return err
 	}}

@@ -12096,6 +12096,8 @@ export interface components {
             generation: number;
             /** Format: email */
             email?: string;
+            /** @description The recipient already had this pending invitation; it was refreshed and re-sent. */
+            resent?: boolean;
         };
         TeamGrantRequest: {
             operation_id: string;

@@ -542,6 +542,26 @@ func TestTeamInviteExplainsSeatRequiredFromTheErrorCode(t *testing.T) {
 	}
 }
 
+// Inviting someone whose invitation is pending re-sends it, and says so.
+func TestTeamInviteSaysWhenItReSentAPendingInvitation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"invitation_id":"invitation_1","team_id":"team_1","account_id":"","role":"member","expires_at":"2026-12-04T00:00:00Z","generation":4,"resent":true}}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	var output bytes.Buffer
+	args := []string{"team", "invite", "team_1", "new.member@example.test", "--generation", "3", "--server", server.URL, "--config", configPath}
+	if code := run(t.Context(), args, &output, &output); code != 0 || !strings.Contains(output.String(), "Invitation re-sent to new.member@example.test") {
+		t.Fatalf("exit=%d output=%s", code, output.String())
+	}
+}
+
 // F12-01: deleting a team that still has a subscription says what to do, not "state changed".
 func TestTeamDeleteWithActiveSubscriptionSaysHowToProceed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

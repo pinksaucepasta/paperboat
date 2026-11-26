@@ -144,3 +144,36 @@ func invitationMessage(policy config.TransactionalMail, address, team string, ex
 		Why:        "You got this because a team admin invited this address.",
 	})
 }
+
+// reinviteTx answers an invite of someone whose invitation is still pending: it
+// refreshes that invitation's expiry and re-sends its email, like GitHub and Slack.
+// Its role stays (cancel and invite again to change it); like ResendInvitation, the
+// inviter must be allowed to grant it. It already holds its seat. Mail follows ResendCooldown.
+func (s *Service) reinviteTx(ctx context.Context, tx *db.Tx, account, inviterRole, id string, r InviteRequest) (Invitation, error) {
+	out := Invitation{InvitationID: id, Resent: true}
+	var send bool
+	err := tx.QueryRow(ctx, `SELECT team_id,role,coalesce(recipient_account,''),coalesce(recipient_email,''),
+ coalesce(mail_requested_at,'-infinity'::timestamptz)<=now()-$2*interval '1 second'
+ FROM team_invitations WHERE invitation_id=$1 FOR UPDATE`, id, int64(ResendCooldown/time.Second)).Scan(&out.TeamID, &out.Role, &out.AccountID, &out.Email, &send)
+	if err != nil {
+		return out, err
+	}
+	if !mayGrantRole(inviterRole, out.Role) {
+		return out, ErrForbidden
+	}
+	if err = tx.QueryRow(ctx, `UPDATE team_invitations SET expires_at=now()+$2*interval '1 second' WHERE invitation_id=$1 RETURNING expires_at`, id, s.mail.InvitationLifetimeSeconds).Scan(&out.ExpiresAt); err != nil {
+		return out, err
+	}
+	if send {
+		if err = s.enqueueInvitation(ctx, tx, id, true); err != nil {
+			return out, err
+		}
+	}
+	if err = advance(ctx, tx, out.TeamID); err != nil {
+		return out, err
+	}
+	if err = tx.QueryRow(ctx, `SELECT generation FROM teams WHERE team_id=$1`, out.TeamID).Scan(&out.Generation); err != nil {
+		return out, err
+	}
+	return out, AuditTx(ctx, tx, account, out.TeamID, "invitation_resent", r.OperationID, map[string]any{"recipient_account": out.AccountID})
+}

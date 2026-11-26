@@ -393,8 +393,16 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		if _, ok := member(t, r.AccountID); ok {
 			return ErrAlreadyMember
 		}
-		if err = checkNewInvitation(ctx, tx, team, r); err != nil {
+		pending, err := checkNewInvitation(ctx, tx, team, r)
+		if err != nil {
 			return err
+		}
+		if pending != "" {
+			out, err = s.reinviteTx(ctx, tx, account, m.Role, pending, r)
+			if err != nil {
+				return err
+			}
+			return save(ctx, tx, account, r.OperationID, digest, out)
 		}
 		if err = reserveInvitationSeatTx(ctx, tx, team); err != nil {
 			return err

@@ -114,6 +114,7 @@ type TeamInvitation struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	Generation   uint64    `json:"generation"`
 	State        string    `json:"state,omitempty"`
+	Resent       bool      `json:"resent,omitempty"`
 }
 type TeamGrantRequest struct {
 	OperationID        string `json:"operation_id"`

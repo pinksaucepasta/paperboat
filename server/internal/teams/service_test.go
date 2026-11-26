@@ -134,8 +134,17 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if gi.Email != other+".member@example.test" {
 		t.Fatal("invitation did not store canonical email")
 	}
-	if _, e = s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_duplicate", ExpectedGeneration: state.Generation, Email: other + ".member+other@example.test"}); !errors.Is(e, ErrInvitationPending) {
-		t.Fatalf("canonical duplicate invitation: %v", e)
+	// Inviting someone whose invitation is pending re-sends that invitation instead of refusing.
+	again, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_duplicate", ExpectedGeneration: state.Generation, Email: other + ".member+other@example.test"})
+	if e != nil || !again.Resent || again.InvitationID != gi.InvitationID || again.Generation != state.Generation+1 || !again.ExpiresAt.After(gi.ExpiresAt) {
+		t.Fatalf("canonical duplicate invitation was not re-sent: %+v %v", again, e)
+	}
+	state.Generation = again.Generation
+	if again.Role != gi.Role {
+		t.Fatalf("re-invite changed the pending invitation's role: %+v", again)
+	}
+	if replayed, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_duplicate", ExpectedGeneration: state.Generation - 1, Email: other + ".member+other@example.test"}); e != nil || replayed.InvitationID != again.InvitationID || replayed.Generation != again.Generation || !replayed.Resent {
+		t.Fatalf("re-invite replay: %+v %v", replayed, e)
 	}
 	state, e = s.CancelInvite(ctx, owner, team, gi.InvitationID, MutationRequest{OperationID: "cancel_canonical", ExpectedGeneration: state.Generation})
 	if e != nil {
@@ -177,8 +186,8 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "duplicate_account", ExpectedGeneration: state.Generation, AccountID: other}); !errors.Is(e, ErrInvitationPending) {
-		t.Fatalf("account invitation duplicated pending email: %v", e)
+	if again, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "duplicate_account", ExpectedGeneration: state.Generation, AccountID: other}); e != nil || !again.Resent || again.InvitationID != emailInvite.InvitationID {
+		t.Fatalf("account invitation duplicated pending email: %+v %v", again, e)
 	}
 	if _, e := s.DeclineInvitation(ctx, other, emailInvite.InvitationID, AcceptRequest{OperationID: "email_decline"}); e != nil {
 		t.Fatalf("verified email decline: %v", e)
@@ -214,9 +223,17 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if _, e := s.Invitation(ctx, admin, emailInvite.InvitationID); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("old email reassignment exposed bound invitation: %v", e)
 	}
+	// A pending email invitation to a member's own address ends when the member is removed.
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.team_invitations(invitation_id,team_id,recipient_email,created_by,expires_at) VALUES($1||'_stale_email',$1,$2,$3,now()+interval '1 hour')`, team, other+"-changed+stale@invalid.test", owner); err != nil {
+		t.Fatal(err)
+	}
 	state, err = s.Mutate(ctx, owner, team, MutationRequest{OperationID: "remove_email_fixture", Action: "remove", AccountID: other, ExpectedGeneration: state.Generation})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var stale bool
+	if err = store.SQL().QueryRowContext(ctx, `SELECT cancelled_at IS NULL FROM paperboat.team_invitations WHERE invitation_id=$1||'_stale_email'`, team).Scan(&stale); err != nil || stale {
+		t.Fatalf("removed member kept a pending email invitation: %v", err)
 	}
 
 	invite := func(actor, recipient, op string) Invitation {

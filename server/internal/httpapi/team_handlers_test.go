@@ -243,13 +243,12 @@ func (s inviteErrorTeamHTTPStub) Invite(context.Context, string, string, teams.I
 	return teams.Invitation{}, s.err
 }
 
-// An invite refused for a pending invitation or a current member says so, never team_changed.
-func TestTeamInviteRefusalsHaveTheirOwnCodes(t *testing.T) {
+// An invite of a current member says so, never team_changed.
+func TestTeamInviteOfAMemberHasItsOwnCode(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		code string
 	}{
-		{teams.ErrInvitationPending, "invitation_pending"},
 		{teams.ErrAlreadyMember, "already_member"},
 	} {
 		mux := http.NewServeMux()
