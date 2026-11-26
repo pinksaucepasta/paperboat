@@ -45,3 +45,11 @@ func TestRegionalRelayCarriesTheVerifiedAddress(t *testing.T) {
 		t.Fatalf("region node %+v", n)
 	}
 }
+
+// A bad address never reaches the DERP map, and a node without a port has no STUN (0 would mean 3478).
+func TestRegionalRelayDropsABadAddressAndUnsetSTUN(t *testing.T) {
+	n := regionForNode(RegionalNode{NodeID: "relay-1", EndpointHost: "relay.example.test", EndpointIPv4: "10.0.0.1", EndpointIPv6: "fe80::1", EndpointQUICPort: 28444}).Nodes[0]
+	if n.IPv4 != "" || n.IPv6 != "" || n.STUNPort != -1 {
+		t.Fatalf("region node %+v", n)
+	}
+}

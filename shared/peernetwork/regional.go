@@ -51,12 +51,29 @@ type RegionalNode struct {
 
 // DialHost is what the node is dialed at: its verified IPv4, else its IPv6, else its name.
 func (n RegionalNode) DialHost() string {
-	for _, raw := range []string{n.EndpointIPv4, n.EndpointIPv6} {
-		if address, err := netip.ParseAddr(raw); err == nil && address.IsGlobalUnicast() && address.Zone() == "" {
-			return address.String()
-		}
+	if v4 := n.IPv4(); v4 != "" {
+		return v4
+	}
+	if v6 := n.IPv6(); v6 != "" {
+		return v6
 	}
 	return n.EndpointHost
+}
+
+// IPv4 and IPv6 are the verified addresses fit to dial, or "" so the name is looked up instead.
+func (n RegionalNode) IPv4() string { return n.dialable(n.EndpointIPv4, true) }
+func (n RegionalNode) IPv6() string { return n.dialable(n.EndpointIPv6, false) }
+
+// dialable keeps a global unicast address of the field's family; a managed relay's must also be public.
+func (n RegionalNode) dialable(raw string, v4 bool) string {
+	a, err := netip.ParseAddr(raw)
+	if err != nil || a.Zone() != "" || !a.IsGlobalUnicast() || a.Is4() != v4 || a.Is4In6() {
+		return ""
+	}
+	if !n.SelfHosted() && (a.IsPrivate() || netip.MustParsePrefix("100.64.0.0/10").Contains(a)) {
+		return ""
+	}
+	return a.String()
 }
 
 // SelfHosted reports whether the account runs this relay itself. A node that does not say is managed.

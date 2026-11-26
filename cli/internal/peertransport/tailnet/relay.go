@@ -296,7 +296,11 @@ func regionalID(node string) tailcfg.DERPRegionID {
 }
 func regionForNode(node RegionalNode) *tailcfg.DERPRegion {
 	id := regionalID(node.NodeID)
-	return &tailcfg.DERPRegion{RegionID: id, RegionCode: node.Region, RegionName: fmt.Sprintf("%s/%d/%s", node.NodeID, node.NodeGeneration, node.ProcessEpoch), Nodes: []*tailcfg.DERPNode{{Name: node.NodeID, RegionID: id, HostName: node.EndpointHost, IPv4: node.EndpointIPv4, IPv6: node.EndpointIPv6, DERPPort: int(node.EndpointQUICPort), STUNPort: int(node.EndpointTCPPort)}}}
+	stun := int(node.EndpointTCPPort)
+	if stun == 0 {
+		stun = -1 // in tailcfg 0 means 3478; a node without a port has no STUN
+	}
+	return &tailcfg.DERPRegion{RegionID: id, RegionCode: node.Region, RegionName: fmt.Sprintf("%s/%d/%s", node.NodeID, node.NodeGeneration, node.ProcessEpoch), Nodes: []*tailcfg.DERPNode{{Name: node.NodeID, RegionID: id, HostName: node.EndpointHost, IPv4: node.IPv4(), IPv6: node.IPv6(), DERPPort: int(node.EndpointQUICPort), STUNPort: stun}}}
 }
 func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]*tailcfg.DERPRegion, error) {
 	if config == nil || len(config.Certificates) != 1 || len(config.Certificates[0].Certificate) != 1 {
