@@ -248,8 +248,9 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 	return hostdproto.UpdateGateResponse{Target: target}, nil
 }
 
-// holdAdmission records that the transfer fence is held for id and arms the
-// lease that releases it if the update never finishes.
+// holdAdmission records that this hostd owns the pending transaction id (commit, rollback, abandonment) and arms
+// the lease that gives it up if the update never finishes. After a drain it holds the transfer fence too; a hostd
+// started after the drain owns the transaction without a fence (EndUpdate on an open fence is a no-op).
 func (g *standaloneUpdateGate) holdAdmission(id string) {
 	if g.fenceTimer != nil {
 		g.fenceTimer.Stop()

@@ -913,3 +913,11 @@ func TestActivationFinishingTextSaysTimeLeft(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorUpdateActivationPendingSaysFinishing(t *testing.T) {
+	now := time.Date(2026, 11, 26, 8, 44, 0, 0, time.UTC)
+	check := doctorUpdateActivationPending(now.Add(5*time.Minute), now)
+	if check.Status != doctorpkg.StatusPending || check.Summary != "An update is installed, finishing its health check (about 5 minutes left)." || check.Validate() != nil {
+		t.Fatalf("%+v validate=%v", check, check.Validate())
+	}
+}

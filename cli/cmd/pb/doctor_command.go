@@ -593,6 +593,7 @@ func doctorMachineProbes(machine localapi.MachineStatus) []doctorpkg.Probe {
 		{Code: "router_mapping", Run: func(context.Context) doctorpkg.Check { return doctorRouterMappingCheck(machine.RouterMapping) }},
 		{Code: "mapping_lifetime", Run: func(context.Context) doctorpkg.Check { return doctorMappingLifetimeCheck(machine.MappingLifetime) }},
 		{Code: "update_health", Run: func(context.Context) doctorpkg.Check { return doctorUpdateHealthCheck(machine.UpdateHealth) }},
+		{Code: "update_activation", Run: doctorUpdateActivationCheck},
 	}
 	// A ready machine's answer is ssh_server, which asks its sshd: the stored readiness stays when sshd stops.
 	if machine.SSHReadiness != "ready" {
@@ -683,6 +684,28 @@ func doctorUpdateHealthCheck(value string) doctorpkg.Check {
 		check.Summary = "Signed update health is unavailable."
 	}
 	return check
+}
+
+// doctorUpdateActivationCheck reports an activation in its stability window (canary update 11-26: doctor
+// said nothing while transfers and status looked stuck for 10 minutes).
+func doctorUpdateActivationCheck(ctx context.Context) doctorpkg.Check {
+	check := doctorpkg.Check{Category: "update", Code: "update_activation", Status: doctorpkg.StatusPass, Summary: "No update is being activated."}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	client, err := newUpdateControlClient(ctx, 5*time.Second)
+	if err != nil {
+		return check
+	}
+	response, err := client.Status(ctx)
+	if err == nil && response.Pending {
+		return doctorUpdateActivationPending(response.Transaction.HealthDeadline, time.Now())
+	}
+	return check
+}
+
+func doctorUpdateActivationPending(deadline, now time.Time) doctorpkg.Check {
+	return doctorpkg.Check{Category: "update", Code: "update_activation", Status: doctorpkg.StatusPending,
+		Summary: "An update is " + activationFinishingText(deadline, now) + ".", Recovery: "Run `pb update status` to confirm completion."}
 }
 
 func doctorNATCheck(family, mapping string) doctorpkg.Check {

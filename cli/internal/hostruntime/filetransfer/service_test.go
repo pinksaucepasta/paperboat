@@ -612,6 +612,9 @@ func TestTransferResumesAcrossHelperRestart(t *testing.T) {
 	if err := durable.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// A hostd stopped mid-upload (update or rollback while transfers are admitted) leaves only the partial
+	// spool: nothing is published until Complete verifies the whole file.
+	assertOnlyPartial(t, contentRoot, id)
 
 	durable, err = store.Open(context.Background(), store.Config{Root: stateRoot})
 	if err != nil {
@@ -626,6 +629,7 @@ func TestTransferResumesAcrossHelperRestart(t *testing.T) {
 	if err != nil || manifest.CommittedOffset != cut {
 		t.Fatalf("recovered manifest=%#v err=%v", manifest, err)
 	}
+	assertOnlyPartial(t, contentRoot, id)
 	if _, err := service.Append(context.Background(), id, cut, bytes.NewReader(data[cut:])); err != nil {
 		t.Fatal(err)
 	}
@@ -1423,5 +1427,23 @@ func TestPublishedNameStaysWithinTheFileNameLimitOnCollision(t *testing.T) {
 	}
 	if base := filepath.Base(path); len(base) > 255 || !strings.HasSuffix(base, " (2).txt") || base == name {
 		t.Fatalf("published as %q (%d bytes)", base, len(base))
+	}
+}
+
+func assertOnlyPartial(t *testing.T, contentRoot, id string) {
+	t.Helper()
+	entries, err := os.ReadDir(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := false
+	for _, entry := range entries {
+		if entry.Name() == id+".content" {
+			t.Fatalf("an unfinished transfer was published: %s", entry.Name())
+		}
+		partial = partial || strings.HasPrefix(entry.Name(), id)
+	}
+	if !partial {
+		t.Fatal("the partial spool of the unfinished transfer is gone")
 	}
 }
