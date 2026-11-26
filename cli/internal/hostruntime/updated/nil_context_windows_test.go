@@ -14,7 +14,7 @@ import (
 // publication lock (audit C #19). Every activation path now refuses it before it waits or acts.
 func TestWindowsActivationPathsRefuseANilContext(t *testing.T) {
 	var ctx context.Context
-	if _, err := stageWindowsActivation(ctx, WindowsConfig{}, workerupdate.Release{}); !errors.Is(err, errInvalidWindowsActivation) {
+	if _, err := stageWindowsActivation(ctx, WindowsConfig{}, workerupdate.Release{}, false); !errors.Is(err, errInvalidWindowsActivation) {
 		t.Errorf("stageWindowsActivation: %v", err)
 	}
 	called := false

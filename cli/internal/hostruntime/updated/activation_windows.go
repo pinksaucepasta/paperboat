@@ -117,7 +117,7 @@ func windowsActivationJournalPath(stateRoot string) string {
 	return filepath.Join(stateRoot, "activation", "journal.json")
 }
 
-func stageWindowsActivation(ctx context.Context, config WindowsConfig, release workerupdate.Release) (result windowsActivationJournal, resultErr error) {
+func stageWindowsActivation(ctx context.Context, config WindowsConfig, release workerupdate.Release, manual bool) (result windowsActivationJournal, resultErr error) {
 	if ctx == nil {
 		return windowsActivationJournal{}, errInvalidWindowsActivation
 	}
@@ -165,9 +165,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
-	if _, err := os.Lstat(filepath.Join(paths.Root, ".quarantined")); err == nil {
-		return windowsActivationJournal{}, workerupdate.ErrQuarantined
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := windowsReleaseQuarantined(paths.Root, manual); err != nil {
 		return windowsActivationJournal{}, err
 	}
 	// Resolve and validate every mutable SCM dependency before downloading any
@@ -1670,6 +1668,20 @@ func (b *windowsSCMActivationBackend) clearCommittedOwnerMaintenance(j windowsAc
 	}
 	if notice != nil && notice.CandidateID == j.Candidate.ID {
 		return autoupdate.ClearOwnerMaintenance(path)
+	}
+	return nil
+}
+
+// windowsReleaseQuarantined refuses a release whose activation was rolled back, as workerupdate's Prepare does on
+// unix: the quarantine stops automatic retries only, and an explicit `pb update` may retry it.
+func windowsReleaseQuarantined(root string, manual bool) error {
+	if manual {
+		return nil
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".quarantined")); err == nil {
+		return workerupdate.ErrQuarantined
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }

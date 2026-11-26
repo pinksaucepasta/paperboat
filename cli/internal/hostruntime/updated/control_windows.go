@@ -469,7 +469,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 			return response, err
 		}
 		if request.Operation == "download" {
-			journal, stageErr := stageWindowsActivation(ctx, c.config, release)
+			journal, stageErr := stageWindowsActivation(ctx, c.config, release, !automatic)
 			if stageErr != nil {
 				return response, stageErr
 			}
@@ -579,6 +579,12 @@ func activationRequested(channel <-chan struct{}) bool {
 }
 
 func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result, error) {
+	// As automaticCheck on unix: no release lookup while an activation holds hostd's stability gate (ded7a1c00).
+	if journal, err := loadWindowsActivationJournalForController(c.config); err == nil && windowsActivationBlocksVersion(journal, c.activeVersion) && !windowsAwaitsFirstApproval(journal) {
+		return autoupdate.Result{Version: c.activeVersion}, nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return autoupdate.Result{}, err
+	}
 	c.checkMu.Lock()
 	defer c.checkMu.Unlock()
 	result, err := resolveRelease(ctx, c.activeVersion, c.resolve)
@@ -675,6 +681,9 @@ func controlErrorCodeWindows(err error) string {
 	var busy *autoupdate.ActiveTerminalSessionsError
 	if errors.As(err, &busy) {
 		return autoupdate.BlockedActiveTerminalSessions
+	}
+	if errors.Is(err, workerupdate.ErrQuarantined) {
+		return "release_quarantined"
 	}
 	if errors.Is(err, ErrWindowsActivationUnavailable) {
 		return "activation_unavailable"
