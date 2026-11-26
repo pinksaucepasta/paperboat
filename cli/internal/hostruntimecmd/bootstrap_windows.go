@@ -332,12 +332,15 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 	}()
 
+	// Plain line: the UAC prompt follows, so no frames run here.
 	fmt.Fprintln(stderr, "Starting the machine services...")
 	if err := elevation.RunRuntimeService(ctx, elevatedPath, elevation.ActionInstallCommit, request); err != nil {
 		return fmt.Errorf("install Paperboat Windows host runtime: %w", err)
 	}
-	fmt.Fprintln(stderr, "Setting up encrypted environment...")
+	environment := newPairStep(stderr, "Setting up encrypted environment...")
+	environment.spin()
 	environmentErr := hostruntime.PreparePairEnvironment(ctx, *stateRoot, material.ControlURL, httptransport.Default())
+	environment.end(environmentErr == nil)
 	if err := bootstrap.ClearResume(*stateRoot); err != nil {
 		return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 	}

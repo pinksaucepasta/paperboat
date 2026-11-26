@@ -275,7 +275,8 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if err := approveAdministrator(ctx, stdin, stderr); err != nil {
 		return &installationStageError{Stage: "service_install", Cause: err}
 	}
-	fmt.Fprintln(stderr, "Starting the machine services...")
+	starting := newPairStep(stderr, "Starting the machine services...")
+	defer starting.end(false)
 	installCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	if err := authorizeServiceInstall(installCtx, executable, installRequest, stdin, stdout, stderr); err != nil {
@@ -284,11 +285,14 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		// does not need the already-consumed one-shot token.
 		return &installationStageError{Stage: "service_install", Cause: err}
 	}
+	// sudo has returned, so no password prompt can show while the frames run.
+	starting.spin()
 	workerCommand, err := installWorkerCommand(commandDirectory, systemWorkerExecutable())
 	if err != nil {
 		if resumingWorker {
 			return &installationStageError{Stage: "service_install", Cause: err}
 		}
+		starting.end(false)
 		failureErr := errors.Join(err, authorizeServiceOperation(ctx, executable, "uninstall", installRequest, stdout, stderr))
 		return failBootstrapInstallation(ctx, failureErr, material, *stateRoot, "service_install")
 	}
@@ -316,6 +320,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
 				return &installationStageError{Stage: "service_readiness", Cause: fmt.Errorf("checkpoint existing runtime finalization: %w", err)}
 			}
+			starting.end(true)
 			if err := authorizeServiceOperation(ctx, executable, "commit", installRequest, stdout, stderr); err != nil {
 				return &installationStageError{Stage: "service_readiness", Cause: runtimeFailure("installation commit could not be confirmed; keep the installed files and run pb doctor before retrying", err)}
 			}
@@ -324,17 +329,21 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			}
 			// Runtime startup and commit may consume their readiness budget.
 			// Canonical daemon cutover gets its own bounded readiness window.
-			fmt.Fprintln(stderr, "Connecting to Paperboat...")
+			connecting := newPairStep(stderr, "Connecting to Paperboat...")
+			connecting.spin()
 			daemonCtx, daemonCancel := context.WithTimeout(ctx, daemonBindWindow)
 			err := bindBootstrapDaemon(daemonCtx, material.ControlURL, source.Version)
 			daemonCancel()
+			connecting.end(err == nil)
 			if err != nil {
 				return &installationStageError{Stage: "daemon_readiness", Cause: err}
 			}
 			paired := pairedMessage(ctx, localdaemon.ProbeCurrentUserForUpdate)
 			paired = namedReadyMessage(paired, material.Alias)
-			fmt.Fprintln(stderr, "Setting up encrypted environment...")
+			environment := newPairStep(stderr, "Setting up encrypted environment...")
+			environment.spin()
 			environmentErr := hostruntime.PreparePairEnvironment(ctx, *stateRoot, material.ControlURL, httptransport.Default())
+			environment.end(environmentErr == nil)
 			if err := bootstrap.ClearResume(*stateRoot); err != nil {
 				return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 			}
@@ -345,6 +354,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			if resumingWorker {
 				return &installationStageError{Stage: "service_readiness", Cause: runtimeFailure("existing installation retained; retry enrollment after restoring runtime readiness", runtimeContextFailure(readyCtx), readinessFailures(firstReadinessErr, lastReadinessErr, failedProbes))}
 			}
+			starting.end(false)
 			failureErr := errors.Join(runtimeFailure("host service did not become ready", runtimeContextFailure(readyCtx), readinessFailures(firstReadinessErr, lastReadinessErr, failedProbes)), authorizeServiceOperation(ctx, executable, "uninstall", installRequest, stdout, stderr), workerCommand.Rollback())
 			return failBootstrapInstallation(ctx, failureErr, material, *stateRoot, "service_readiness")
 		case <-time.After(time.Second):

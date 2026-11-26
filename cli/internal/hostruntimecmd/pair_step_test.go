@@ -1,0 +1,40 @@
+package hostruntimecmd
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestPairStepOffATerminalPrintsThePlainLineOnly(t *testing.T) {
+	var out bytes.Buffer
+	step := newPairStepFor(&out, "Connecting to Paperboat...", false)
+	step.spin()
+	step.end(false)
+	if got := out.String(); got != "Connecting to Paperboat...\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestPairStepOnATerminalSpinsThenLeavesOneFinishedLine(t *testing.T) {
+	for _, ok := range []bool{true, false} {
+		var out bytes.Buffer
+		step := newPairStepFor(&out, "Connecting to Paperboat...", true)
+		if out.Len() != 0 {
+			t.Fatalf("printed before spin: %q", out.String())
+		}
+		step.spin()
+		time.Sleep(250 * time.Millisecond)
+		step.end(ok)
+		step.end(!ok) // later calls do nothing
+		got := out.String()
+		mark := map[bool]string{true: "✓", false: "✗"}[ok]
+		if !strings.Contains(got, "\r\x1b[2K⠋ Connecting") {
+			t.Fatalf("no spinner frame: %q", got)
+		}
+		if !strings.HasSuffix(got, "\r\x1b[2K"+mark+" Connecting to Paperboat...\n") || strings.Count(got, "\n") != 1 {
+			t.Fatalf("line not cleaned up with %s: %q", mark, got)
+		}
+	}
+}
