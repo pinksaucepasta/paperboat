@@ -27,16 +27,22 @@ type StagedCandidate struct {
 // only its own units, and the installing process is often another build: a signed
 // update's helper is the previous build, and pb update --from runs the invoking CLI
 // (Linux test VM). nil means no carrier generation was staged.
+// readRetainedCarrier and stageCandidate are the serving generation's read and the candidate's stage; tests replace them.
+var (
+	readRetainedCarrier = ReadCarrierConfig
+	stageCandidate      = stageCandidateByExecutable
+)
+
 func stageUnixUpgrade(ctx context.Context, request Request, paths installPaths, carrier bool) (*carrierUpgrade, error) {
 	var retained CarrierConfig
 	if carrier {
 		var err error
-		if retained, err = ReadCarrierConfig(ctx, paths.instance); err != nil {
+		if retained, err = readRetainedCarrier(ctx, paths.instance); err != nil {
 			return nil, err
 		}
 		carrier = !retained.Source.SameArtifact(request.Source)
 	}
-	staged, err := stageCandidateByExecutable(ctx, request, carrier)
+	staged, err := stageCandidate(ctx, request, carrier)
 	if err != nil || !carrier {
 		return nil, err
 	}
