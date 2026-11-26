@@ -34,6 +34,7 @@ jobs:
     env:
       RELEASE_URL: ${{ vars.PAPERBOAT_DEFAULT_RELEASE_URL }}
       RELEASE_HOST: ${{ vars.PAPERBOAT_RELEASE_HOST }}
+      SERVER_URL: ${{ vars.PAPERBOAT_DEFAULT_SERVER_URL }}
       PAPERBOAT_TUF_CI: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +63,11 @@ jobs:
           release = urlsplit(os.environ.get('RELEASE_URL', ''))
           if release.scheme != 'https' or not release.hostname or release.path != '/tuf' or release.port not in (None, 443) or release.username or release.query or release.fragment:
               raise SystemExit('PAPERBOAT_DEFAULT_RELEASE_URL must be https://HOST/tuf')
-          print(f'origin=https://{release.hostname.lower()}')
+          # The address probe is the API server's: the release host sits behind a CDN, so it never sees the caller's IP.
+          server = urlsplit(os.environ.get('SERVER_URL', ''))
+          if server.scheme != 'https' or not server.hostname or server.path not in ('', '/') or server.port not in (None, 443) or server.username or server.query or server.fragment:
+              raise SystemExit('PAPERBOAT_DEFAULT_SERVER_URL must be an HTTPS origin')
+          print(f'server=https://{server.hostname.lower()}')
           PY
       - name: Require multi-architecture relay and edge images for this tag
         shell: bash
@@ -81,11 +86,11 @@ jobs:
       - name: Build both packages
         id: build
         env:
-          ORIGIN: ${{ steps.endpoints.outputs.origin }}
+          SERVER: ${{ steps.endpoints.outputs.server }}
         shell: bash
         run: |
           set -euo pipefail
-          export PAPERBOAT_SELFHOST_ADDRESS_URL="$ORIGIN/selfhost/address"
+          export PAPERBOAT_SELFHOST_ADDRESS_URL="$SERVER/selfhost/address"
           export PAPERBOAT_SELFHOST_RELAY_IMAGE="ghcr.io/$GITHUB_REPOSITORY/relay:$RELEASE_VERSION"
           export PAPERBOAT_SELFHOST_EDGE_IMAGE="ghcr.io/$GITHUB_REPOSITORY/edge:$RELEASE_VERSION"
           out="$GITHUB_WORKSPACE/.build/selfhost"
