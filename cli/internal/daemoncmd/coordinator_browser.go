@@ -278,7 +278,7 @@ func (c *Coordinator) observeBrowserTrustFailure(ctx context.Context, err error)
 	if !reported {
 		c.observe(ctx, "browser_certificate", err)
 	}
-	diagnosticlog.TryInfo("browser URLs are unavailable: the local browser certificate could not be installed; machine access is unaffected")
+	diagnosticlog.TryWarn("browser URLs are unavailable: the local browser certificate could not be installed; machine access is unaffected", "error", err)
 }
 
 // browserListenerPorts are the machine ports that get a per-port listener: https://<machine>:<port>.

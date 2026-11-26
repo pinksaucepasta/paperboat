@@ -63,6 +63,7 @@ func TestLinuxSystemTrustInstallActivatesAndIsIdempotent(t *testing.T) {
 
 type fakeNSSDatabase struct {
 	certificates map[string][]byte
+	trust        map[string]string // per certificate key; absent means "C,," (what -A -t C,, sets)
 }
 
 func (db *fakeNSSDatabase) run(_ context.Context, args ...string) ([]byte, error) {
@@ -107,7 +108,11 @@ func (db *fakeNSSDatabase) run(_ context.Context, args ...string) ([]byte, error
 		var listing strings.Builder
 		for key := range db.certificates {
 			if strings.HasPrefix(key, database+"\x00") {
-				fmt.Fprintln(&listing, strings.TrimPrefix(key, database+"\x00"), "C,,")
+				trust := "C,,"
+				if flags, ok := db.trust[key]; ok {
+					trust = flags
+				}
+				fmt.Fprintln(&listing, strings.TrimPrefix(key, database+"\x00"), trust)
 			}
 		}
 		return []byte(listing.String()), nil
@@ -124,6 +129,15 @@ func (db *fakeNSSDatabase) run(_ context.Context, args ...string) ([]byte, error
 		return nil, nil
 	case "-D":
 		delete(db.certificates, database+"\x00"+nickname)
+		return nil, nil
+	case "-M":
+		if _, ok := db.certificates[database+"\x00"+nickname]; !ok {
+			return nil, errors.New("certificate not found")
+		}
+		if db.trust == nil {
+			db.trust = map[string]string{}
+		}
+		db.trust[database+"\x00"+nickname] = args[len(args)-1]
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unexpected certutil operation %q", args[0])
@@ -450,5 +464,57 @@ func TestLinuxUserTrustInstallsTheActiveRootDespiteAnUnretirableOldEntry(t *test
 	}
 	if !bytes.Equal(fake.certificates[profile+"\x00"+localTrustNickname(oldRoot)], stranger) {
 		t.Fatal("foreign material under an old nickname was changed")
+	}
+}
+
+// certutil -A writes the certificate and its trust apart: a write killed between them (dadape, 2026-11-26) left
+// Paperboat's own root without SSL trust under a pending receipt, and every later pass refused it. The next pass
+// finishes that install; a root without trust and without our pending receipt stays preserved.
+func TestLinuxUserTrustFinishesAnInstallCutOffBeforeItsTrust(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("browser trust refuses root by design; this runs in the unprivileged test step")
+	}
+	_, _, rootPEM := renewalFixture(t, 365)
+	root, err := parseLocalTrustRoot(rootPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owned := range []bool{true, false} {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+		profile := filepath.Join(home, ".mozilla", "firefox", "profile.default")
+		if err = os.MkdirAll(profile, 0700); err != nil {
+			t.Fatal(err)
+		}
+		uid := uint32(os.Geteuid())
+		databases := []linuxNSSDatabase{{Path: profile, Create: true}}
+		key := profile + "\x00" + localTrustNickname(root)
+		fake := &fakeNSSDatabase{}
+		if owned {
+			cutOff := func(ctx context.Context, args ...string) ([]byte, error) {
+				out, err := fake.run(ctx, args...)
+				if err == nil && args[0] == "-A" {
+					fake.trust = map[string]string{key: ",,"} // the certificate landed, its trust did not
+					return nil, errors.New("signal: killed")
+				}
+				return out, err
+			}
+			if err = installLinuxUserTrustDatabases(t.Context(), home, uid, root, rootPEM, databases, cutOff); err == nil {
+				t.Fatal("setup: the cut-off install reported success")
+			}
+		} else {
+			_, _ = fake.run(t.Context(), "-N", "-d", "sql:"+profile)
+			block, _ := pem.Decode(rootPEM)
+			fake.certificates = map[string][]byte{key: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes})}
+			fake.trust = map[string]string{key: ",,"}
+		}
+		err = installLinuxUserTrustDatabases(t.Context(), home, uid, root, rootPEM, databases, fake.run)
+		if owned && (err != nil || fake.trust[key] != "C,,") {
+			t.Fatalf("our cut-off install was not finished: err=%v trust=%q", err, fake.trust[key])
+		}
+		if !owned && (!errors.Is(err, errNSSRootWithoutSSLTrust) || fake.trust[key] != ",,") {
+			t.Fatalf("a root without trust that we did not start installing was changed: err=%v trust=%q", err, fake.trust[key])
+		}
 	}
 }

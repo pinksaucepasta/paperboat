@@ -177,6 +177,14 @@ func installLinuxUserTrustDatabases(ctx context.Context, home string, uid uint32
 			return errors.New("invalid Paperboat browser trust receipt; preserved")
 		}
 		present, err := nssLocalRootTrusted(ctx, database.Path, certificate, run)
+		if errors.Is(err, errNSSRootWithoutSSLTrust) && entryIndex >= 0 && receipt.Databases[entryIndex].State == "pending" {
+			// Our own add was cut off between the certificate and its trust (NSS writes them apart): finish it. A
+			// root without trust and without our pending receipt is someone's choice and stays preserved.
+			if _, err = run(ctx, "-M", "-d", "sql:"+database.Path, "-n", localTrustNickname(certificate), "-t", "C,,"); err != nil {
+				return fmt.Errorf("finish the interrupted browser certificate install in %s: %w", filepath.Base(database.Path), err)
+			}
+			present = true
+		}
 		if err != nil {
 			return fmt.Errorf("inspect browser certificate database %s: %w", filepath.Base(database.Path), err)
 		}
@@ -718,6 +726,8 @@ func nssHotJournal(database string) bool {
 	return false
 }
 
+var errNSSRootWithoutSSLTrust = errors.New("Paperboat NSS root exists without SSL trust; existing trust settings preserved")
+
 func nssLocalRoot(ctx context.Context, database string, certificate *x509.Certificate, run nssCommand, requireSSLTrust bool) (bool, error) {
 	nickname := localTrustNickname(certificate)
 	var recoveryErr error
@@ -748,7 +758,7 @@ func nssLocalRoot(ctx context.Context, database string, certificate *x509.Certif
 		}
 		trust := strings.Split(fields[len(fields)-1], ",")
 		if requireSSLTrust && (len(trust) != 3 || !strings.Contains(trust[0], "C")) {
-			return false, errors.New("Paperboat NSS root exists without SSL trust; existing trust settings preserved")
+			return false, errNSSRootWithoutSSLTrust
 		}
 		return true, nil
 	}
