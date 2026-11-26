@@ -122,8 +122,8 @@ github.com/pingcap/errors v0.11.4 h1:lFuQV/oaUMGcD2tqt+01ROSmJs75VG1ToEOkZIZ4nE4
 github.com/pingcap/errors v0.11.4/go.mod h1:Oi8TUi2kEtXXLMJk9l1cGmz20kV3TaQ0usTwv5KuLY8=
 github.com/pinksaucepasta/quic-go v0.61.1-paperboat.1 h1:vInCSALM9fquGpn6PsSNjtOr7+PIYhfUmAzNwUjwiwE=
 github.com/pinksaucepasta/quic-go v0.61.1-paperboat.1/go.mod h1:9So2anK4Tp22URSQq00k+Vo2PNkle96ycDPDHL4s9vs=
-github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261126045526-ad241c8dd239 h1:1MlUzgO9bB65AyftrD2OFizneWJRICGu/9h1KBdVJZs=
-github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261126045526-ad241c8dd239/go.mod h1:pNl682NgUoac2/Um3khv8pduX3D1YPBZTL067+zo8wY=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261126050016-15c228d4760a h1:PDtRL1afvsDcf6ivJycMy0riXQR4PUIo9ZPqE8pt5c4=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261126050016-15c228d4760a/go.mod h1:pNl682NgUoac2/Um3khv8pduX3D1YPBZTL067+zo8wY=
 github.com/pires/go-proxyproto v0.15.0 h1:dTshmNbFm/D+0+sbrxUuddPOZ5Y0B7c5NhtsBkm6LqI=
 github.com/pires/go-proxyproto v0.15.0/go.mod h1:OXsCrKwrK2tXS9YrI5tkHx5xaQlO8FH3lFW76orFh24=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
