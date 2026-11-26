@@ -87,6 +87,11 @@ func startSSHCommandServer(t *testing.T, host, client ssh.Signer, behavior sshCo
 				return
 			}
 			result.err = behavior(channel, payload.Command)
+			// End as sshd does: close the channel and let the client end the connection. Closing TCP here with the
+			// client's last messages unread resets it, and Windows then drops the exit status it had not read yet.
+			_ = channel.Close()
+			_ = remote.SetDeadline(time.Now().Add(time.Second))
+			_ = connection.Wait()
 			return
 		}
 		result.err = errors.New("SSH exec request missing")
