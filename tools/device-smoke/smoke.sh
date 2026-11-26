@@ -1077,10 +1077,12 @@ release_gap() { # release_gap WHAT_ELSE_IS_MISSING
 }
 
 # F14-06: an official install updates itself at the configured time. Runs only when SMOKE_SCHEDULED_UPDATE=1 and
-# the device is a paired official install older than the newest official release (it takes about 10 minutes).
+# the device is a paired official install older than the newest official release (it takes about 10 minutes);
+# SMOKE_UPDATE_PEER names a second machine that exchanges files with it during and after the activation.
 test_update_scheduled() {
   skipped update-scheduled && return
   [ "${SMOKE_SCHEDULED_UPDATE:-}" = 1 ] || { record update-scheduled "NOT RUN" 0 "$(release_gap "the device is not a paired official install on SMOKE_RELEASE_OLD (SMOKE_SCHEDULED_UPDATE=1)")"; return 0; }
+  [ -n "${SMOKE_UPDATE_PEER:-}" ] || { record update-scheduled "NOT RUN" 0 "$(release_gap "SMOKE_UPDATE_PEER (a second paired Unix machine to exchange files with during the update) is not set")"; return 0; }
   local device id out status t0
   for device in "${TLIST[@]}"; do
     id="update-scheduled:$device"
@@ -1090,9 +1092,9 @@ test_update_scheduled() {
       record "$id" FAIL 0 "could not stage the device fixture"
       continue
     fi
-    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_scheduled.py" 2>&1); status=$?
-    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-scheduled" and r["status"]=="PASS" and r["disabled_stayed_put"] and r["settings_restored"]' "$out" 2>/dev/null; then
-      record "$id" PASS $(( $(now)-t0 )) "disabled stayed put; at the configured time the machine reached $(python3 -c 'import json,sys;print(json.loads(sys.argv[1].strip().splitlines()[-1])["to"])' "$out") by itself; doctor healthy; settings restored"
+    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_scheduled.py --me $(printf %q "$device") --peer $(printf %q "$SMOKE_UPDATE_PEER")" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-scheduled" and r["status"]=="PASS" and r["disabled_stayed_put"] and r["settings_restored"] and r["transfers_both_ways"]' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "disabled stayed put; at the configured time the machine reached $(python3 -c 'import json,sys;print(json.loads(sys.argv[1].strip().splitlines()[-1])["to"])' "$out") by itself; files arrived both ways during and after activation; doctor healthy; settings restored"
     else
       record_command_failure "$id" $(( $(now)-t0 )) "$out"
     fi

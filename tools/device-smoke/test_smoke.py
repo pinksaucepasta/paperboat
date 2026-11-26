@@ -628,15 +628,20 @@ TLIST=($DEVICES)
         self.assertEqual(update_scheduled.utc_stamp('2026-11-10T22:30:00Z'), '2026-11-10T22:30')
 
     def test_update_scheduled_runs_only_when_asked_and_reports_where_the_machine_went(self):
-        good = json.dumps({'check': 'update-scheduled', 'status': 'PASS', 'from': '2026.10.25.1', 'to': '2026.10.26.0',
+        good = json.dumps({'check': 'update-scheduled', 'status': 'PASS', 'transfers_both_ways': True,
+                           'from': '2026.10.25.1', 'to': '2026.10.26.0',
                            'disabled_stayed_put': True, 'settings_restored': True})
-        out, calls = self.run_new_check('test_update_scheduled', {'SMOKE_SCHEDULED_UPDATE': '1'}, good)
+        asked = {'SMOKE_SCHEDULED_UPDATE': '1', 'SMOKE_UPDATE_PEER': 'boxb'}
+        out, calls = self.run_new_check('test_update_scheduled', asked, good)
         self.assertRegex(out, r'update-scheduled:boxa\s+PASS')
         self.assertIn('2026.10.26.0', out)
         self.assertIn('update_scheduled.py', calls)
         stayed = json.dumps(dict(json.loads(good), disabled_stayed_put=False))
-        out, _ = self.run_new_check('test_update_scheduled', {'SMOKE_SCHEDULED_UPDATE': '1'}, stayed)
+        out, _ = self.run_new_check('test_update_scheduled', asked, stayed)
         self.assertRegex(out, r'update-scheduled:boxa\s+FAIL')
+        out, alone = self.run_new_check('test_update_scheduled', {'SMOKE_SCHEDULED_UPDATE': '1'}, good)  # no second machine
+        self.assertRegex(out, r'update-scheduled\s+NOT RUN')
+        self.assertNotIn('update_scheduled.py', alone)
         out, calls = self.run_new_check('test_update_scheduled', {}, good)  # not asked: its own NOT RUN line, nothing runs, never PASS
         self.assertRegex(out, r'update-scheduled\s+NOT RUN\s+0s\s+no older official release of the current code')
         self.assertNotIn('update_scheduled.py', calls)
@@ -1025,7 +1030,7 @@ class ScheduledUpdateCheck(unittest.TestCase):
     """update_scheduled.py against a simulated official machine and a fake clock (no minute is waited)."""
 
     class World:
-        def __init__(self, updates_when_disabled=False, never_updates=False):
+        def __init__(self, updates_when_disabled=False, never_updates=False, stalls_inbound=False):
             import datetime
             self.datetime = datetime
             self.time = datetime.datetime(2026, 10, 26, 8, 55, 30, tzinfo=datetime.timezone.utc)
@@ -1034,6 +1039,7 @@ class ScheduledUpdateCheck(unittest.TestCase):
             self.updates_when_disabled, self.never_updates = updates_when_disabled, never_updates
             self.runtime = self.version
             self.invoked = []
+            self.stalls_inbound, self.activated_at, self.sends = stalls_inbound, None, []
 
         def now(self):
             return self.time
@@ -1050,11 +1056,23 @@ class ScheduledUpdateCheck(unittest.TestCase):
             fired = self.time.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if (self.enabled or self.updates_when_disabled) and before < fired <= self.time and not self.never_updates:
                 self.version = self.runtime = self.latest
+                self.activated_at = self.time
+
+        def pending(self):  # the stability window after the swap
+            return self.activated_at is not None and self.time - self.activated_at < self.datetime.timedelta(minutes=10)
 
         def invoke(self, binary, *args, raw=False, **kwargs):
             self.invoked.append(args)
             if args[:1] == ('--version',):
                 return json.dumps({'ok': True, 'data': {'version': self.version}})
+            if args[0] in ('send', 'exec'):
+                direction = 'out' if args[0] == 'send' else 'in'
+                assert kwargs['timeout'] == 30, kwargs
+                self.sends.append((direction, self.pending()))
+                if direction == 'in' and self.stalls_inbound and self.pending():
+                    import pairing_lifecycle
+                    raise pairing_lifecycle.CommandFailed('0 B / 64 KiB, Operation canceled')
+                return ''
             assert args[:2] == ('update', 'settings') or args[0] == 'update', args
             if args[1] == 'settings':
                 for index, value in enumerate(args):
@@ -1068,7 +1086,7 @@ class ScheduledUpdateCheck(unittest.TestCase):
                 return {'data': {'settings': {'enabled': self.enabled, 'local_time': self.local_time},
                                  'next_maintenance_at': self.next_run().strftime('%Y-%m-%dT%H:%M:%SZ'),
                                  'cli_version': self.version, 'runtime_version': self.runtime,
-                                 'activation_pending': False, 'update_available': self.version != self.latest}}
+                                 'activation_pending': self.pending(), 'update_available': self.version != self.latest}}
             if args[1] == 'check':
                 return {'data': {'installed_version': self.version, 'latest_version': self.latest,
                                  'update_available': self.version != self.latest, 'verified': True}}
@@ -1077,6 +1095,8 @@ class ScheduledUpdateCheck(unittest.TestCase):
             raise AssertionError('the check must never install an update itself: %r' % (args,))
 
         def doctor(self, *args, **kwargs):
+            if 'exec' in args:  # the check's own cleanup on the peer
+                return SimpleNamespace(returncode=0, stdout='')
             return SimpleNamespace(returncode=0, stdout=json.dumps({'ok': True, 'data': {'overall': 'healthy', 'checks': [
                 {'code': 'machine_guard_version', 'status': 'pass'}]}}))
 
@@ -1085,18 +1105,26 @@ class ScheduledUpdateCheck(unittest.TestCase):
         clock = SimpleNamespace(now=world.now, sleep=world.sleep)
         with patch.object(update_scheduled, 'clock', clock), patch.object(update_scheduled.p, 'invoke', world.invoke), \
                 patch.object(update_scheduled.p, 'command_result', world.doctor), patch.object(update_scheduled, 'READY_SECONDS', 600), \
-                patch.object(sys, 'argv', ['update_scheduled.py']):
+                patch.object(sys, 'argv', ['update_scheduled.py', '--me', 'boxa', '--peer', 'boxb']):
             import io, contextlib
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 update_scheduled.main()
             return json.loads(out.getvalue().strip().splitlines()[-1])
 
+    def test_a_transfer_that_stalls_while_the_activation_is_pending_fails_the_row_and_restores_settings(self):
+        world = self.World(stalls_inbound=True)
+        with self.assertRaisesRegex(AssertionError, 'during-activation: a file send into this machine did not complete within 30 s'):
+            self.run_check(world)
+        self.assertEqual((world.enabled, world.local_time), (True, '04:00'))
+
     def test_the_machine_updates_by_itself_at_the_configured_time_and_settings_are_restored(self):
         world = self.World()
         receipt = self.run_check(world)
         self.assertTrue(receipt['status'] == 'PASS' and receipt['to'] == '2026.10.26.0' and receipt['disabled_stayed_put'], receipt)
         self.assertEqual((world.enabled, world.local_time), (True, '04:00'))
+        self.assertEqual(world.sends, [('in', True), ('out', True), ('in', False), ('out', False)])
+        self.assertTrue(receipt['transfers_both_ways'])
         self.assertFalse(any(args[:2] == ('update', '--from') or args[:1] == ('update',) and len(args) > 1 and args[1] == 'install'
                              for args in world.invoked), 'the check must not install an update itself')
         # It downloads the release ahead (update_scheduled.py, F14-06) so the schedule step is not racing a download.

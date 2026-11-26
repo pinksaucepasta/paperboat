@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """F14-06: an official install updates itself at the configured time, and the settings persist and disable.
 
-Usage: update_scheduled.py [--lead-minutes N]
+Usage: update_scheduled.py --me NAME --peer NAME [--lead-minutes N]
 Run on a paired, healthy official install that is older than the newest official release (`pb update
 check` says an update is available). Nothing here installs: the machine must do that on its own (the release is only
 downloaded ahead).
@@ -10,13 +10,16 @@ downloaded ahead).
   2. enabled: `--auto=true --time T2` persists with the next maintenance at T2; before T2 the machine is
      still on its version; after T2 it is on the newest official release (the `latest_version` that
      `pb update check` reported), doctor is healthy, the guard runs the same version, activation is done
-     and the next maintenance moved to the next day
+     and the next maintenance moved to the next day. While the activation is still pending, and again after it,
+     a small file arrives within 30 s both ways: from the PEER machine into this one and from this one to the peer
   3. the original settings are restored, also when a step fails.
 """
 import argparse
 import datetime
 import json
 import os
+import pathlib
+import tempfile
 import time
 
 import pairing_lifecycle as p
@@ -44,6 +47,11 @@ clock = Clock()
 READY_SECONDS = int(os.environ.get('PAPERBOAT_SMOKE_READY_SECONDS', '600'))
 # A new version is not 'activation complete' until its stability window (about 10 minutes) passes; settings are refused until then.
 ACTIVATION_SECONDS = int(os.environ.get('PAPERBOAT_SMOKE_ACTIVATION_SECONDS', '900'))
+SEND_SECONDS = 30
+# runs on the peer: sends a new 64 KiB file to this machine as a plain shell would (inside `pb exec` the session's
+# PAPERBOAT_* variables make `pb send` expect a terminal session), then removes it
+PEER_SEND = ('unset $(env | grep -o "^PAPERBOAT_[A-Z_]*"); d=$(mktemp -d) && head -c 65536 /dev/urandom >"$d/$0" && '
+             '"$HOME/.local/bin/pb" send "$d/$0" --to "$1"; r=$?; rm -rf "$d"; exit $r')
 
 
 def run(*args, timeout=90):
@@ -82,6 +90,32 @@ def wait_until(deadline, condition, what):
     raise AssertionError('timed out waiting for ' + what)
 
 
+def transfers(me, peer, phase):
+    """A small file arrives within SEND_SECONDS both ways: the peer sends into this machine, this machine sends out."""
+    name = 'updcheck-%s.bin' % phase
+    with tempfile.TemporaryDirectory() as folder:
+        path = pathlib.Path(folder, name)
+        path.write_bytes(os.urandom(65536))
+        for direction, args in (
+                ('into this machine', ('exec', peer, '--timeout', '%ds' % SEND_SECONDS, '--', 'sh', '-c', PEER_SEND, name, me)),
+                ('out of this machine', ('send', str(path), '--to', peer))):
+            try:
+                p.invoke(PB, *args, raw=True, timeout=SEND_SECONDS)
+            except (RuntimeError, p.CommandTimeout) as error:
+                raise AssertionError('%s: a file send %s did not complete within %d s: %s'
+                                     % (phase, direction, SEND_SECONDS, error)) from None
+    # best effort: the received copies are this check's own files
+    p.command_result(PB, 'exec', peer, '--', 'sh', '-c', 'rm -f "$HOME/Paperboat/Inbox/$0"', name, timeout=30)
+    pathlib.Path.home().joinpath('Paperboat', 'Inbox', name).unlink(missing_ok=True)
+
+
+def activation_pending():
+    try:  # the daemon and updater restart while the new version activates
+        return status()['activation_pending'] is True
+    except (RuntimeError, ValueError, p.CommandTimeout):
+        return False
+
+
 def disabled_phase(before):
     target, text = at_minute(2)
     run('update', 'settings', '--auto=false', '--time', text)
@@ -99,7 +133,7 @@ def utc_stamp(stamp):
     return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00')).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M')
 
 
-def scheduled_phase(lead, before, latest):
+def scheduled_phase(lead, before, latest, me, peer):
     target, text = at_minute(lead)
     run('update', 'settings', '--auto=true', '--time', text)
     current = settings()
@@ -113,6 +147,9 @@ def scheduled_phase(lead, before, latest):
     updated_at = clock.now()
     assert updated_at >= target - datetime.timedelta(seconds=60), \
         'updated %d s before the configured time' % (target - updated_at).total_seconds()
+    wait_until(clock.now() + datetime.timedelta(seconds=120), activation_pending,
+               'update status to report the activation of %s as pending' % latest)
+    transfers(me, peer, 'during-activation')
 
     def settled():
         try:  # the daemon and updater restart while the new version activates
@@ -126,6 +163,7 @@ def scheduled_phase(lead, before, latest):
         return (state['runtime_version'] == latest and state['activation_pending'] is False
                 and p.doctor_healthy(report) and (not guard or guard[0].get('status') == 'pass'))
     wait_until(clock.now() + datetime.timedelta(seconds=ACTIVATION_SECONDS), settled, 'doctor healthy, activation done and the guard on %s' % latest)
+    transfers(me, peer, 'after-activation')
     next_run = status()['next_maintenance_at']
     assert utc_stamp(next_run)[:16] > utc_minute(target + datetime.timedelta(hours=1)), \
         'next maintenance did not move to the next day: %r' % next_run
@@ -148,6 +186,8 @@ def restore(original):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--me', required=True, help='this machine\'s Paperboat name')
+    parser.add_argument('--peer', required=True, help='a second paired Unix machine to exchange files with')
     parser.add_argument('--lead-minutes', type=int, default=3)
     args = parser.parse_args()
     original = settings()
@@ -162,7 +202,7 @@ def main():
     run('update', 'download', timeout=300)
     try:
         disabled_time = disabled_phase(before)
-        time_set, seconds_after, next_run = scheduled_phase(args.lead_minutes, before, latest)
+        time_set, seconds_after, next_run = scheduled_phase(args.lead_minutes, before, latest, args.me, args.peer)
     finally:
         restore(original)
     restored = settings()
@@ -171,7 +211,7 @@ def main():
     print(json.dumps({'check': 'update-scheduled', 'status': 'PASS', 'from': before, 'to': latest,
                       'disabled_stayed_put': True, 'configured_time': time_set, 'disabled_time': disabled_time,
                       'seconds_after_configured_time': seconds_after, 'next_maintenance_at': next_run,
-                      'settings_restored': True, 'enrollment_preserved': True}), flush=True)
+                      'settings_restored': True, 'enrollment_preserved': True, 'transfers_both_ways': True}), flush=True)
 
 
 if __name__ == '__main__':
