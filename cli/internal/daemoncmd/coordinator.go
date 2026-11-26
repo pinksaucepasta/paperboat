@@ -661,8 +661,6 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemo
 }
 
 func (c *Coordinator) Stop() error {
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), connectTimeout)
-	defer shutdownCancel()
 	c.resetReconcileRetry()
 	// Cancel first: every reconcile stage ends at once, so mu is free after at most one in-flight certutil write
 	// (machineguard nssWriteBudget, 10 s) and a cancelled guard call; cleanup then has connectTimeout (5 s): Stop
@@ -673,6 +671,9 @@ func (c *Coordinator) Stop() error {
 	}
 	c.lifeMu.Unlock()
 	c.mu.Lock()
+	// Cleanup's budget starts once mu is held: the wait for an in-flight write above never spends it.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), connectTimeout)
+	defer shutdownCancel()
 	server, listener, cancel := c.rpcServer, c.rpcListener, c.cancel
 	c.rpcServer, c.rpcListener, c.ctx, c.cancel, c.running = nil, nil, nil, nil, false
 	routes, webRoutes, nameClient := c.routes, c.webRoutes, c.nameClient

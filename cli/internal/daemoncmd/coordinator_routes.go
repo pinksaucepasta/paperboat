@@ -141,10 +141,11 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	stage, cancelStage := c.stageCtx(c.cfg.ReconcileTimeout)
 	defer cancelStage()
 	err = c.replaceGuardedRoutesLocked(stage, peers)
+	// Only Stop's cancellation (c.ctx) rules out a retry: the failed step may be a later stage with its own budget.
 	// A guard that restarted (an update or self-heal replaced it) or answered too slowly leaves this connection
 	// dead (the failed step dropped it): on a timeout or closed connection, dial once more within this reconcile.
 	var op coordinatorOperationError
-	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(stage, err) && errors.As(err, &op) &&
+	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(c.ctx, err) && errors.As(err, &op) &&
 		(op.LocalAccessStep() == "guard_status" || op.LocalAccessStep() == "native_listener") {
 		diagnosticlog.TryWarn("machine guard did not answer; dialing it again", "error", err)
 		// The failed attempt spent most of its budget: the retry gets a full one of its own, ended by Stop.

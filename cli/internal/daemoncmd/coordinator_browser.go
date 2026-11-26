@@ -71,7 +71,13 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	}
 	state := &browserGatewayState{}
 	state.set(routes, byAddress, denied)
+	life := c.ctx // the handshake's certificate and trust steps also end when Stop cancels the coordinator
 	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{DeniedHosts: denied, Domain: c.localDomain(), Routes: routes, IssueCertificate: func(certCtx context.Context, hostname string) (tls.Certificate, error) {
+		certCtx, cancel := context.WithCancel(certCtx)
+		defer cancel()
+		if life != nil {
+			defer context.AfterFunc(life, cancel)()
+		}
 		current, _, deniedNow := state.get()
 		if deniedNow[hostname] {
 			return tls.Certificate{}, errors.New("configured browser alias destination is unavailable")

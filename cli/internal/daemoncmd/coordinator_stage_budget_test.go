@@ -6,10 +6,13 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/cli/internal/testcert"
 )
 
@@ -118,5 +121,92 @@ func TestStopEndsAReconcileStagePromptly(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the reconcile did not end after Stop")
+	}
+}
+
+// Stop waits out a certutil write that outlives the cancellation (it runs to its own bound so the store stays
+// whole); cleanup's budget starts after that wait, so it still finishes and the coordinator starts again.
+func TestStopAfterAWriteLongerThanCleanupsBudgetStillCleansUp(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var slow atomic.Bool
+	entered := make(chan struct{}, 1)
+	c, err := NewCoordinator(CoordinatorConfig{
+		SocketAddress: socketAddress(shorttemp.Dir(t)), NameClient: &coordinatorNameClient{},
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") },
+		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+			if slow.Load() {
+				entered <- struct{}{}
+				time.Sleep(connectTimeout + 500*time.Millisecond) // a write that ignores cancellation
+			}
+			return ca.TLS(name)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	a := &daemonrpc.PeerUpdate{PeerId: "a", Alias: "laptop", AssignedIp: "127.100.0.24", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	b := &daemonrpc.PeerUpdate{PeerId: "b", Alias: "desktop", AssignedIp: "127.100.0.25", Approved: true, Online: true, ExportedPorts: []int32{8081}}
+	if err = c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{a}); err != nil {
+		t.Fatal(err)
+	}
+	slow.Store(true)
+	go func() { _ = c.replaceGuardedRoutes(context.Background(), []*daemonrpc.PeerUpdate{a, b}) }()
+	<-entered
+	if err = c.Stop(); err != nil {
+		t.Fatalf("Stop after a long write: %v", err)
+	}
+	c.mu.Lock()
+	left := len(c.cleanups)
+	c.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d cleanups left after Stop; the next Start would be refused", left)
+	}
+	slow.Store(false)
+	if err = c.Start(t.Context()); err != nil {
+		t.Fatalf("Start after Stop: %v", err)
+	}
+	_ = c.Stop()
+}
+
+// A transient guard failure in a later stage is retried even when an earlier stage ran out its own budget: only
+// Stop's cancellation rules a retry out.
+func TestALaterStagesTransientFailureIsRetriedAfterASlowEarlierStage(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dials := 0
+	c, err := NewCoordinator(CoordinatorConfig{
+		SocketAddress: socketAddress(shorttemp.Dir(t)), ReconcileTimeout: 200 * time.Millisecond,
+		ConnectNameClient: func(context.Context) (guardedNameClient, error) {
+			dials++
+			client := &coordinatorNameClient{}
+			if dials == 1 {
+				client.failApply = os.ErrDeadlineExceeded // the policy apply stage times out once
+			}
+			return client, nil
+		},
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") },
+		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+			time.Sleep(400 * time.Millisecond) // the first stage outlives its budget
+			return ca.TLS(name)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Stop() })
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.26", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err = c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil || dials != 2 {
+		t.Fatalf("err=%v dials=%d; want the policy apply retried on a fresh guard connection", err, dials)
 	}
 }

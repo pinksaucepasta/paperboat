@@ -44,7 +44,21 @@ type linuxUserTrustDatabaseReceipt struct {
 	State string `json:"state"`
 }
 
-var linuxUserTrustMu sync.Mutex
+// linuxUserTrustMu serializes NSS trust changes; waiting for it honours ctx so a handshake or reconcile that ends
+// never stays queued behind another one's certutil writes.
+var linuxUserTrustMu = make(chan struct{}, 1)
+
+func lockLinuxUserTrust(ctx context.Context) error {
+	select {
+	case linuxUserTrustMu <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for another browser certificate store change: %w", ctx.Err())
+	}
+}
+
+func unlockLinuxUserTrust() { <-linuxUserTrustMu }
+
 var linuxUserTrustCache struct {
 	sync.Mutex
 	entries map[string]linuxUserTrustCacheEntry
@@ -91,8 +105,10 @@ func installLinuxUserTrust(ctx context.Context, certificatePEM []byte, run nssCo
 	}
 	linuxUserTrustCache.Unlock()
 
-	linuxUserTrustMu.Lock()
-	defer linuxUserTrustMu.Unlock()
+	if err := lockLinuxUserTrust(ctx); err != nil {
+		return err
+	}
+	defer unlockLinuxUserTrust()
 	linuxUserTrustCache.Lock()
 	if cached, ok := linuxUserTrustCache.entries[cacheKey]; ok && cached.paths == paths && time.Now().Before(cached.until) {
 		linuxUserTrustCache.Unlock()
@@ -201,8 +217,10 @@ func installLinuxUserTrustDatabases(ctx context.Context, home string, uid uint32
 }
 
 func removeLinuxUserTrust(ctx context.Context, certificatePEM []byte, run nssCommand) error {
-	linuxUserTrustMu.Lock()
-	defer linuxUserTrustMu.Unlock()
+	if err := lockLinuxUserTrust(ctx); err != nil {
+		return err
+	}
+	defer unlockLinuxUserTrust()
 	certificate, err := parseLocalTrustRoot(certificatePEM)
 	if err != nil {
 		return err
@@ -215,8 +233,10 @@ func removeLinuxUserTrust(ctx context.Context, certificatePEM []byte, run nssCom
 }
 
 func cleanupLinuxUserTrust(ctx context.Context, run nssCommand) error {
-	linuxUserTrustMu.Lock()
-	defer linuxUserTrustMu.Unlock()
+	if err := lockLinuxUserTrust(ctx); err != nil {
+		return err
+	}
+	defer unlockLinuxUserTrust()
 	err := cleanupLinuxUserTrustExcept(ctx, nil, run)
 	if err == nil {
 		clearLinuxUserTrustCache()

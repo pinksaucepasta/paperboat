@@ -132,3 +132,19 @@ func TestNSSHealsAWriteKilledAtItsBound(t *testing.T) {
 		t.Fatalf("store still unreadable: %v", err)
 	}
 }
+
+// A trust change queued behind another one's certutil writes gives up when its caller does (a handshake or a
+// stopping reconcile), instead of waiting out the other change.
+func TestUserTrustWaitEndsWithItsCaller(t *testing.T) {
+	if err := lockLinuxUserTrust(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer unlockLinuxUserTrust()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := removeLinuxUserTrust(ctx, nil, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 2*time.Second {
+		t.Fatalf("err=%v after %v; want the wait to end with the caller's deadline", err, time.Since(started))
+	}
+}
