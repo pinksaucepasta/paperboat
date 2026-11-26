@@ -38,7 +38,7 @@ sha=$(git rev-parse --short HEAD)
 
 echo "remote-test: syncing $sha to $host:pb-remote-test/$worktree" >&2
 ssh -o BatchMode=yes "$host" "mkdir -p pb-remote-test/$worktree"
-rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remote-test/$worktree/"
+rsync -az --checksum --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remote-test/$worktree/"
 
 # The quoted heredoc is the remote script; arguments are passed as positional parameters (no re-parsing).
 echo "remote-test: $host: go test -p 2 $* ($module)" >&2
