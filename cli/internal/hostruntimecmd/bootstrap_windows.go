@@ -332,14 +332,20 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 	}()
 
+	fmt.Fprintln(stderr, "Starting the machine services...")
 	if err := elevation.RunRuntimeService(ctx, elevatedPath, elevation.ActionInstallCommit, request); err != nil {
 		return fmt.Errorf("install Paperboat Windows host runtime: %w", err)
 	}
+	fmt.Fprintln(stderr, "Setting up encrypted environment...")
 	environmentErr := hostruntime.PreparePairEnvironment(ctx, *stateRoot, material.ControlURL, httptransport.Default())
 	if err := bootstrap.ClearResume(*stateRoot); err != nil {
 		return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 	}
-	return reportPairEnvironment(stdout, environmentErr, "Paperboat Windows machine runtime is installed. It will resume after reboot.")
+	ready := "Paperboat Windows machine runtime is installed. It will resume after reboot."
+	if material.Alias != "" {
+		ready = namedReadyMessage(pairedReadyMessage, material.Alias)
+	}
+	return reportPairEnvironment(stdout, environmentErr, ready)
 }
 
 func ensureWindowsRuntimeEnrollment(ctx context.Context, material bootstrap.Material, stateRoot string) error {

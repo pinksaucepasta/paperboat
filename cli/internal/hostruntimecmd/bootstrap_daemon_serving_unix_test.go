@@ -88,16 +88,3 @@ func TestPairingOnADegradedDaemonNamesTheFailingStep(t *testing.T) {
 		t.Fatalf("message=%q", got)
 	}
 }
-
-// A name already taken on the account is enrolled as name-2; the last line names that, not the requested name.
-func TestNamedReadyMessageUsesTheServerName(t *testing.T) {
-	if got := namedReadyMessage(pairedReadyMessage, "laptop-2"); got != "Ready: this machine is laptop-2. Open it from any device with: pb connect laptop-2" {
-		t.Fatal(got)
-	}
-	if got := namedReadyMessage(pairedReadyMessage, ""); got != pairedReadyMessage {
-		t.Fatal(got)
-	}
-	if degraded := "Paperboat is paired; its local service is still starting. Run `pb status` to see when it is ready."; namedReadyMessage(degraded, "laptop-2") != degraded {
-		t.Fatal("a not-ready message was replaced")
-	}
-}

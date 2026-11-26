@@ -15,3 +15,14 @@ func reportPairEnvironment(output io.Writer, environmentErr error, readyMessage 
 	_, err := fmt.Fprintln(output, readyMessage)
 	return err
 }
+
+// pairedReadyMessage is the settled pairing message; bootstrap names the machine and its next step in it.
+const pairedReadyMessage = "Paperboat machine runtime is ready."
+
+// namedReadyMessage names the machine the server enrolled (its -N name after a collision) and the next step.
+func namedReadyMessage(paired, alias string) string {
+	if paired != pairedReadyMessage || alias == "" {
+		return paired
+	}
+	return "Ready: this machine is " + alias + ". Open it from any device with: pb connect " + alias
+}

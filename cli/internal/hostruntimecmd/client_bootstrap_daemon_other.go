@@ -111,17 +111,6 @@ func localAccessOnly(codes []string) bool {
 // still starting (C020, round 9: `pb doctor` right after setup said degraded, healthy seconds later).
 const daemonSettleWindow = 60 * time.Second
 
-// pairedReadyMessage is the settled pairing message; bootstrap names the machine and its next step in it.
-const pairedReadyMessage = "Paperboat machine runtime is ready."
-
-// namedReadyMessage names the machine the server enrolled (its -N name after a collision) and the next step.
-func namedReadyMessage(paired, alias string) string {
-	if paired != pairedReadyMessage || alias == "" {
-		return paired
-	}
-	return "Ready: this machine is " + alias + ". Open it from any device with: pb connect " + alias
-}
-
 // pairedMessage is what pairing prints once the daemon is bound: ready when it settled within
 // daemonSettleWindow, otherwise that it is still starting and where to watch it.
 func pairedMessage(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error)) string {
