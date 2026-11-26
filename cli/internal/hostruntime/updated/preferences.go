@@ -29,13 +29,16 @@ func machineUpdateSettings(root string, enabled bool, value *autoupdate.Preferen
 	return autoupdate.LoadPreferences(path, enabled)
 }
 
+// machineZone is the machine's local calendar; tests set it instead of time.Local, which every live timer reads.
+var machineZone = time.Local
+
 func nextMachineUpdateCheck(root string, enabled bool, now, next time.Time) time.Time {
 	settings, err := machineUpdateSettings(root, enabled, nil)
 	if err != nil || !settings.Enabled {
 		return next
 	}
 	// Scheduler observations are UTC; scheduling uses the machine local calendar.
-	maintenance := settings.NextMaintenance(now.In(time.Local))
+	maintenance := settings.NextMaintenance(now.In(machineZone))
 	if maintenance.After(now) && maintenance.Before(next) {
 		return maintenance
 	}

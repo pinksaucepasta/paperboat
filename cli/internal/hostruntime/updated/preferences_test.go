@@ -10,9 +10,9 @@ import (
 )
 
 func TestMachineSettingsPersistAndRespectOptOut(t *testing.T) {
-	previous := time.Local
-	time.Local = time.FixedZone("device", 19800)
-	t.Cleanup(func() { time.Local = previous })
+	previous := machineZone
+	machineZone = time.FixedZone("device", 19800)
+	t.Cleanup(func() { machineZone = previous })
 	root := t.TempDir()
 	initial, err := machineUpdateSettings(root, true, nil)
 	if err != nil || initial != autoupdate.DefaultPreferences(true) {
@@ -56,9 +56,9 @@ func TestMachineSettingsPersistAndRespectOptOut(t *testing.T) {
 // Scheduler observations use UTC; maintenance still belongs to the machine's
 // local calendar, independently of the observation timestamp's location.
 func TestMachineMaintenanceWakeUsesLocalClockForUTCObservation(t *testing.T) {
-	previous := time.Local
-	time.Local = time.FixedZone("IST", 19800)
-	t.Cleanup(func() { time.Local = previous })
+	previous := machineZone
+	machineZone = time.FixedZone("IST", 19800)
+	t.Cleanup(func() { machineZone = previous })
 	root := t.TempDir()
 	settings := autoupdate.DefaultPreferences(true)
 	if _, err := machineUpdateSettings(root, true, &settings); err != nil {
