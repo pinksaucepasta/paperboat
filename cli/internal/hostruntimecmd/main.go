@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -190,6 +191,8 @@ func runtimeFailureMessage(err error) string {
 		}
 	}
 	switch {
+	case errors.Is(err, service.ErrLifecycleRollbackIncomplete):
+		return "Paperboat installation failed, and restoring the previous version did not finish, so this computer may run parts of both versions. Run pb doctor to see why, fix what it reports, then run pb install again: it finishes the restore first."
 	case errors.Is(err, elevation.ErrElevationRestrictedJob):
 		return elevation.ErrElevationRestrictedJob.Error()
 	case errors.Is(err, bootstrap.ErrEnrollmentTokenExpired):
@@ -299,7 +302,8 @@ func serviceFailureExitCode(err error) int {
 	if errors.Is(err, hostinstall.ErrInsufficientSpace) {
 		return InsufficientSpaceExitCode
 	}
-	if errors.Is(err, hostinstall.ErrUpdateNotReady) {
+	// Exit 79 tells the caller the previous version was restored: never when that restore did not finish.
+	if errors.Is(err, hostinstall.ErrUpdateNotReady) && !errors.Is(err, service.ErrLifecycleRollbackIncomplete) {
 		return UpdateNotReadyExitCode
 	}
 	if errors.Is(err, hostinstall.ErrNoPendingInstallation) {

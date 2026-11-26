@@ -26,6 +26,9 @@ var (
 	ErrLifecycleInvalid   = errors.New("invalid service lifecycle configuration")
 	ErrLifecycleNotReady  = errors.New("native service did not become ready")
 	ErrLifecycleUncertain = errors.New("service lifecycle outcome is uncertain")
+	// ErrLifecycleRollbackIncomplete is a failed operation whose rollback did not finish: the previous version is
+	// not known to be back, and its journal stays for the next start or install to retry.
+	ErrLifecycleRollbackIncomplete = errors.New("restoring the previous version did not finish")
 )
 
 // NativeComponentStatus is the complete state which must survive a failed
@@ -353,34 +356,16 @@ func (m *LifecycleManager) execute(ctx context.Context, operation lifecycleOpera
 	}
 	if operation == lifecycleReplace {
 		if err := replace(ctx); err != nil {
-			rollbackCtx, cancel := context.WithTimeout(context.Background(), m.rollbackTimeout)
-			rollbackErr := m.rollback(rollbackCtx, journal)
-			cancel()
-			if rollbackErr == nil {
-				rollbackErr = m.removeJournal()
-			}
-			return errors.Join(err, rollbackErr)
+			return m.rollbackAfter(err, journal)
 		}
 		return m.removeJournal()
 	}
 	for index, component := range order {
 		if err := applyLifecycleOperation(ctx, component, operation); err != nil {
-			rollbackCtx, cancel := context.WithTimeout(context.Background(), m.rollbackTimeout)
-			rollbackErr := m.rollback(rollbackCtx, journal)
-			cancel()
-			if rollbackErr == nil {
-				rollbackErr = m.removeJournal()
-			}
-			return errors.Join(err, rollbackErr)
+			return m.rollbackAfter(err, journal)
 		}
 		if err := verifyLifecycleOutcome(ctx, component, operation); err != nil {
-			rollbackCtx, cancel := context.WithTimeout(context.Background(), m.rollbackTimeout)
-			rollbackErr := m.rollback(rollbackCtx, journal)
-			cancel()
-			if rollbackErr == nil {
-				rollbackErr = m.removeJournal()
-			}
-			return errors.Join(err, rollbackErr)
+			return m.rollbackAfter(err, journal)
 		}
 		journal.Next = index + 1
 		if err := m.writeJournal(journal); err != nil {
@@ -474,6 +459,21 @@ func validLifecycleOperation(operation lifecycleOperation) bool {
 	default:
 		return false
 	}
+}
+
+// rollbackAfter restores the journaled baseline after err; a rollback that does not finish is named as such, so no
+// caller reports the previous version as restored (a revoked machine whose previous carrier could not start again).
+func (m *LifecycleManager) rollbackAfter(err error, journal lifecycleJournal) error {
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), m.rollbackTimeout)
+	rollbackErr := m.rollback(rollbackCtx, journal)
+	cancel()
+	if rollbackErr == nil {
+		rollbackErr = m.removeJournal()
+	}
+	if rollbackErr != nil {
+		rollbackErr = fmt.Errorf("%w: %w", ErrLifecycleRollbackIncomplete, rollbackErr)
+	}
+	return errors.Join(err, rollbackErr)
 }
 
 func (m *LifecycleManager) rollback(ctx context.Context, journal lifecycleJournal) error {
