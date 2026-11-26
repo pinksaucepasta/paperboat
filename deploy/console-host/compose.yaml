@@ -1,0 +1,19 @@
+# Console host proxy. .env (owner-only): PAPERBOAT_PROXY_IMAGE, PAPERBOAT_CONSOLE_HOST, PAPERBOAT_ADMIN_HOST.
+name: paperboat
+services:
+  proxy:
+    logging: {driver: json-file, options: {max-size: "50m", max-file: "4"}}
+    image: ${PAPERBOAT_PROXY_IMAGE:?set PAPERBOAT_PROXY_IMAGE}
+    restart: unless-stopped
+    environment:
+      PAPERBOAT_CONSOLE_HOST: ${PAPERBOAT_CONSOLE_HOST:?set PAPERBOAT_CONSOLE_HOST}
+      PAPERBOAT_ADMIN_HOST: ${PAPERBOAT_ADMIN_HOST:?set PAPERBOAT_ADMIN_HOST}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, proxy_data:/data, proxy_config:/config]
+networks:
+  default:
+    driver_opts: {com.docker.network.bridge.name: pb0}
+    ipam: {config: [{subnet: 172.18.0.0/16, gateway: 172.18.0.1}]}
+volumes:
+  proxy_data:
+  proxy_config:

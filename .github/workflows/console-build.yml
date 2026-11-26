@@ -1,0 +1,47 @@
+# Builds the production console for tools/console-prod.sh: the browser terminal and vault WASM (Go) and `next build`
+# into the slot the server is not serving from. The build-time public values (NEXT_PUBLIC_*, shipped to every browser)
+# come from the console host's console.env through the dispatch inputs. The artifact holds what the host needs besides
+# its own `bun install --production`.
+name: Console build
+run-name: Console build ${{ inputs.nonce }}
+on:
+  workflow_dispatch:
+    inputs:
+      commit: {description: 40-hex commit to build, required: true, type: string}
+      slot: {description: .next-a or .next-b, required: true, type: string}
+      nonce: {description: names this run for the dispatcher, required: true, type: string}
+      posthog_key: {required: false, type: string, default: ''}
+      posthog_host: {required: false, type: string, default: ''}
+      sentry_dsn: {required: false, type: string, default: ''}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check inputs
+        env: {COMMIT: '${{ inputs.commit }}', SLOT: '${{ inputs.slot }}'}
+        run: |
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "commit must be 40 hex characters" >&2; exit 1; }
+          [[ "$SLOT" == .next-a || "$SLOT" == .next-b ]] || { echo "slot must be .next-a or .next-b" >&2; exit 1; }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: {ref: '${{ inputs.commit }}'}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: {go-version-file: cli/go.mod, cache: false}
+      - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
+        with: {bun-version-file: console/package.json}
+      - name: Build
+        working-directory: console
+        env:
+          NEXT_DIST_DIR: '${{ inputs.slot }}'
+          NEXT_PUBLIC_POSTHOG_KEY: '${{ inputs.posthog_key }}'
+          NEXT_PUBLIC_POSTHOG_HOST: '${{ inputs.posthog_host }}'
+          NEXT_PUBLIC_SENTRY_DSN: '${{ inputs.sentry_dsn }}'
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          rm -rf "$NEXT_DIST_DIR/cache"
+          tar -czf ../console-build.tgz package.json bun.lock bunfig.toml next.config.ts patches public "$NEXT_DIST_DIR"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: {name: console-build, path: console-build.tgz, retention-days: 3, if-no-files-found: error}

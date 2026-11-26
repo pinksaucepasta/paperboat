@@ -42,7 +42,7 @@ gate, hook, doc or other script names it. Add a row when you add a file.
 | `test_sentry_release.py` | its tests | **unreferenced**: `python3 tools/test_sentry_release.py` |
 | `release-version.sh` | release version format check | `release.yml`, `selfhost-release.yml`, `server-container.yml` |
 | `console-live.sh` | builds and restarts the live console | manual (AGENTS.md) |
-| `console-prod.sh` | production console deploy | manual; `deploy/Caddyfile`, `deploy/paperboat-console.service` mention it |
+| `console-prod.sh` | production console deploy (build: `console-build.yml` on a GitHub runner) | manual; `deploy/console-host/`, `deploy/paperboat-console.service` mention it |
 
 ## Device qualification (manual, on test machines)
 

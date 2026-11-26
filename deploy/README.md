@@ -4,8 +4,7 @@ Run this stack only on the managed VPS. Set immutable image references in the
 owner-only `.env`: `PAPERBOAT_POSTGRES_IMAGE` (PostgreSQL 17, the scratch database of `rehearse-migrations.sh`),
 `PAPERBOAT_SERVER_IMAGE`, `PAPERBOAT_DIAGNOSTICS_IMAGE` (MinIO), and
 `PAPERBOAT_PROXY_IMAGE` (Caddy). Configure `PAPERBOAT_API_HOST`,
-`PAPERBOAT_DOWNLOAD_HOST`, `PAPERBOAT_DIAGNOSTICS_HOST` and `PAPERBOAT_CONSOLE_HOST` (the production console, proxied to
-the host's `paperboat-console` unit on 172.18.0.1:3100) there too. The proxy container reads these names when it is created: adding
+`PAPERBOAT_DOWNLOAD_HOST` and `PAPERBOAT_DIAGNOSTICS_HOST` there too. The proxy container reads these names when it is created: adding
 one to a running stack means recreating the proxy (`docker compose up -d --no-deps proxy`), a short cut of every long-lived
 stream, so do it in a quiet window and not as part of a server rollout.
 
@@ -27,6 +26,14 @@ signed TUF metadata and the product-pinned installer in `releases/current/`.
 Installer and metadata requests reach the server; binary URLs in the signed metadata
 point to GitHub. The origin bundle keeps an empty `tuf/targets/` directory. Pairing
 custom builds is independent of this publication and needs no server release record.
+
+## Console host
+
+The console and the admin panel run on their own host: `paperboat-console.service` (:3100) and `paperboat-admin.service`
+(:3101) listen on 172.18.0.1, the gateway of the `pb0` bridge that `console-host/compose.yaml` creates for its Caddy
+(`console-host/Caddyfile` names the console and admin domains; ufw allows 22, 80, 443 and `pb0` to 3100-3101). Deploy with
+`tools/console-prod.sh` (built on a GitHub runner by `console-build.yml`) and `tools/admin-prod.sh`; both take the host from
+the `console_host` development target.
 
 ## Database host
 

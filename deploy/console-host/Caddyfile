@@ -1,0 +1,7 @@
+# Console host proxy (deploy/README.md "Console host"): console and admin units on the pb0 bridge gateway.
+{$PAPERBOAT_CONSOLE_HOST} {
+	reverse_proxy 172.18.0.1:3100
+}
+{$PAPERBOAT_ADMIN_HOST} {
+	reverse_proxy 172.18.0.1:3101
+}
