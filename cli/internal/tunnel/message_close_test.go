@@ -22,9 +22,9 @@ func (nopStreamGroup) Close() error                                     { return
 // F21-164: a closed terminal must fully close its streams, not only send the FIN. A FIN-only stream kept the host's unread
 // output, which held the peer's shared QUIC connection window, and every other terminal on that peer stalled.
 func TestNativeMessageCloseFullyClosesEveryStream(t *testing.T) {
-	streams := []*closeRecordingStream{{}, {}, {}}
+	streams := []*closeRecordingStream{{}}
 	ctx, cancel := context.WithCancel(context.Background())
-	message := &nativeMessageConnection{connection: nopStreamGroup{}, control: streams[0], input: streams[1], output: streams[2],
+	message := &nativeMessageConnection{connection: nopStreamGroup{}, control: streams[0],
 		ctx: ctx, cancel: cancel}
 	_ = message.Close()
 	for i, s := range streams {

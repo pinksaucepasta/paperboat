@@ -197,8 +197,8 @@ func (*inputOrderStream) Close() error                     { return nil }
 func (*inputOrderStream) SetWriteDeadline(time.Time) error { return nil }
 
 func TestHelperExecEOFFollowsAllInputWithoutWaitingForResponse(t *testing.T) {
-	control, input := &inputOrderStream{}, &inputOrderStream{}
-	message := &nativeMessageConnection{control: control, input: input, ctx: context.Background()}
+	input := &inputOrderStream{}
+	message := &nativeMessageConnection{control: input, ctx: context.Background()}
 	connection := &helperExecConn{message: message, streamID: 7,
 		request: ExecRequest{OperationID: "operation_exec_1"}}
 	chunks := [][]byte{bytes.Repeat([]byte("x"), 16384), bytes.Repeat([]byte("y"), 48)}
@@ -217,11 +217,8 @@ func TestHelperExecEOFFollowsAllInputWithoutWaitingForResponse(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("input EOF waited for a response")
 	}
-	if control.Len() != 0 {
-		t.Fatal("input EOF used the independent control stream and can overtake stdin")
-	}
 	for index, chunk := range chunks {
-		kind, data, err := readNativeRecord(input, false)
+		kind, data, err := readNativeRecord(input, true)
 		if err != nil || kind != nativeBinary {
 			t.Fatal("missing input record", err)
 		}
@@ -230,7 +227,7 @@ func TestHelperExecEOFFollowsAllInputWithoutWaitingForResponse(t *testing.T) {
 			t.Fatal("stdin framing lost bytes or ordering", err)
 		}
 	}
-	_, data, err := readNativeRecord(input, false)
+	_, data, err := readNativeRecord(input, true)
 	if err != nil {
 		t.Fatal("missing ordered EOF", err)
 	}
@@ -315,7 +312,7 @@ func (g *closingStreamGroup) Close() error {
 func TestHelperExecDetachUnblocksAStdinWriteOnAFullWindow(t *testing.T) {
 	stream := &fullWindowStream{writing: make(chan struct{}, 1), closed: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
-	message := &nativeMessageConnection{connection: &closingStreamGroup{stream: stream}, control: stream, input: stream,
+	message := &nativeMessageConnection{connection: &closingStreamGroup{stream: stream}, control: stream,
 		ctx: ctx, cancel: cancel}
 	connection := &helperExecConn{message: message, streamID: 7, done: make(chan struct{}),
 		request: ExecRequest{OperationID: "operation_exec_1"}}
@@ -368,7 +365,7 @@ func TestHelperExecStdinUsesFullFramesAndCompression(t *testing.T) {
 	rand.New(rand.NewSource(1)).Read(random)
 	compressible := bytes.Repeat([]byte("exec stdin\n"), (300<<10)/11)
 	input := &inputOrderStream{}
-	message := &nativeMessageConnection{control: &inputOrderStream{}, input: input, ctx: context.Background()}
+	message := &nativeMessageConnection{control: input, ctx: context.Background()}
 	connection := &helperExecConn{message: message, streamID: 7, request: ExecRequest{OperationID: "operation_exec_1", InputOffset: 10}}
 	stdin := append(append([]byte{}, compressible...), random...)
 	if n, err := connection.Write(stdin); err != nil || n != len(stdin) {
@@ -377,7 +374,7 @@ func TestHelperExecStdinUsesFullFramesAndCompression(t *testing.T) {
 	var got []byte
 	frames, compressed := 0, 0
 	for input.Len() > 0 {
-		_, data, err := readNativeRecord(input, false)
+		_, data, err := readNativeRecord(input, true)
 		if err != nil || len(data) > protocol.MaxBinaryFrame {
 			t.Fatal("bad input record", err, len(data))
 		}
