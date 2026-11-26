@@ -58,13 +58,21 @@ func (b *claimBook) holder(ip string) (string, bool) {
 }
 
 // assign returns the address of key: its existing claim (reactivated if held), else the preferred address if
-// nobody holds it, else the lowest free address.
+// nobody holds it (or only a released claim of the same uid and account), else the lowest free address.
 func (b *claimBook) assign(key claimKey, preferred netip.Addr, now time.Time) (string, error) {
 	b.expire(now)
 	if existing, ok := b.Claims[key.String()]; ok {
 		existing.HeldUntil = time.Time{}
 		b.Claims[key.String()] = existing
 		return existing.IP, nil
+	}
+	want := preferred.String()
+	// The server gives each machine of an account one address; a released claim of the same user and account
+	// (a removed or re-paired machine record) yields it at once, so the machine is reachable where pb shows it.
+	if name, held := b.holder(want); held && b.Claims[name].HeldUntil.After(now) {
+		if other, ok := parseClaimKey(name); ok && other.UID == key.UID && other.Account == key.Account {
+			delete(b.Claims, name)
+		}
 	}
 	owned := 0
 	for name := range b.Claims {
@@ -75,7 +83,6 @@ func (b *claimBook) assign(key claimKey, preferred netip.Addr, now time.Time) (s
 	if owned >= maxUserClaims || len(b.Claims) >= maxHostClaims {
 		return "", errClaimsExhausted
 	}
-	want := preferred.String()
 	if _, held := b.holder(want); !held && validClaimAddress(preferred) {
 		b.Claims[key.String()] = claim{IP: want}
 		return want, nil
