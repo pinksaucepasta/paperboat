@@ -21,7 +21,7 @@ func authorizeError(err error) error {
 	if err == nil || errors.As(err, &fatal) && fatal.Fatal() {
 		return err
 	}
-	return fmt.Errorf("%w (retrying on the existing carrier): %w", errAuthorizeTransport, err)
+	return fmt.Errorf("%w (the connection is closed and redialled): %w", errAuthorizeTransport, err)
 }
 
 // The carrier has already authenticated. Refresh publishes policy changes; a
@@ -49,9 +49,8 @@ func watchCarrierAuthority(ctx context.Context, credential func(context.Context)
 		if err := send(token); err != nil {
 			if errors.Is(err, errAuthorizeTransport) {
 				// The grant did not reach the relay: a network failure, not a refusal. Closing the connection
-				// with ErrAdmission here latched the whole carrier fatal until a restart, so the grant is
-				// sent again on the poll's own backoff and a dead connection ends by itself, redialled
-				// without a latch.
+				// with ErrAdmission here latched the whole carrier fatal until a restart; send closed it
+				// without a code instead, so the next send redials and no carrier stays fatal.
 				sent = ""
 				return err
 			}

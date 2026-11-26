@@ -1,6 +1,7 @@
 package derpquic
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -55,7 +56,9 @@ func TestQUICAuthorizeSeparatesNetworkLossFromAnUnframeableGrant(t *testing.T) {
 
 func TestWSSAuthorizeSeparatesNetworkLossFromAnUnframeableGrant(t *testing.T) {
 	near, far := net.Pipe()
-	cc := &wssClientConn{conn: near, namespace: [32]byte{1}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cc := &wssClientConn{conn: near, namespace: [32]byte{1}, ctx: ctx, cancel: cancel}
 	go func() { _, _ = far.Read(make([]byte, 1<<20)) }()
 	err := cc.authorize(strings.Repeat("x", MaxControl))
 	var fatal interface{ Fatal() bool }
@@ -66,5 +69,9 @@ func TestWSSAuthorizeSeparatesNetworkLossFromAnUnframeableGrant(t *testing.T) {
 	err = cc.authorize("a-grant")
 	if !errors.Is(err, errAuthorizeTransport) || !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("a re-authentication lost with the connection gave %v on the WSS carrier, want transport error wrapping closed pipe", err)
+	}
+	// Connected must drop at once, not when the reader notices: a first handshake would trust the dead conn.
+	if ctx.Err() == nil {
+		t.Fatal("a lost re-authentication left the WSS connection open")
 	}
 }

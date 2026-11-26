@@ -405,5 +405,9 @@ func (cc *wssClientConn) authorize(token string) error {
 	cc.writeMu.Lock()
 	defer cc.writeMu.Unlock()
 	cc.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return authorizeError(writeAuthRequest(cc.conn, parts, cc.namespace, cc.generationDisco))
+	err = authorizeError(writeAuthRequest(cc.conn, parts, cc.namespace, cc.generationDisco))
+	if errors.Is(err, errAuthorizeTransport) {
+		cc.cancel() // as Client.authorize: Connected drops now and the next send redials
+	}
+	return err
 }

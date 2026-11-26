@@ -389,5 +389,11 @@ func (cc *clientConn) authorize(token string) error {
 	cc.writeMu.Lock()
 	defer cc.writeMu.Unlock()
 	cc.stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return authorizeError(writeAuthRequest(cc.stream, parts, cc.namespace, cc.generationDisco))
+	err = authorizeError(writeAuthRequest(cc.stream, parts, cc.namespace, cc.generationDisco))
+	if errors.Is(err, errAuthorizeTransport) {
+		// A failed or partial control write ends the stream: close now (code 0, no latch) so Connected drops and
+		// the next send redials, instead of a first handshake trusting this conn until the 45 s idle timeout.
+		cc.conn.CloseWithError(0, "relay control write failed")
+	}
+	return err
 }
