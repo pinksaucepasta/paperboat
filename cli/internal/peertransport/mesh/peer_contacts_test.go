@@ -78,6 +78,22 @@ func connectDirectlyWithoutARelay(t *testing.T, lateHost, noInboundEndpoints boo
 	if err := dialer.SetPeerContacts(map[key.NodePublic]PeerContact{hostKey.Public(): {Disco: host.lb.discoPublic(), Endpoints: endpoints(host)}}); err != nil {
 		t.Fatal(err)
 	}
+	if !lateHost && !noInboundEndpoints {
+		// Endpoint updates during the first exchange (ReSTUN for a new peer under load) must not reset the host's
+		// path: with an empty relay map each one rebound the socket and cleared every path, and the host stopped
+		// answering (14 s on CI, every time with this loop).
+		stop := time.After(3 * time.Second)
+		go func() {
+			for {
+				select {
+				case <-stop:
+					return
+				case <-time.After(150 * time.Millisecond):
+				}
+				host.lb.sys.MagicSock.Get().ReSTUN("test")
+			}
+		}()
+	}
 	// No relay means no CallMeMaybe and no DERP fallback: the host's first handshake response finds no trusted
 	// path. It goes to the dialer's signed endpoints instead of being dropped until wireguard-go's 5 s retry.
 	started := time.Now()
