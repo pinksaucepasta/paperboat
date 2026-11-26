@@ -16,17 +16,24 @@ import (
 // A second loopback address stands in for a second visitor; Linux answers on all of 127.0.0.0/8.
 const otherSource = "127.0.0.2"
 
+// otherSourceSocket binds the second source, or skips the test where the host has only 127.0.0.1 (macOS).
+func otherSourceSocket(t *testing.T) net.PacketConn {
+	t.Helper()
+	socket, err := net.ListenPacket("udp4", otherSource+":0")
+	if err != nil {
+		t.Skip("second loopback address unavailable:", err)
+	}
+	t.Cleanup(func() { _ = socket.Close() })
+	return socket
+}
+
 // A source that opens connections and never authorizes holds at most preGrantPerAddress of them; the
 // connection past the bound is refused, and another source still connects and authorizes.
 func TestQUICPreGrantBoundsUnauthenticatedConnectionsPerSource(t *testing.T) {
 	f := newFixture(t)
 	s, address, _ := f.start("127.0.0.1:0")
 	cert := certificate(t)
-	socket, err := net.ListenPacket("udp4", otherSource+":0")
-	if err != nil {
-		t.Skip("second loopback address unavailable:", err)
-	}
-	transport := &quic.Transport{Conn: socket}
+	transport := &quic.Transport{Conn: otherSourceSocket(t)}
 	defer transport.Close()
 	remote, _ := net.ResolveUDPAddr("udp4", address)
 	var held []*quic.Conn
@@ -55,6 +62,7 @@ func TestQUICPreGrantBoundsUnauthenticatedConnectionsPerSource(t *testing.T) {
 }
 
 func TestWSSPreGrantBoundsUnauthenticatedConnectionsPerSource(t *testing.T) {
+	otherSourceSocket(t) // skip as the QUIC twin does
 	f := newFixture(t)
 	s, err := NewServer(f.verifier)
 	if err != nil {
