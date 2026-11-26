@@ -120,7 +120,7 @@ func TestStandaloneUpdateGateCompletesWithNoProtectedWorkloads(t *testing.T) {
 	}
 }
 
-func TestStandaloneUpdateGateDefersTerminalsAndRestoresAdmissionFence(t *testing.T) {
+func TestStandaloneUpdateGateDefersTerminalsAndAdmitsTransfersAfterRestart(t *testing.T) {
 	health := http.NewServeMux()
 	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
 	busy, held := true, ""
@@ -138,7 +138,7 @@ func TestStandaloneUpdateGateDefersTerminalsAndRestoresAdmissionFence(t *testing
 			return nil
 		},
 		EndUpdate: func(id string) error {
-			if held != id {
+			if held != "" && held != id {
 				return execprocess.ErrUpdateInProgress
 			}
 			held = ""
@@ -167,15 +167,17 @@ func TestStandaloneUpdateGateDefersTerminalsAndRestoresAdmissionFence(t *testing
 	if held != "transaction_01" {
 		t.Fatal("missing admission fence")
 	}
-	// A restarted host restores the exec fence before admitting new commands.
+	// The host that starts after the drain is the candidate in its stability window: it admits
+	// transfers (canary update 11-26: every send failed for the whole 10-minute window) and still
+	// owns the transaction's stability check and commit.
 	held = ""
 	workloads = hostdproto.WorkloadStatus{Generation: 1}
 	gate, err = newStandaloneUpdateGate(config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if held != "transaction_01" {
-		t.Fatal("restart lost admission fence")
+	if held != "" {
+		t.Fatal("restarted host closed transfer admission during the stability window")
 	}
 	for _, op := range []string{hostdproto.UpdateGateStability, hostdproto.UpdateGateCommit} {
 		if _, err = gate.HandleUpdateGate(context.Background(), standaloneGateRequest(op, &target)); err != nil {
@@ -367,13 +369,14 @@ func TestStandaloneUpdateGateNewDrainSupersedesAbandonedTransaction(t *testing.T
 		t.Fatal(err)
 	}
 	stale := drainedGate(t, gate, "transaction_stale")
-	// hostd restarts into the restored fence, as it does after the failed update.
+	// hostd restarts after the failed update (a new process: no fence) and owns the stale transaction without fencing.
+	fence.held = ""
 	gate, err = newStandaloneUpdateGate(fence.config(statePath, time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fence.holder() != "transaction_stale" {
-		t.Fatalf("restart did not restore the fence: %q", fence.holder())
+	if fence.holder() != "" {
+		t.Fatalf("restart closed transfer admission: %q", fence.holder())
 	}
 	drainedGate(t, gate, "transaction_next")
 	if fence.holder() != "transaction_next" || !gate.transactions["transaction_stale"].RolledBack || gate.transactions["transaction_stale"].Drained {
@@ -413,15 +416,17 @@ func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
 	}
 	// A restarted hostd gets a fresh lease for a transaction that is still pending.
 	drainedGate(t, reloaded, "transaction_02")
+	retireGate(t, reloaded)
+	fence.held = "" // a restarted process starts with no fence
 	reloaded, err = newStandaloneUpdateGate(fence.config(statePath, 50*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
 	retireGate(t, reloaded)
-	if fence.holder() != "transaction_02" {
-		t.Fatal("restart lost the fence of a pending update")
+	if fence.holder() != "" {
+		t.Fatal("restart closed transfer admission for a pending update")
 	}
-	waitFenceReleased(t, fence)
+	waitStateRecordsRollbacks(t, statePath, 2)
 }
 
 // retireGate disarms a gate's fence lease when the test ends. Every gate this test builds from the

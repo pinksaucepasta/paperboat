@@ -90,12 +90,9 @@ func newStandaloneUpdateGate(config standaloneUpdateGateConfig) (*standaloneUpda
 			if gate.heldTransaction != "" {
 				return nil, errStandaloneUpdateGate
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), hostdproto.MaximumUpdateGateDuration)
-			err := config.BeginUpdate(ctx, id)
-			cancel()
-			if err != nil {
-				return nil, err
-			}
+			// This process started after the drain: it is the candidate (or the restored previous build) and
+			// must serve transfers through the stability window. The drain only had to empty the stopped
+			// process, so own the transaction for commit/rollback without closing admission again.
 			gate.holdAdmission(id)
 		}
 	}
