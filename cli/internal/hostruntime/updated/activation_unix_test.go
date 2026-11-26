@@ -384,7 +384,7 @@ func TestPreparedNativeActivationUpdatesAndRestoresRoutingDaemon(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires protected activation custody")
 	}
-	for _, mode := range []string{"healthy", "before native validation", "health rejected", "canceled health", "native recovery pending", "native roles recovery pending"} {
+	for _, mode := range []string{"healthy", "guard handover", "before native validation", "health rejected", "canceled health", "native recovery pending", "native roles recovery pending"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			if err := os.Chmod(root, 0700); err != nil {
@@ -439,6 +439,10 @@ func TestPreparedNativeActivationUpdatesAndRestoresRoutingDaemon(t *testing.T) {
 				if candidate.Stage == nil {
 					t.Fatal("routing daemon startup was deferred until after native cutover")
 				}
+				if mode == "guard handover" {
+					// The cutover restarted the machine guard; the old daemon reconnects within a few probes.
+					routing.degraded = 3
+				}
 				if err := candidate.Stage(nativeCtx); err != nil {
 					return installsource.Source{}, err
 				}
@@ -485,12 +489,12 @@ func TestPreparedNativeActivationUpdatesAndRestoresRoutingDaemon(t *testing.T) {
 					cancel()
 					return context.Canceled
 				}
-				if mode != "healthy" {
+				if mode != "healthy" && mode != "guard handover" {
 					return failure
 				}
 				return nil
 			}})
-			if mode == "healthy" {
+			if mode == "healthy" || mode == "guard handover" {
 				if err != nil || committed != next || routing.process != next.Version {
 					t.Fatal("native success left old routing daemon", err)
 				}
@@ -534,6 +538,7 @@ type preparedRoutingFixture struct {
 	old, next installsource.Source
 	process   string
 	updater   string
+	degraded  int // probes still answering degraded
 }
 
 func (p *preparedRoutingFixture) executableVersion() (string, error) {
@@ -560,7 +565,11 @@ func (p *preparedRoutingFixture) Probe(ctx context.Context) (UnixParticipantProb
 	if err := ctx.Err(); err != nil {
 		return UnixParticipantProbe{}, err
 	}
-	return UnixParticipantProbe{Running: true, Version: p.process, UpdaterVersion: p.updater, State: "ready", Machines: 1}, nil
+	state := "ready"
+	if p.degraded > 0 {
+		p.degraded, state = p.degraded-1, "degraded"
+	}
+	return UnixParticipantProbe{Running: true, Version: p.process, UpdaterVersion: p.updater, State: state, Machines: 1}, nil
 }
 
 func TestUnixNativeRecoveryKeepsApprovalWhileQueuedWorkRechecksLatest(t *testing.T) {

@@ -227,7 +227,7 @@ func doctorCommandV1() *cobra.Command {
 				observeLocalDoctorFailure(command.Context(), err)
 				probes = []doctorpkg.Probe{{Code: "daemon", Run: func(context.Context) doctorpkg.Check {
 					return doctorpkg.Check{Category: "local", Code: "daemon", Status: doctorpkg.StatusFail, Summary: localDaemonStoppedSummary, Recovery: localDaemonStoppedRecovery}
-				}}}
+				}}, {Code: "update_activation", Run: doctorUpdateActivationCheck}}
 			default:
 				return fmt.Errorf("read local Paperboat diagnostics: %w", err)
 			}
@@ -300,6 +300,8 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 			return doctorpkg.Check{Category: "local", Code: "daemon", Status: status, Summary: summary, Recovery: strings.ReplaceAll(recovery, "..", ".")}
 		}},
 		{Code: "local_state", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorLocalState(ctx) }},
+		// The update is this computer's: plain `pb doctor` showed no update check after a rollback (canary-b 2026-11-26).
+		{Code: "update_activation", Run: doctorUpdateActivationCheck},
 		{Code: "clock", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorClock(ctx, command) }},
 		{Code: "machine_guard_version", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorGuardVersion(ctx) }},
 		{Code: "machine_credentials", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorCredentials(ctx) }},
@@ -594,7 +596,6 @@ func doctorMachineProbes(machine localapi.MachineStatus) []doctorpkg.Probe {
 		{Code: "router_mapping", Run: func(context.Context) doctorpkg.Check { return doctorRouterMappingCheck(machine.RouterMapping) }},
 		{Code: "mapping_lifetime", Run: func(context.Context) doctorpkg.Check { return doctorMappingLifetimeCheck(machine.MappingLifetime) }},
 		{Code: "update_health", Run: func(context.Context) doctorpkg.Check { return doctorUpdateHealthCheck(machine.UpdateHealth) }},
-		{Code: "update_activation", Run: doctorUpdateActivationCheck},
 	}
 	// A ready machine's answer is ssh_server, which asks its sshd: the stored readiness stays when sshd stops.
 	if machine.SSHReadiness != "ready" {

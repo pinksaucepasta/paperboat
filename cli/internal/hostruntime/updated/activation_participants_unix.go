@@ -27,6 +27,11 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 		return installsource.Source{}, ErrInvalidConfig
 	}
 	routingTouched := false
+	readiness := &unixParticipantReadiness{participants: s.config.Participants, handoff: handoff}
+	timeout := handoff.RecoveryTimeout
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
 	candidate.Stage = func(prepareCtx context.Context) error {
 		probe, err := s.config.Participants.Probe(prepareCtx)
 		if err != nil {
@@ -38,7 +43,12 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 		if probe.State == "ready" || probe.Machines > 0 {
 			handoff.RequireInventory = true
 		}
-		if err := unixParticipantReady(probe, handoff.Previous.Version, handoff.Baseline, handoff.RequireInventory); err != nil {
+		// The native cutover has just restarted the machine guard: the old daemon can be briefly degraded
+		// (broken_pipe, then not_found) until it reconnects (canary-b 2026-11-26 .9 to .10 rolled back here).
+		readyCtx, cancel := context.WithTimeout(prepareCtx, timeout)
+		err = readiness.waitReady(readyCtx, handoff.Previous.Version, true)
+		cancel()
+		if err != nil {
 			return err
 		}
 		if err := writeUnixHandoff(s.config.StateRoot, handoff); err != nil {
@@ -54,11 +64,6 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 	}
 	candidate.Prepare = prepare
 	validate := candidate.Validate
-	readiness := &unixParticipantReadiness{participants: s.config.Participants, handoff: handoff}
-	timeout := handoff.RecoveryTimeout
-	if timeout <= 0 {
-		timeout = 2 * time.Minute
-	}
 	candidate.Validate = func(validateCtx context.Context) error {
 		if handoff.Baseline.Running {
 			routingTouched = true

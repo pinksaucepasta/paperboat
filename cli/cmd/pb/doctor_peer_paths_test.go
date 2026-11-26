@@ -103,3 +103,23 @@ func TestDoctorWarnsWhenNoOnlinePeerWasReachedRecently(t *testing.T) {
 		})
 	}
 }
+
+// Plain `pb doctor` (no machine named) checks this computer's update: after a rolled-back update it said
+// nothing while `pb update status` showed failed_update (canary-b 2026-11-26, support_a44f897e).
+func TestDoctorChecksTheUpdateWithoutAMachine(t *testing.T) {
+	found := 0
+	for _, probe := range doctorProbes(&cobra.Command{}, localapi.Snapshot{DaemonState: "ready"}, nil) {
+		if probe.Code == "update_activation" {
+			found++
+		}
+	}
+	machine := localapi.MachineStatus{ID: "machine_hp", Alias: "laptop"}
+	for _, probe := range doctorProbes(&cobra.Command{}, localapi.Snapshot{DaemonState: "ready"}, &machine) {
+		if probe.Code == "update_activation" {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Fatalf("update_activation ran %d times over the two reports, want once in each", found)
+	}
+}

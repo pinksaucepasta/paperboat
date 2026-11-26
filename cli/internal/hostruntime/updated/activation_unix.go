@@ -728,7 +728,7 @@ func unixParticipantReady(probe UnixParticipantProbe, version string, baseline U
 	if baseline.State == "degraded" && baseline.ControlPlaneUnavailableOnly && probe.State == "degraded" && probe.ControlPlaneUnavailableOnly && probe.Machines >= baseline.Machines {
 		return nil
 	}
-	return participantFailure("daemon_state", ErrParticipantReadiness)
+	return &activationFailure{phase: "participant", reason: "daemon_state", state: probe.State, cause: ErrParticipantReadiness}
 }
 
 func participantFailure(reason string, cause error) error {
@@ -742,9 +742,12 @@ func writeActivationFailure(writer io.Writer, err error, previous, candidate str
 	if err == nil {
 		return
 	}
-	phase, reason := "activation", "failed"
+	phase, reason, state := "activation", "failed", "none"
 	var failure *activationFailure
 	if errors.As(err, &failure) {
+		if failurePart.MatchString(failure.state) {
+			state = failure.state
+		}
 		switch failure.phase + "/" + failure.reason {
 		case "health/owner_identity", "health/heartbeat_missing", "health/heartbeat_stale", "health/endpoint_invalid", "health/request_invalid", "health/transport", "health/http_redirect", "health/http_status", "health/http_body", "health/http_not_live", "participant/updater_version", "participant/daemon_stopped", "participant/daemon_version", "participant/daemon_state", "participant/probe", "participant/restart_daemon":
 			phase, reason = failure.phase, failure.reason
@@ -764,13 +767,14 @@ func writeActivationFailure(writer io.Writer, err error, previous, candidate str
 		return "unknown"
 	}
 	chain, cause, sentinels := activationErrorChain(err)
-	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s chain=%s io=%s sentinels=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification, chain, cause, sentinels)
+	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s state=%s previous=%s candidate=%s classification=%s chain=%s io=%s sentinels=%s\n", phase, reason, state, validVersion(previous), validVersion(candidate), classification, chain, cause, sentinels)
 }
 
 var (
 	errorTypeName = regexp.MustCompile(`^[*A-Za-z0-9_./]{1,80}$`)
 	fileOperation = regexp.MustCompile(`^[a-z]{1,16}$`)
 	errnoNameRE   = regexp.MustCompile(`^E[A-Z0-9]{1,16}$`)
+	failurePart   = regexp.MustCompile(`^[a-z_]{1,32}$`)
 )
 
 // activationErrorChain names the Go types along a bounded walk of the error tree, never their

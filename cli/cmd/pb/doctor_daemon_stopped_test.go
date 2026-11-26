@@ -54,7 +54,8 @@ func TestWindowsDoctorReportsAStoppedLocalServiceWithTheRepair(t *testing.T) {
 	if err := report.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if report.Overall != "unhealthy" || len(report.Checks) != 1 {
+	// The daemon check, then the update check (an interrupted update is the usual reason the service stopped).
+	if report.Overall != "unhealthy" || len(report.Checks) != 2 || report.Checks[1].Code != "update_activation" {
 		t.Fatalf("report=%+v", report)
 	}
 	check := report.Checks[0]

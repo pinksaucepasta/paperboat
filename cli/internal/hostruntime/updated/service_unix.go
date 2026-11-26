@@ -35,7 +35,9 @@ var ErrInvalidConfig = errors.New("invalid paperboat-updated configuration")
 // finite local diagnostic reason. Error text never formats the wrapped cause.
 type activationFailure struct {
 	phase, reason string
-	cause         error
+	// state is the daemon state a readiness probe saw (daemon_state only), for the failure log.
+	state string
+	cause error
 }
 
 func (e *activationFailure) Error() string { return "update " + e.phase + " failed: " + e.reason }
