@@ -55,6 +55,8 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if ctx == nil {
 		return "", hostinstall.ErrInvalidRequest
 	}
+	deadline, bounded := ctx.Deadline()
+	budget := time.Until(deadline) // the caller's whole budget, given again to the steps after the privileged one
 	if bundlePath == "" {
 		if explicitUpdate {
 			source.Distribution = installsource.Custom
@@ -108,6 +110,10 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		return "", err
 	}
 	lock, err := hostinstall.LockSuppliedOperation(filepath.Join(paths.StateRoot, "install.lock"), uid)
+	var busy *hostinstall.MaintenanceBusyTimeoutError
+	if errors.As(err, &busy) {
+		return "", runtimeFailure("another Paperboat install or update is running on this computer; wait for it to finish, then run the command again", err)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -185,7 +191,28 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		command := privilegedInstallCommand(callCtx, os.Geteuid(), rootHome, account.Uid, installerExecutable, "__runtime-service", "inventory")
 		return runInventoryCommand(callCtx, command, installerExecutable)
 	}
-	if err = invoke(ctx, "install-supplied"); err != nil {
+	if err = ctx.Err(); err != nil {
+		return "", err // cancelled before the privileged step: start nothing
+	}
+	// The privileged step runs to its end, like a package manager install (Tailscale clientupdate/clientupdate.go:511
+	// and :642 run apt-get and dnf without a deadline): killing sudo at the caller's deadline left the root step
+	// finishing the install behind a reported failure (dadape, 2026-11-26: 3 min deadline, 4 min idle-I/O install).
+	// Ctrl-C still reaches it through the terminal's process group. The steps after it get the caller's budget again.
+	fmt.Fprintln(os.Stderr, "Installing Paperboat's system services; on a busy disk this can take a few minutes...")
+	err = invoke(context.WithoutCancel(ctx), "install-supplied")
+	if bounded {
+		parent := ctx
+		rest, cancelRest := context.WithTimeout(context.WithoutCancel(parent), budget)
+		defer cancelRest()
+		// A real cancellation (Ctrl-C) still ends the rest; the deadline the privileged step outlasted does not.
+		defer context.AfterFunc(parent, func() {
+			if !errors.Is(parent.Err(), context.DeadlineExceeded) {
+				cancelRest()
+			}
+		})()
+		ctx = rest
+	}
+	if err != nil {
 		if ctx.Err() != nil {
 			// Cancelled (Ctrl-C, or a caller that ended): start no new privileged child; the next pb install
 			// runs the inventory.

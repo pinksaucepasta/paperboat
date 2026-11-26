@@ -47,8 +47,8 @@ func TestFailedInstallInventoryIsBoundedAndCancelledInstallStartsNone(t *testing
 	if _, err := InstallRunningBinary(ctx, executable, source, filepath.Join(home, "bin"), ""); err == nil {
 		t.Fatal("cancelled install succeeded")
 	}
-	if want := []started{{"install-supplied", false}}; !reflect.DeepEqual(children, want) {
-		t.Fatalf("cancelled install asked for %+v, want only the cancelled install step %+v", children, want)
+	if len(children) != 0 {
+		t.Fatalf("cancelled install started %+v; want no privileged child", children)
 	}
 
 	children = nil
