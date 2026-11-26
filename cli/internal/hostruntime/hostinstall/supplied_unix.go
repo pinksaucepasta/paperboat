@@ -72,16 +72,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 	if err = secureRootDirectory(paths.updateState, 0700); err != nil {
 		return err
 	}
-	var nativeLock io.Closer
-	if input.SuppliedUpdate {
-		// An explicit update refuses at once while an activation holds the lock: waiting sat silent for its whole
-		// stability window (smoke 11-26, removed machine .8 to .9). The caller says which update is finishing.
-		if nativeLock, err = updated.TryLockUnixNativeInstall(paths.updateState); errors.Is(err, updated.ErrActivationPending) {
-			return hostdproto.ErrMaintenanceBusy
-		}
-	} else {
-		nativeLock, err = updated.LockUnixNativeInstall(ctx, paths.updateState)
-	}
+	nativeLock, err := lockSuppliedNative(ctx, paths.updateState, operation, input.SuppliedUpdate)
 	if err != nil {
 		return err
 	}
@@ -316,4 +307,27 @@ func suppliedActiveRequest(previous Request, paths installPaths) (Request, error
 // reads the deployment's local access domain from that server.
 func unboundSuppliedRequest(input Request) Request {
 	return Request{Schema: input.Schema, Platform: input.Platform, User: input.User, UID: input.UID, GID: input.GID, Group: input.Group, Home: input.Home, Executable: input.Executable, Source: input.Source, ControlURL: input.ControlURL, EnrollmentPending: true}
+}
+
+// tryLockNative and lockNative take the activation lock at once or waiting; tests replace them.
+var (
+	tryLockNative = updated.TryLockUnixNativeInstall
+	lockNative    = updated.LockUnixNativeInstall
+)
+
+// lockSuppliedNative takes the activation lock for one supplied-install step. Starting an explicit update
+// refuses at once while an activation holds it: waiting sat silent for its whole stability window (smoke 11-26,
+// removed machine .8 to .9), and the caller says which update is finishing. Its commit and rollback steps belong
+// to the update already under way and wait: the updater install-supplied just restarted takes the lock briefly
+// as it starts, and refusing there reported "busy ... installed version is unchanged" after the services had
+// been replaced (smoke 11-27 linuxpool-3, 5 of 10 same-version pb update --from).
+func lockSuppliedNative(ctx context.Context, root, operation string, explicit bool) (io.Closer, error) {
+	if !explicit || operation != "install-supplied" {
+		return lockNative(ctx, root)
+	}
+	lock, err := tryLockNative(root)
+	if errors.Is(err, updated.ErrActivationPending) {
+		return nil, hostdproto.ErrMaintenanceBusy
+	}
+	return lock, err
 }
