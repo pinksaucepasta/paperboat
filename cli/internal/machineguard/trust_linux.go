@@ -254,7 +254,13 @@ func linuxDistributionIDs() (string, []string, error) {
 // NSS output consists of public certificate metadata, but its size and runtime
 // are bounded even if a browser store is corrupt or contains excessive entries.
 func runNSSCommand(parent context.Context, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	timeout := 5 * time.Second
+	if len(args) > 0 && args[0] != "-L" {
+		// A write killed midway leaves hot journals that read-only certutil cannot roll back ("bad database"
+		// for good, in the user's own browser store), so a caller's deadline never cancels it.
+		parent, timeout = context.WithoutCancel(parent), 30*time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "certutil", args...)
 	command.WaitDelay = time.Second

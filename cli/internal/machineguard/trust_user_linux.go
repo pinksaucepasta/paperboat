@@ -686,8 +686,25 @@ func pemContainsCertificate(data, der []byte) bool {
 	}
 }
 
+const nssJournalRecoveryNickname = "Paperboat journal recovery (never present)"
+
+// nssHotJournal reports whether an NSS SQL store has a journal left by an interrupted write.
+func nssHotJournal(database string) bool {
+	for _, name := range []string{"cert9.db-journal", "key4.db-journal"} {
+		if _, err := os.Lstat(filepath.Join(database, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func nssLocalRoot(ctx context.Context, database string, certificate *x509.Certificate, run nssCommand, requireSSLTrust bool) (bool, error) {
 	nickname := localTrustNickname(certificate)
+	if nssHotJournal(database) {
+		// Read-only -L cannot roll a hot journal back; a write-mode open can. Deleting a nickname nobody uses
+		// opens the store for writing and changes nothing (it fails with "not found", which is expected).
+		_, _ = run(ctx, "-D", "-d", "sql:"+database, "-n", nssJournalRecoveryNickname)
+	}
 	listing, err := run(ctx, "-L", "-d", "sql:"+database)
 	if err != nil {
 		return false, fmt.Errorf("list NSS certificates: %w", err)
