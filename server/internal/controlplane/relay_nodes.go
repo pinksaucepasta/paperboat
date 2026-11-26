@@ -227,13 +227,13 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		}
 		gen = max(gen, in.ExpectedGeneration)
 		expires := now.Add(relayRegistryLease)
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state=CASE WHEN state='draining' THEN 'draining' ELSE 'registered' END,ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=CASE WHEN state='draining' THEN coalesce(drain_deadline,$3) END,updated_at=$3,version=version+1,observation=coalesce(observation,'{}'::jsonb)||$6::jsonb WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1, fragment)
+		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state=CASE WHEN state='draining' THEN 'draining' WHEN state='offline' AND drain_deadline IS NOT NULL THEN 'offline' ELSE 'registered' END,ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=CASE WHEN state='draining' OR state='offline' AND drain_deadline IS NOT NULL THEN coalesce(drain_deadline,$3) END,updated_at=$3,version=version+1,observation=coalesce(observation,'{}'::jsonb)||$6::jsonb WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1, fragment)
 		if err != nil {
 			return out, err
 		}
 		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}}
 	}
-	if state == "draining" {
+	if relayOperatorDrained(state, drainDeadline) {
 		out.Draining, out.DrainDeadline = true, relayDrainDeadline(drainDeadline, s.clock())
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
@@ -413,7 +413,10 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	// process that owns this generation and epoch (the update below matches both): it renews the lease. Refusing it
 	// fenced the relay, which restarted under a new epoch and invalidated every grant whenever the control plane was
 	// slow (F21-01). A process that announced its own shutdown (offline within its lease) stays shut down.
-	if state == "retired" || (state == "offline" && !in.Draining && expires.After(now)) {
+	// An operator drain stays in force past its deadline (ReconcileExpiredDrains turns it offline, deadline kept) until
+	// resume clears the deadline: the relay keeps heartbeating drained and never comes back ready on its own.
+	operatorDraining := relayOperatorDrained(state, drainDeadline)
+	if state == "retired" || (state == "offline" && !operatorDraining && !in.Draining && expires.After(now)) {
 		return out, set, required, invalidUsage("relay_nodes.go:166")
 	}
 	// An operator-drained node's heartbeat is accepted whether or not the relay has applied the drain yet: the lease
@@ -425,7 +428,7 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 		return out, set, required, err
 	}
 	expires = now.Add(relayRegistryLease)
-	operatorDraining := state == "draining"
+	drainedState := state
 	state = "registered"
 	if in.Ready {
 		state = "ready"
@@ -436,9 +439,9 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 		state = "offline"
 	}
 	if operatorDraining {
-		state = "draining"
+		state = drainedState // draining, or offline once the deadline passed
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state=$4,ready=$5,capacity_used=$6,capacity_observed_at=$7,last_heartbeat_at=$7,registry_expires_at=$8,drain_deadline=CASE WHEN $4='draining' THEN coalesce(drain_deadline,$7) ELSE NULL END,observation=(coalesce(observation,'{}'::jsonb)-'mesh')||$9::jsonb,updated_at=$7 WHERE id=$1 AND node_generation=$2 AND process_epoch=$3`, in.NodeID, in.Generation, in.ProcessEpoch, state, in.Ready && !in.Draining && !operatorDraining, in.CapacityUsed, now, expires, observation)
+	_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state=$4,ready=$5,capacity_used=$6,capacity_observed_at=$7,last_heartbeat_at=$7,registry_expires_at=$8,drain_deadline=CASE WHEN $10 THEN coalesce(drain_deadline,$7) ELSE NULL END,observation=(coalesce(observation,'{}'::jsonb)-'mesh')||$9::jsonb,updated_at=$7 WHERE id=$1 AND node_generation=$2 AND process_epoch=$3`, in.NodeID, in.Generation, in.ProcessEpoch, state, in.Ready && !in.Draining && !operatorDraining, in.CapacityUsed, now, expires, observation, operatorDraining)
 	if err != nil {
 		return out, set, required, err
 	}
@@ -539,6 +542,13 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeEdgeSnapshot(w, r, out)
+}
+
+// relayOperatorDrained reports an operator drain in force: draining, or offline with the drain's deadline still set
+// (ReconcileExpiredDrains ended the grace). Only resume or retire ends it; a relay's own shutdown (offline) clears no
+// operator intent because it never sets a deadline.
+func relayOperatorDrained(state string, deadline sql.NullTime) bool {
+	return state == "draining" || state == "offline" && deadline.Valid
 }
 
 // relayDrainDeadline is the operator drain's deadline in Unix seconds (now when the row has none).

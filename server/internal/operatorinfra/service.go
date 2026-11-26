@@ -234,7 +234,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			}
 			// Compare-and-set: a request built on an older read (a resume racing a newer drain) is refused. Only a
 			// drained node resumes: resuming a serving one would take it out of rotation until it re-registers.
-			tag, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes SET operator_revision=operator_revision+1 WHERE id=$1 AND operator_revision=$2 AND ($3<>'resume' OR state='draining')`, in.NodeID, in.Revision, in.Action)
+			tag, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes SET operator_revision=operator_revision+1 WHERE id=$1 AND operator_revision=$2 AND ($3<>'resume' OR state='draining' OR state='offline' AND drain_deadline IS NOT NULL)`, in.NodeID, in.Revision, in.Action)
 			if err != nil {
 				return err
 			}

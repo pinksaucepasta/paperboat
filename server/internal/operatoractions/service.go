@@ -374,7 +374,8 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 
 	var state string
 	var version int64
-	if err := tx.QueryRow(ctx, `SELECT state,version FROM control_tunnel_nodes WHERE id=$1 AND (roles @> ARRAY['relay']::text[] OR roles @> ARRAY['peer_relay']::text[]) FOR UPDATE`, target).Scan(&state, &version); err != nil {
+	var drained bool // offline with the drain's deadline still set: an operator drain whose grace ended
+	if err := tx.QueryRow(ctx, `SELECT state,version,state='offline' AND drain_deadline IS NOT NULL FROM control_tunnel_nodes WHERE id=$1 AND (roles @> ARRAY['relay']::text[] OR roles @> ARRAY['peer_relay']::text[]) FOR UPDATE`, target).Scan(&state, &version, &drained); err != nil {
 		if operatorNoRowsOnly(err) {
 			return ErrNotFound
 		}
@@ -391,7 +392,7 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 		if drain && state != "ready" && state != "registered" {
 			return ErrConflict
 		}
-		if !drain && state != "draining" {
+		if !drain && state != "draining" && !drained {
 			return ErrConflict
 		}
 		if _, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes SET state=$2,ready=false,drain_deadline=CASE WHEN $2='draining' THEN now()+interval '30 seconds' ELSE NULL END,version=version+1,updated_at=now() WHERE id=$1`, target, wanted); err != nil {
