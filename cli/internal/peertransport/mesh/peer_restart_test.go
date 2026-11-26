@@ -2,7 +2,9 @@ package mesh
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/netip"
 	"slices"
 	"testing"
@@ -112,14 +114,26 @@ func restartExchange(t *testing.T, from, to *Server) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	// One UDP datagram can be lost: with no relay a restarted peer drops its reply until it trusts a path
+	// (magicsock endpoint.send). So resend every second until the deadline, as a real transport does.
 	deadline, _ := ctx.Deadline()
-	_ = c.SetDeadline(deadline)
-	if _, err := c.Write([]byte("restart")); err != nil {
-		t.Fatal(err)
-	}
 	var body [7]byte
-	if _, err := io.ReadFull(c, body[:]); err != nil || string(body[:]) != "restart" {
-		t.Fatalf("same-identity carrier unreachable after listener replacement: %q, %v", body, err)
+	for {
+		next := time.Now().Add(time.Second)
+		if next.After(deadline) {
+			next = deadline
+		}
+		_ = c.SetDeadline(next)
+		if _, err = c.Write([]byte("restart")); err == nil {
+			_, err = io.ReadFull(c, body[:])
+		}
+		if err == nil && string(body[:]) == "restart" {
+			return
+		}
+		var late net.Error
+		if !errors.As(err, &late) || !late.Timeout() || !time.Now().Before(deadline) {
+			t.Fatalf("same-identity carrier unreachable after listener replacement: %q, %v", body, err)
+		}
 	}
 }
 
