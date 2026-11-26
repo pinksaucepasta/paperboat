@@ -543,6 +543,7 @@ func TestUpdateDuringAnActivationRefusesAtOnceAsBusy(t *testing.T) {
 	for _, args := range [][]string{
 		{"update"}, {"update", "--json"}, {"update", "--force"}, {"update", "--force", "--json"},
 		{"update", "--approve", updateApprovalCandidateID, "--json"}, {"update", "download", "--json"},
+		{"update", "check"}, {"update", "check", "--json"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			fixture := startUpdateApprovalControlFixture(t)

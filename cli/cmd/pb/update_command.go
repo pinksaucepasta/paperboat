@@ -86,6 +86,10 @@ func readLocalDaemonSnapshot(ctx context.Context) (localapi.Snapshot, error) {
 func actionUpdateCheck(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 30*time.Second)
 	defer cancel()
+	// During an activation the check cannot decide eligibility (hostd does not answer): say what is happening instead.
+	if err := refuseUpdateWhileActivating(ctx); err != nil {
+		return err
+	}
 	client, err := newUpdateControlClient(ctx, 30*time.Second)
 	if err != nil {
 		return err
