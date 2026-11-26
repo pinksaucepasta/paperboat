@@ -12,16 +12,12 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
 const (
 	nativeVersion     byte = 1
-	nativeRoleControl byte = 1
-	nativeRoleInput   byte = 2
-	nativeRoleOutput  byte = 3
 	nativeRoleUnified byte = 4
 	nativeBindingSize      = 32
 	nativeMaxRecord        = 1 << 20
@@ -112,59 +108,6 @@ func FallbackEligible(err error) bool {
 	return errors.As(err, &target) && target.TransportRetryable()
 }
 
-func authenticateNativeStreamGroup(ctx context.Context, connection nativeStreamGroup, target *resolver.TerminalTarget, transport string) (*nativeMessageConnection, error) {
-	var id [16]byte
-	if _, err := io.ReadFull(rand.Reader, id[:]); err != nil {
-		_ = connection.Close()
-		return nil, err
-	}
-	control, err := connection.OpenStream(ctx)
-	if err != nil {
-		_ = connection.Close()
-		return nil, errors.Join(ErrPeerStreamOpen, &terminalTransportError{transport: transport, cause: err})
-	}
-	if err := writeNativePreface(control, nativeRoleControl, id, nil, target.Auth.Token); err != nil {
-		_ = connection.Close()
-		return nil, classifyNativeHandshakeError(ctx, transport, err)
-	}
-	message := newNativeMessageConnection(connection, control)
-	binding, err := nativeHandshake(ctx, message)
-	if err != nil {
-		_ = message.Close()
-		return nil, classifyNativeHandshakeError(ctx, transport, err)
-	}
-	var input, output nativeStream
-	// The host admits auxiliary streams in this order. Opening concurrently
-	// allows relay multiplexing to deliver output before input, causing a
-	// stream-scoped authority mismatch even though the transport is valid.
-	for _, role := range []byte{nativeRoleInput, nativeRoleOutput} {
-		stream, openErr := connection.OpenStream(ctx)
-		if openErr == nil {
-			openErr = writeNativePreface(stream, role, id, binding, "")
-		}
-		if openErr != nil {
-			if stream != nil {
-				_ = stream.Close()
-			}
-			if input != nil {
-				_ = input.Close()
-			}
-			if output != nil {
-				_ = output.Close()
-			}
-			_ = message.Close()
-			return nil, &terminalTransportError{transport: transport, cause: openErr}
-		}
-		if role == nativeRoleInput {
-			input = stream
-		} else {
-			output = stream
-		}
-	}
-	message.attach(input, output)
-	return message, nil
-}
-
 func authenticateUnifiedNativeStream(ctx context.Context, connection nativeStreamGroup, target *resolver.TerminalTarget, transport string) (*nativeMessageConnection, error) {
 	message, helloID, err := startUnifiedNativeStream(ctx, connection, target, transport)
 	if err != nil {
@@ -195,7 +138,6 @@ func startUnifiedNativeStream(ctx context.Context, connection nativeStreamGroup,
 		return nil, "", classifyNativeHandshakeError(ctx, transport, err)
 	}
 	message := newNativeMessageConnection(connection, control)
-	message.unified = true
 	helloID, err := writeNativeHello(ctx, message)
 	if err != nil {
 		_ = message.Close()
@@ -252,14 +194,6 @@ func classifyNativeHandshakeError(ctx context.Context, transport string, err err
 	return &terminalTransportError{transport: transport, cause: err}
 }
 
-func nativeHandshake(ctx context.Context, message helperMessageConnection) ([]byte, error) {
-	id, err := writeNativeHello(ctx, message)
-	if err != nil {
-		return nil, err
-	}
-	return readNativeWelcome(ctx, message, id)
-}
-
 func writeNativeHello(ctx context.Context, message helperMessageConnection) (string, error) {
 	payload, _ := json.Marshal(map[string]any{"min_version": helperProtocolVersion, "max_version": helperProtocolVersion, "capabilities": helperCapabilities()})
 	id := helperID("request")
@@ -288,14 +222,11 @@ func readNativeWelcome(ctx context.Context, message helperMessageConnection, id 
 type nativeMessageConnection struct {
 	connection nativeStreamGroup
 	control    nativeStream
-	input      nativeStream
-	output     nativeStream
 	ctx        context.Context
 	cancel     context.CancelFunc
 	reads      chan nativeMessage
 	writeMu    sync.Mutex
 	closeOnce  sync.Once
-	unified    bool
 }
 type nativeMessage struct {
 	kind helperMessageType
@@ -308,10 +239,6 @@ func newNativeMessageConnection(connection nativeStreamGroup, control nativeStre
 	c := &nativeMessageConnection{connection: connection, control: control, ctx: ctx, cancel: cancel, reads: make(chan nativeMessage, 2)}
 	go c.read(control, true)
 	return c
-}
-func (c *nativeMessageConnection) attach(input, output nativeStream) {
-	c.input, c.output = input, output
-	go c.read(output, false)
 }
 func (c *nativeMessageConnection) read(stream io.Reader, typed bool) {
 	for {
@@ -350,17 +277,9 @@ func (c *nativeMessageConnection) WriteMessage(ctx context.Context, kind helperM
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	stream := c.control
-	typed := true
 	recordKind := nativeStructured
 	if kind == helperBinaryMessage {
 		recordKind = nativeBinary
-		if !c.unified && len(data) > 0 && (data[0] == protocol.TerminalInputOpcode || data[0] == protocol.TerminalInputZstdOpcode || data[0] == protocol.TerminalEOFOpcode) {
-			if c.input == nil {
-				return errors.New("native input stream unavailable")
-			}
-			stream = c.input
-			typed = false
-		}
 	} else if kind != helperStructuredMessage {
 		return errors.New("invalid helper message type")
 	}
@@ -369,7 +288,7 @@ func (c *nativeMessageConnection) WriteMessage(ctx context.Context, kind helperM
 	}
 	cancelDone := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { _ = stream.SetWriteDeadline(time.Now()); close(cancelDone) })
-	err := writeNativeRecord(stream, recordKind, data, typed)
+	err := writeNativeRecord(stream, recordKind, data, true)
 	if !stop() {
 		<-cancelDone
 	}
@@ -387,7 +306,7 @@ func (c *nativeMessageConnection) WriteMessage(ctx context.Context, kind helperM
 // not keep the shared association's flow-control window.
 func (c *nativeMessageConnection) Abort() {
 	c.closeOnce.Do(func() {
-		for _, stream := range []nativeStream{c.control, c.input, c.output} {
+		for _, stream := range []nativeStream{c.control} {
 			if stream == nil {
 				continue
 			}
@@ -406,7 +325,7 @@ func (c *nativeMessageConnection) Close() error {
 	c.closeOnce.Do(func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		for _, stream := range []nativeStream{c.control, c.input, c.output} {
+		for _, stream := range []nativeStream{c.control} {
 			if stream == nil {
 				continue
 			}

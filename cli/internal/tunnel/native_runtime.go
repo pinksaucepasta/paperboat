@@ -376,7 +376,7 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 				message = &pipelinedWelcome{helperMessageConnection: unified, helloID: helloID}
 			}
 		} else {
-			message, err = authenticateNativeStreamGroup(ctx, group, target, "native")
+			message, err = authenticateUnifiedNativeStream(ctx, group, target, "native")
 		}
 		authEnd(err)
 		if err != nil {
