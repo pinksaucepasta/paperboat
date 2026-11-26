@@ -60,7 +60,7 @@ func (g *scriptedGate) Rollback(context.Context, GateRequest) error {
 // A native owner returns the verified prior Source only after restoration. The
 // manager then owns gate reconciliation/quarantine, never executable rollback.
 func TestPreparedGateFailureKeepsNativeOwnerAndApprovalContracts(t *testing.T) {
-	for _, mode := range []string{"old route unhealthy", "drain deadline", "candidate unhealthy", "rollback uncertain"} {
+	for _, mode := range []string{"old route unhealthy", "drain deadline", "candidate unhealthy", "rollback uncertain", "participant failed"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newFixture(t)
 			failure := errors.New(mode)
@@ -73,6 +73,8 @@ func TestPreparedGateFailureKeepsNativeOwnerAndApprovalContracts(t *testing.T) {
 				f.manager.config.DrainTimeout = time.Millisecond
 			case "candidate unhealthy":
 				gate.activeErr = failure
+			case "participant failed":
+				gate.candidateErr = stepFailure{}
 			case "rollback uncertain":
 				gate.activeErr = failure
 				gate.rollbackErr = errors.New("restored route unavailable")
@@ -96,6 +98,15 @@ func TestPreparedGateFailureKeepsNativeOwnerAndApprovalContracts(t *testing.T) {
 				if mode == "candidate unhealthy" {
 					expected = updateflow.FailureHealth
 					quarantine = f.candidate.Version
+				}
+				if mode == "participant failed" {
+					expected = updateflow.FailureCandidate
+					if j.FailedStep != "participant" || j.FailedReason != "daemon_state" {
+						t.Fatalf("rolled-back step not recorded: %+v", j)
+					}
+				}
+				if j.FailedVersion != f.candidate.Version {
+					t.Fatalf("rolled-back version not recorded: %+v", j)
 				}
 				if j.Stage != updateflow.StageIdle || j.LastFailure != expected || j.CandidateVersion != quarantine {
 					t.Fatalf("incorrect outcome: %+v", j)
@@ -162,3 +173,10 @@ func TestNativeSourceCommitKeepsOriginalApprovalUntilGateAndFinalizerComplete(t 
 		})
 	}
 }
+
+// stepFailure is an activation error that names its step, as the native activation's errors do.
+type stepFailure struct{}
+
+func (stepFailure) Error() string         { return "update participant failed: daemon_state" }
+func (stepFailure) FailureStep() string   { return "participant" }
+func (stepFailure) FailureReason() string { return "daemon_state" }

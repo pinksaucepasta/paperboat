@@ -914,6 +914,23 @@ func TestActivationFinishingTextSaysTimeLeft(t *testing.T) {
 	}
 }
 
+// A rolled-back update says which version failed, where and when, and offers the retry (canary
+// 2026-11-26: status said only "failed (drain_failed)", update_available was false, doctor was green).
+func TestRolledBackUpdateIsReported(t *testing.T) {
+	at := time.Date(2026, 11, 26, 10, 28, 3, 0, time.UTC)
+	state := workerupdate.TransactionState{Stage: updateflow.StageIdle, ActiveVersion: "2026.11.26.4", Failure: updateflow.FailureCandidate,
+		FailedVersion: "2026.11.26.6", FailedStep: "participant", FailedReason: "daemon_state", UpdatedAt: at}
+	want := "Last update to 2026.11.26.6 failed at participant (daemon_state) and was rolled back at " + at.Local().Format(time.RFC3339) + "; run `pb update` to retry."
+	result := updateStatusCommandResult("2026.11.26.4", updated.ControlResponse{ActivationFailure: string(state.Failure), Transaction: state}, nil)
+	if result.FailedUpdate == nil || result.FailedUpdate.text(result.ActivationFailure) != want || !result.UpdateAvailable || result.LatestVersion != "2026.11.26.6" {
+		t.Fatalf("%+v", result)
+	}
+	check := doctorUpdateRolledBack(string(state.Failure), state)
+	if check.Status != doctorpkg.StatusWarning || check.Summary != want || check.Validate() != nil {
+		t.Fatalf("%+v validate=%v", check, check.Validate())
+	}
+}
+
 func TestDoctorUpdateActivationPendingSaysFinishing(t *testing.T) {
 	now := time.Date(2026, 11, 26, 8, 44, 0, 0, time.UTC)
 	check := doctorUpdateActivationPending(now.Add(5*time.Minute), now)

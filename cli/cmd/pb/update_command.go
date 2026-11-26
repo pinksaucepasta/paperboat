@@ -140,7 +140,9 @@ type updateStatusResult struct {
 	RuntimeState      string                             `json:"runtime_state,omitempty"`
 	ActivationPending bool                               `json:"activation_pending"`
 	ActivationFailure string                             `json:"activation_failure,omitempty"`
-	HealthDeadline    time.Time                          `json:"health_deadline,omitempty"`
+	// FailedUpdate is the last update that was rolled back, with where it failed and when.
+	FailedUpdate   *failedUpdate `json:"failed_update,omitempty"`
+	HealthDeadline time.Time     `json:"health_deadline,omitempty"`
 	// ActivationFinishing: the update is installed and the last step (hostd commit, manuals) is being retried.
 	ActivationFinishing bool                            `json:"activation_finishing,omitempty"`
 	LastCheck           time.Time                       `json:"last_check,omitempty"`
@@ -177,6 +179,13 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
 	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, HealthDeadline: response.Transaction.HealthDeadline, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
 	result.LatestVersion = response.Observation.Version
+	if state := response.Transaction; result.ActivationFailure != "" && state.FailedVersion != "" {
+		result.FailedUpdate = &failedUpdate{Version: state.FailedVersion, Step: state.FailedStep, Reason: state.FailedReason, RolledBackAt: state.UpdatedAt}
+		// The rolled-back release is still available to retry, even if the last check is older.
+		if comparison, err := selfupdate.CompareVersions(state.FailedVersion, result.LatestVersion); result.LatestVersion == "" || err == nil && comparison > 0 {
+			result.LatestVersion = state.FailedVersion
+		}
+	}
 	if result.ActivationFailure == "" && (response.Transaction.Failure == updateflow.FailureCommit || response.Transaction.Failure == updateflow.FailureRevoked) {
 		result.ActivationFailure = string(response.Transaction.Failure)
 	}
@@ -272,6 +281,8 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 		fmt.Fprintln(command.OutOrStdout(), "Activation: "+activationFinishingText(result.HealthDeadline, time.Now()))
 	} else if result.ActivationFailure == string(updateflow.FailureRevoked) {
 		fmt.Fprintf(command.OutOrStdout(), "Activation: failed (%s). The installed version is no longer allowed. Run `pb update` to install the current release, or `pb uninstall` to remove Paperboat.\n", result.ActivationFailure)
+	} else if result.FailedUpdate != nil {
+		fmt.Fprintln(command.OutOrStdout(), "Activation: "+result.FailedUpdate.text(result.ActivationFailure))
 	} else if result.ActivationFailure != "" {
 		fmt.Fprintf(command.OutOrStdout(), "Activation: failed (%s)\n", result.ActivationFailure)
 	} else {
@@ -578,4 +589,21 @@ func updatedControlSocket() (string, error) {
 		layout, err = service.UserLayout(runtime.GOOS, uid)
 	}
 	return layout.UpdaterSocket, err
+}
+
+type failedUpdate struct {
+	Version      string    `json:"version"`
+	Step         string    `json:"step,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
+	RolledBackAt time.Time `json:"rolled_back_at"`
+}
+
+// text says which update was rolled back, where and when (canary 2026-11-26: status said only
+// "failed (drain_failed)").
+func (f *failedUpdate) text(failure string) string {
+	step := failure
+	if f.Step != "" {
+		step = f.Step + " (" + f.Reason + ")"
+	}
+	return fmt.Sprintf("Last update to %s failed at %s and was rolled back at %s; run `pb update` to retry.", f.Version, step, f.RolledBackAt.Local().Format(time.RFC3339))
 }

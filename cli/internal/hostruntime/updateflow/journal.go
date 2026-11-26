@@ -128,11 +128,16 @@ type Journal struct {
 	AttemptCount                 uint32                `json:"attempt_count"`
 	RollbackCount                uint32                `json:"rollback_count"`
 	LastFailure                  Failure               `json:"last_failure,omitempty"`
-	CleanupComplete              bool                  `json:"cleanup_complete"`
-	BlockedReason                string                `json:"blocked_reason,omitempty"`
-	DeferredManual               bool                  `json:"deferred_manual,omitempty"`
-	RequiredVersion              string                `json:"required_version,omitempty"`
-	NextCheckAt                  time.Time             `json:"next_check_at,omitempty,omitzero"`
+	// FailedVersion, FailedStep and FailedReason say which update was rolled back and where it failed;
+	// StageUpdatedAt is when.
+	FailedVersion   string    `json:"failed_version,omitempty"`
+	FailedStep      string    `json:"failed_step,omitempty"`
+	FailedReason    string    `json:"failed_reason,omitempty"`
+	CleanupComplete bool      `json:"cleanup_complete"`
+	BlockedReason   string    `json:"blocked_reason,omitempty"`
+	DeferredManual  bool      `json:"deferred_manual,omitempty"`
+	RequiredVersion string    `json:"required_version,omitempty"`
+	NextCheckAt     time.Time `json:"next_check_at,omitempty,omitzero"`
 	// NativeCommitted marks an approved candidate whose native installation committed but whose finish
 	// (hostd ledger commit, manual refresh) is being retried; CommitAttempts counts the failures and
 	// NextCommitRetry is when the updater tries again. No error text is stored, only counts.

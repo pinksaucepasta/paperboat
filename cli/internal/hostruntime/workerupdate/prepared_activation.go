@@ -136,10 +136,18 @@ func (m *Manager) finishRestored(ctx context.Context, journal updateflow.Journal
 		}
 	}
 	failure, quarantine := updateflow.FailureDrain, ""
+	var detail failureDetail
 	if validationStarted {
 		failure, quarantine = updateflow.FailureHealth, signed.Version
+	} else if errors.As(cause, &detail) {
+		failure = updateflow.FailureCandidate
 	}
-	if idleErr := m.write(m.idleJournal(journal, failure, quarantine)); idleErr != nil {
+	idle := m.idleJournal(journal, failure, quarantine)
+	idle.FailedVersion = signed.Version
+	if detail != nil || errors.As(cause, &detail) {
+		idle.FailedStep, idle.FailedReason = detail.FailureStep(), detail.FailureReason()
+	}
+	if idleErr := m.write(idle); idleErr != nil {
 		return result, errors.Join(cause, idleErr, ErrBlocked)
 	}
 	return result, cause
@@ -323,4 +331,10 @@ func (m *Manager) EndStuckAttempt(ctx context.Context, fault bool) (bool, error)
 		failure = updateflow.FailureRollback
 	}
 	return true, m.write(m.idleJournal(journal, failure, journal.CandidateVersion))
+}
+
+// failureDetail is an activation error that names the step and reason it failed at.
+type failureDetail interface {
+	FailureStep() string
+	FailureReason() string
 }

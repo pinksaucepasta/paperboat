@@ -41,6 +41,10 @@ type activationFailure struct {
 func (e *activationFailure) Error() string { return "update " + e.phase + " failed: " + e.reason }
 func (e *activationFailure) Unwrap() error { return e.cause }
 
+// FailureStep and FailureReason let the update journal record where a rolled-back update failed.
+func (e *activationFailure) FailureStep() string   { return e.phase }
+func (e *activationFailure) FailureReason() string { return e.reason }
+
 func healthFailure(reason string, cause error) error {
 	return &activationFailure{phase: "health", reason: reason, cause: cause}
 }

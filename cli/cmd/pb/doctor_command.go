@@ -30,6 +30,7 @@ import (
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	service "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localwait"
@@ -700,7 +701,15 @@ func doctorUpdateActivationCheck(ctx context.Context) doctorpkg.Check {
 	if err == nil && response.Pending {
 		return doctorUpdateActivationPending(response.Transaction.HealthDeadline, time.Now())
 	}
+	if err == nil && response.ActivationFailure != "" && response.Transaction.FailedVersion != "" {
+		return doctorUpdateRolledBack(response.ActivationFailure, response.Transaction)
+	}
 	return check
+}
+
+func doctorUpdateRolledBack(failure string, state workerupdate.TransactionState) doctorpkg.Check {
+	failed := failedUpdate{Version: state.FailedVersion, Step: state.FailedStep, Reason: state.FailedReason, RolledBackAt: state.UpdatedAt}
+	return doctorpkg.Check{Category: "update", Code: "update_activation", Status: doctorpkg.StatusWarning, Summary: failed.text(failure), Recovery: "Run `pb update` to retry."}
 }
 
 func doctorUpdateActivationPending(deadline, now time.Time) doctorpkg.Check {
