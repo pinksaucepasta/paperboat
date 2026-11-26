@@ -87,6 +87,11 @@ func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string) boo
 	if order, err := selfupdate.CompareVersions(status.Version, version); err == nil {
 		return order >= 0
 	}
+	if _, err := selfupdate.CompareVersions(version, version); err == nil {
+		// A release replaces a development guard unless that guard carries newer guard code (canaries
+		// 2026-11-26: custom -> official kept the custom build's guard).
+		return status.Revision > machineguard.Revision
+	}
 	return status.Revision >= machineguard.Revision
 }
 

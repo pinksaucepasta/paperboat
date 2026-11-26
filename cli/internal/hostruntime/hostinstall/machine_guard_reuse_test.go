@@ -106,12 +106,13 @@ func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
 		version  string
 		notOlder bool
 	}{
-		"same version":                   {machineguard.RuntimeStatus{Version: "2026.11.16.0"}, "2026.11.16.0", true},
-		"newer release kept":             {machineguard.RuntimeStatus{Version: "2026.11.17.2"}, "2026.11.16.0", true},
-		"older release replaced":         {machineguard.RuntimeStatus{Version: "2026.11.13.0"}, "2026.11.16.0", false},
-		"dev guard of the same revision": {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r}, "dev-de73faa7f", true},
-		"dev guard of a higher revision": {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r + 1}, "2026.11.16.0", true},
-		"dev guard of a lower revision":  {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r - 1, Features: machineguard.Features()}, "dev-de73faa7f", false},
+		"same version":                    {machineguard.RuntimeStatus{Version: "2026.11.16.0"}, "2026.11.16.0", true},
+		"newer release kept":              {machineguard.RuntimeStatus{Version: "2026.11.17.2"}, "2026.11.16.0", true},
+		"older release replaced":          {machineguard.RuntimeStatus{Version: "2026.11.13.0"}, "2026.11.16.0", false},
+		"dev guard of the same revision":  {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r}, "dev-de73faa7f", true},
+		"dev guard of a higher revision":  {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r + 1}, "2026.11.16.0", true},
+		"dev guard replaced by a release": {machineguard.RuntimeStatus{Version: "dev-76b5e9764", Revision: r}, "2026.11.16.0", false},
+		"dev guard of a lower revision":   {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r - 1, Features: machineguard.Features()}, "dev-de73faa7f", false},
 	} {
 		if got := MachineGuardNotOlder(c.guard, c.version); got != c.notOlder {
 			t.Errorf("%s: not older = %v", name, got)
