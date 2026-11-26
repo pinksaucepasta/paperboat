@@ -167,7 +167,7 @@ func TestControlStatusWhilePendingCarriesJournalCandidate(t *testing.T) {
 		t.Fatalf("check during an activation: %+v %v", result, err)
 	}
 	// A deferred activation waiting for open terminals is not finishing: --approve --force must not be refused.
-	if err := writeUnixHandoff(root, &unixActivationHandoff{Schema: unixHandoffSchema, Previous: active, Candidate: j.CandidateVersion, ApprovalID: approval, ActiveTerminalBusy: true}); err != nil {
+	if err := writeUnixHandoff(root, &unixActivationHandoff{Schema: unixHandoffSchema, Previous: active, Candidate: j.CandidateVersion, ApprovalID: approval, ActiveTerminalBusy: true, BusyRequiredVersion: j.CandidateVersion, BusyNextCheckAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	if response, err = s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"}); err != nil || response.Activating {
