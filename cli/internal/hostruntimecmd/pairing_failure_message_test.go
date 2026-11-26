@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -121,5 +122,27 @@ func TestNamedReadyMessageUsesTheServerName(t *testing.T) {
 	}
 	if degraded := "Paperboat is paired; its local service is still starting. Run `pb status` to see when it is ready."; namedReadyMessage(degraded, "laptop-2") != degraded {
 		t.Fatal("a not-ready message was replaced")
+	}
+}
+
+// Pairing prints its steps in the order they run and ends on the line naming the server's machine name.
+// The bootstraps are single long functions, so the order is checked in their source.
+func TestPairStepLinesComeInOrderBeforeTheNamedReadyLine(t *testing.T) {
+	for file, steps := range map[string][]string{
+		"bootstrap_unix.go":    {`"Administrator approval is required`, `"Starting the machine services..."`, `"Connecting to Paperboat..."`, `"Setting up encrypted environment..."`, `namedReadyMessage(paired, material.Alias)`},
+		"bootstrap_windows.go": {`"Starting the machine services..."`, `"Setting up encrypted environment..."`, `namedReadyMessage(pairedReadyMessage, material.Alias)`},
+	} {
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at := 0
+		for _, step := range steps {
+			next := strings.Index(string(source[at:]), step)
+			if next < 0 {
+				t.Fatalf("%s: %s missing or out of order", file, step)
+			}
+			at += next + len(step)
+		}
 	}
 }
