@@ -423,7 +423,7 @@ func (b *locoBackend) Start() error {
 	b.logf("disco pub key: %v", mc.DiscoPublicKey())
 
 	mc.SetPrivateKey(b.priv)
-	mc.SetDERPMap(magicsockDERPMap(b.dm))
+	mc.SetDERPMap(b.dm)
 
 	derpRegion := b.derpRegionID()
 
