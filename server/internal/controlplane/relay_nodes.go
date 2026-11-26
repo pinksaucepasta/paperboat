@@ -227,7 +227,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		}
 		gen = max(gen, in.ExpectedGeneration)
 		expires := now.Add(relayRegistryLease)
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state=CASE WHEN state='draining' THEN 'draining' WHEN state='offline' AND drain_deadline IS NOT NULL THEN 'offline' ELSE 'registered' END,ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=CASE WHEN state='draining' OR state='offline' AND drain_deadline IS NOT NULL THEN coalesce(drain_deadline,$3) END,updated_at=$3,version=version+1,observation=coalesce(observation,'{}'::jsonb)||$6::jsonb WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1, fragment)
+		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state=CASE WHEN state='draining' THEN 'draining' WHEN (state='offline' AND drain_deadline IS NOT NULL) THEN 'offline' ELSE 'registered' END,ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=CASE WHEN state='draining' OR (state='offline' AND drain_deadline IS NOT NULL) THEN coalesce(drain_deadline,$3) END,updated_at=$3,version=version+1,observation=coalesce(observation,'{}'::jsonb)||$6::jsonb WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1, fragment)
 		if err != nil {
 			return out, err
 		}

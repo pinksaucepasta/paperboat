@@ -51,7 +51,7 @@ func (o InventoryOptions) normalized() (InventoryOptions, error) {
 
 const installationInventorySQL = `WITH visible AS (
  SELECT i.id,i.node_id,coalesce(n.endpoint_host,'') AS endpoint_host,coalesce(n.region,'') AS region,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,i.created_at,n.last_heartbeat_at,
- n.state='draining' AS draining,CASE WHEN n.state='draining' THEN n.drain_deadline END AS drain_deadline,
+ (n.state='draining' OR (n.state='offline' AND n.drain_deadline IS NOT NULL)) AS draining,CASE WHEN (n.state='draining' OR (n.state='offline' AND n.drain_deadline IS NOT NULL)) THEN n.drain_deadline END AS drain_deadline,
  coalesce(c.version,'') AS version,
  u.id AS update_id,u.target_version AS update_target,u.state AS update_state,u.detail AS update_detail,u.support_reference AS update_reference,u.updated_at AS update_at,
  ` + installationReadySQL + ` AS ready
