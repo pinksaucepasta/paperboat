@@ -26,6 +26,7 @@ type Carrier interface {
 	SendPong([8]byte) error
 	LocalAddr() (netip.AddrPort, error)
 	Ping(context.Context) error
+	Connected() bool // a live connection, false from its first read or write failure
 }
 
 type FallbackCarrier struct {
@@ -408,6 +409,15 @@ func (c *FallbackCarrier) LocalAddr() (netip.AddrPort, error) {
 	}
 	return a.LocalAddr()
 }
+
+// Connected reports whether the carrier in use is connected.
+func (c *FallbackCarrier) Connected() bool {
+	c.mu.RLock()
+	a, closed := c.active, c.closed
+	c.mu.RUnlock()
+	return !closed && a != nil && a.Connected()
+}
+
 func (c *FallbackCarrier) Ping(ctx context.Context) error {
 	a, err := c.current()
 	if err != nil {

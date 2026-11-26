@@ -233,9 +233,14 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	return nil
 }
 
-// connectRelay connects and pings this engine's carrier for region (magicsock PrepareDERP).
+// connectRelay readies this engine's carrier for region for a handshake: a live carrier is used as is, like
+// upstream's sends over a live DERP connection; otherwise it connects and pings (magicsock PrepareDERP).
 func (b *locoBackend) connectRelay(ctx context.Context, region tailcfg.DERPRegionID) error {
-	return b.sys.MagicSock.Get().PrepareDERP(ctx, region)
+	ms := b.sys.MagicSock.Get()
+	if ms.DERPConnected(region) {
+		return nil
+	}
+	return ms.PrepareDERP(ctx, region)
 }
 
 // HomeRegion is the relay region this engine is homed on (0 before a relay is set).

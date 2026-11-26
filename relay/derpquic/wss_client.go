@@ -305,6 +305,13 @@ func (c *WSSClient) LocalAddr() (netip.AddrPort, error) {
 	}
 	return netip.AddrPort{}, nil
 }
+
+// Connected reports whether c holds a WebSocket connection that has not ended.
+func (c *WSSClient) Connected() bool {
+	cc := c.observed.Load() // not c.mu: ensure holds it across a dial
+	return c.ctx.Err() == nil && cc != nil && cc.ctx.Err() == nil
+}
+
 func (c *WSSClient) Ping(ctx context.Context) error {
 	cc, e := c.ensure(ctx)
 	if e != nil {

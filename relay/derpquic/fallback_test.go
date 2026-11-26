@@ -24,6 +24,8 @@ type fakeCarrier struct {
 	recvErr    error
 }
 
+func (f *fakeCarrier) Connected() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.connected }
+
 func (f *fakeCarrier) Connect(ctx context.Context) error {
 	f.mu.Lock()
 	f.connects++

@@ -32,7 +32,7 @@ require (
 	golang.zx2c4.com/wireguard/windows v1.0.1 // indirect
 )
 
-replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261119151000-b2eaa82185fc
+replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261126022731-032f9ea91925
 
 replace github.com/pinksaucepasta/paperboat/shared => ../shared
 

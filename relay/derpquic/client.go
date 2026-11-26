@@ -272,6 +272,13 @@ func (c *Client) LocalAddr() (netip.AddrPort, error) {
 	}
 	return netip.ParseAddrPort(cc.conn.LocalAddr().String())
 }
+
+// Connected reports whether c holds a QUIC connection that has not ended.
+func (c *Client) Connected() bool {
+	cc := c.observed.Load() // not c.mu: ensure holds it across a dial
+	return c.ctx.Err() == nil && cc != nil && cc.conn.Context().Err() == nil
+}
+
 func (c *Client) Ping(ctx context.Context) error {
 	cc, e := c.ensure(ctx)
 	if e != nil {
