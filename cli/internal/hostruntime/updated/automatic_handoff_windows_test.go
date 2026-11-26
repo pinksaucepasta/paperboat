@@ -144,3 +144,23 @@ func TestWindowsManualPendingRetryAcknowledgesHandoff(t *testing.T) {
 	}
 
 }
+
+// winpool-9 2026-11-26: the updater started mid-activation ran its first automatic check, found the activator
+// already owning the journal (resumed=false) and still closed its pipe, so status went unanswered for 10 minutes.
+func TestWindowsAutomaticCheckKeepsServingWhileTheActivatorOwnsTheTransaction(t *testing.T) {
+	oldLoad, oldResume, oldDelay := loadWindowsActivationJournalForController, resumeWindowsActivationForController, windowsActivationHandoffDelay
+	t.Cleanup(func() {
+		loadWindowsActivationJournalForController = oldLoad
+		resumeWindowsActivationForController = oldResume
+		windowsActivationHandoffDelay = oldDelay
+	})
+	windowsActivationHandoffDelay = 0
+	journal := testWindowsActivationJournal()
+	journal.Stage = windowsActivationServicesLive
+	loadWindowsActivationJournalForController = func(WindowsConfig) (windowsActivationJournal, error) { return journal, nil }
+	resumeWindowsActivationForController = func(context.Context, WindowsConfig) (bool, error) { return false, nil }
+	c := &windowsController{config: WindowsConfig{StateRoot: t.TempDir(), AutomaticChecks: true}, activeVersion: journal.Version, handoff: make(chan struct{})}
+	if _, err := c.automaticCheck(context.Background()); err != nil || activationRequested(c.handoff) {
+		t.Fatalf("updater retired while the activator owns the transaction: err=%v closed=%v", err, activationRequested(c.handoff))
+	}
+}

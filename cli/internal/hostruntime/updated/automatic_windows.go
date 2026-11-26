@@ -32,9 +32,17 @@ func (c *windowsController) automaticCheck(ctx context.Context) (autoupdate.Resu
 	if journal, loadErr := loadWindowsActivationJournalForController(c.config); loadErr == nil {
 		if windowsActivationNeedsResume(journal, c.activeVersion, false) {
 			err := c.handoffAutomaticActivation(ctx, func(ctx context.Context) error {
-				_, err := resumeWindowsActivationForController(ctx, c.config)
+				resumed, err := resumeWindowsActivationForController(ctx, c.config)
+				if err == nil && !resumed {
+					return errActivatorOwnsTransaction
+				}
 				return err
 			})
+			// A running activator owns the transaction: this updater keeps its pipe and answers status (activating)
+			// through the cutover and health check instead of exiting (winpool-9 2026-11-26: down for 10 minutes).
+			if errors.Is(err, errActivatorOwnsTransaction) {
+				err = nil
+			}
 			return autoupdate.Result{Version: journal.Version}, err
 		}
 	} else if !errors.Is(loadErr, os.ErrNotExist) {
@@ -81,6 +89,9 @@ func (c *windowsController) automaticCheck(ctx context.Context) (autoupdate.Resu
 	}
 	return result, nil
 }
+
+// errActivatorOwnsTransaction stops a handoff when no activator was started because one already runs.
+var errActivatorOwnsTransaction = errors.New("the update activator already owns the transaction")
 
 // Serialize the final automatic SCM handoff with changes to machine settings.
 func (c *windowsController) handoffAutomaticActivation(ctx context.Context, launch func(context.Context) error) error {

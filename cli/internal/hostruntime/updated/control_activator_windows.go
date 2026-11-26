@@ -135,6 +135,7 @@ func (c *windowsActivatorControl) invoke(ctx context.Context, request ControlReq
 	}
 	response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: journal.PreviousVersion, Transaction: windowsTransactionState(journal)}
 	response.Pending = journal.Stage != windowsActivationAwaitingApproval && journal.Stage != windowsActivationCommitted && journal.Stage != windowsActivationRolledBack
+	response.Activating = response.Pending
 	if journal.Stage == windowsActivationCommitted {
 		response.Version = journal.Version
 		response.Updated = true
