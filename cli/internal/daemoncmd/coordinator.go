@@ -28,8 +28,10 @@ type Coordinator struct {
 	cfg CoordinatorConfig
 	// lifeMu guards lifeCancel apart from mu: Stop cancels every running stage before it waits for mu (a
 	// reconcile holds mu while a stage runs). Prior art: Tailscale's shutdownCertRefreshLoop runs without b.mu.
-	lifeMu            sync.Mutex
-	lifeCancel        context.CancelFunc
+	lifeMu     sync.Mutex
+	lifeCancel context.CancelFunc
+	// stageParent is the running reconcile's caller ctx (under mu), which every stage's budget derives from.
+	stageParent       context.Context
 	rpcServer         *daemonrpc.Server
 	rpcListener       net.Listener
 	rpcBackend        *daemonrpc.LiveDaemonBackend
@@ -615,9 +617,9 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemo
 		if parent == nil {
 			return errors.New("local access coordinator is not running")
 		}
-		ctx, cancel := context.WithTimeout(parent, c.cfg.ReconcileTimeout)
-		err := c.replaceGuardedRoutes(ctx, localPeers)
-		cancel()
+		// No deadline over the whole reconcile: each stage has its own (stageCtx), so a slow browser stage never
+		// spends the native access stages' budget.
+		err := c.replaceGuardedRoutes(parent, localPeers)
 		if err != nil {
 			err = errors.Join(err, skipped)
 			c.reportReconcileError(fmt.Errorf("local machine access withdrawn; retry after repairing the machine guard or browser trust: %w", err))

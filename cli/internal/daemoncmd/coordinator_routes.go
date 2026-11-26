@@ -113,15 +113,17 @@ func transientGuardFailure(ctx context.Context, err error) bool {
 // guardCallBudget bounds one guard call of the browser gateway (Acquire, Certificate) on its own.
 const guardCallBudget = 5 * time.Second
 
-// stageCtx is one reconcile stage's budget, derived from the coordinator's lifetime so Stop ends it at once. c.mu
-// is held (c.ctx is only read under it).
+// stageCtx is one reconcile stage's budget: it ends with the reconcile's caller (its deadline or cancellation), with
+// Stop (the coordinator's lifetime) and after timeout, never with an earlier stage's spent budget. c.mu is held.
 func (c *Coordinator) stageCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
-	if c.ctx == nil {
+	if c.ctx == nil || c.stageParent == nil {
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // not running: every stage ends before it starts
+		cancel() // not reconciling: every stage ends before it starts
 		return ctx, cancel
 	}
-	return context.WithTimeout(c.ctx, timeout)
+	ctx, cancel := context.WithTimeout(c.stageParent, timeout)
+	stop := context.AfterFunc(c.ctx, cancel)
+	return ctx, func() { stop(); cancel() }
 }
 
 func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonrpc.PeerUpdate) (err error) {
@@ -133,19 +135,22 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	if c.ctx == nil {
 		return errors.New("coordinator is not running")
 	}
-	// Each stage has its own budget from the coordinator's lifetime (stageCtx), so a slow stage never spends a later
-	// one's, and Stop ends them all. The caller's ctx only decides whether to start.
+	// Each stage has its own budget (stageCtx), so a slow stage never spends a later one's; the caller's ctx and
+	// Stop end them all.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	c.stageParent = ctx
+	defer func() { c.stageParent = nil }()
 	stage, cancelStage := c.stageCtx(c.cfg.ReconcileTimeout)
 	defer cancelStage()
 	err = c.replaceGuardedRoutesLocked(stage, peers)
-	// Only Stop's cancellation (c.ctx) rules out a retry: the failed step may be a later stage with its own budget.
+	// Only the caller's end or Stop rules out a retry, never a failed stage's own budget: the failed step may be a
+	// later stage than the first.
 	// A guard that restarted (an update or self-heal replaced it) or answered too slowly leaves this connection
 	// dead (the failed step dropped it): on a timeout or closed connection, dial once more within this reconcile.
 	var op coordinatorOperationError
-	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(c.ctx, err) && errors.As(err, &op) &&
+	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(ctx, err) && c.ctx.Err() == nil && errors.As(err, &op) &&
 		(op.LocalAccessStep() == "guard_status" || op.LocalAccessStep() == "native_listener") {
 		diagnosticlog.TryWarn("machine guard did not answer; dialing it again", "error", err)
 		// The failed attempt spent most of its budget: the retry gets a full one of its own, ended by Stop.
