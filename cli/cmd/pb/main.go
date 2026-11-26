@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -83,10 +84,23 @@ func mainExit() (exitCode int) {
 			} else {
 				fmt.Fprintf(os.Stderr, "pb: Paperboat stopped unexpectedly. Retry; if this continues, contact support with reference %s.\n", supportref.FromContext(ctx))
 			}
+			// Root host-service steps keep diagnostics in memory only, so stderr (their caller's terminal and failure
+			// record) is the one place the panic site survives (a revoked machine's install inventory, 2026-11-26).
+			writePanicDetail(os.Stderr, failure, debug.Stack())
 			exitCode = 1
 		}
 	}()
 	return runWithReporter(ctx, os.Args[1:], os.Stdout, os.Stderr, reporter)
+}
+
+// maxPanicStack bounds the stack printed for a panic: the panicking goroutine's frames, not a full dump.
+const maxPanicStack = 8 << 10
+
+func writePanicDetail(w io.Writer, failure any, stack []byte) {
+	if len(stack) > maxPanicStack {
+		stack = append(stack[:maxPanicStack:maxPanicStack], "\n...(truncated)\n"...)
+	}
+	_, _ = fmt.Fprintf(w, "pb: panic: %v\n%s", failure, stack)
 }
 
 func processComponent(args []string) string {
