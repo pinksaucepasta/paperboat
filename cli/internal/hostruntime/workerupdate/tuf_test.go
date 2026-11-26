@@ -13,13 +13,15 @@ import (
 )
 
 type failureDomainClient struct {
-	request hostdproto.UpdateGateRequest
-	result  hostdproto.UpdateGateResponse
-	err     error
+	request  hostdproto.UpdateGateRequest
+	result   hostdproto.UpdateGateResponse
+	err      error
+	deadline time.Time
 }
 
-func (c *failureDomainClient) UpdateGate(_ context.Context, request hostdproto.UpdateGateRequest) (hostdproto.UpdateGateResponse, error) {
+func (c *failureDomainClient) UpdateGate(ctx context.Context, request hostdproto.UpdateGateRequest) (hostdproto.UpdateGateResponse, error) {
 	c.request = request
+	c.deadline, _ = ctx.Deadline()
 	return c.result, c.err
 }
 
@@ -135,6 +137,10 @@ func TestHostdFailureDomainSourceBindsFreshSignedInputs(t *testing.T) {
 	domain, err := source.ResolveFailureDomain(context.Background(), request)
 	if err != nil || domain != "iad-1" {
 		t.Fatalf("domain=%q err=%v", domain, err)
+	}
+	// The lookup is bounded: hostd does not answer during an activation, and the check must not wait 35 s for it.
+	if client.deadline.IsZero() || time.Until(client.deadline) > failureDomainTimeout {
+		t.Fatalf("failure-domain lookup deadline = %v, want within %v", client.deadline, failureDomainTimeout)
 	}
 	if client.request.Operation != hostdproto.UpdateGateTarget || client.request.Version != request.Version || client.request.ManifestSHA256 != request.ManifestSHA256 || client.request.TransactionID != eligibilityTransactionID(request) {
 		t.Fatalf("request=%+v", client.request)

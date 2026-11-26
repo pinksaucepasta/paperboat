@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
@@ -18,11 +19,17 @@ type HostdFailureDomainSource struct {
 	MachineID string
 }
 
+const failureDomainTimeout = 5 * time.Second
+
 func (s HostdFailureDomainSource) ResolveFailureDomain(ctx context.Context, request FailureDomainRequest) (string, error) {
 	if ctx == nil || s.Client == nil || !releasepolicy.IsIdentifier(s.MachineID) || request.MachineID != s.MachineID || !releasepolicy.IsIdentifier(request.MachineID) || !releasepolicy.IsVersion(request.Version) || !releasepolicy.IsDigest(request.ManifestSHA256) || !releasepolicy.IsDigest(request.PlanSHA256) || !releasepolicy.IsPlatform(request.Platform, request.Architecture) || request.ReleaseID == "" {
 		return "", ErrFailureDomainUnavailable
 	}
 	transactionID := eligibilityTransactionID(request)
+	// hostd answers this locally in milliseconds; during an activation it does not answer at all, and the hostd client's
+	// 35 s request timeout made `pb update check` hang 36 s (smoke rehearsal .10→.11).
+	ctx, cancel := context.WithTimeout(ctx, failureDomainTimeout)
+	defer cancel()
 	response, err := s.Client.UpdateGate(ctx, hostdproto.UpdateGateRequest{Operation: hostdproto.UpdateGateTarget, TransactionID: transactionID, Version: request.Version, ManifestSHA256: request.ManifestSHA256})
 	if err != nil {
 		return "", errors.Join(ErrFailureDomainUnavailable, err)
