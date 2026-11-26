@@ -141,6 +141,7 @@ func (c *windowsActivatorControl) invoke(ctx context.Context, request ControlReq
 	}
 	if journal.Stage == windowsActivationRolledBack {
 		response.ActivationFailure = "activation_failed"
+		reportWindowsRolledBackUpdate(c.config.StateRoot, journal.PreviousVersion, &response)
 	}
 	if journal.Stage == windowsActivationRollingBack || journal.Stage == windowsActivationRollbackReady {
 		response.ActivationFailure = "recovery_pending"

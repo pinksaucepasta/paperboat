@@ -806,7 +806,13 @@ func (b *windowsSCMActivationBackend) WriteJournal(j windowsActivationJournal) e
 	if err := atomicfile.Write(path, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
 		return err
 	}
-	return applyWindowsReleaseACL(path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)")
+	if err := applyWindowsReleaseACL(path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)"); err != nil {
+		return err
+	}
+	if err := recordWindowsUpdateOutcome(b.config.StateRoot, j, time.Now()); err != nil || j.Stage != windowsActivationRolledBack {
+		return err
+	}
+	return applyWindowsReleaseACL(windowsRolledBackUpdatePath(b.config.StateRoot), "D:P(A;;FA;;;SY)(A;;FA;;;BA)")
 }
 
 // windowsLocalAPIStateDir is the user daemon's state directory, the sibling of the runtime state root.

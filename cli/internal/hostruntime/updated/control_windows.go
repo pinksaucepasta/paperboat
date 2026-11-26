@@ -427,6 +427,9 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 				}
 			}
 		}
+		if response.ActivationFailure == "" || response.ActivationFailure == "activation_failed" {
+			reportWindowsRolledBackUpdate(c.config.StateRoot, c.activeVersion, &response)
+		}
 		return response, nil
 	case "check":
 		// A manual check is read-only. Calling Scheduler.CheckNow here used the
