@@ -178,3 +178,17 @@ func TestDialUsesAKeptAddressWithoutALookup(t *testing.T) {
 	}
 	_ = connection.CloseWithError(0, "")
 }
+
+// A relay or edge is verified by its pin, not a WebPKI chain: a finished handshake under a pin counts, skipped checks never.
+func TestVerifiedAcceptsAPinButNotSkippedVerification(t *testing.T) {
+	pinned := &tls.Config{InsecureSkipVerify: true, VerifyConnection: func(tls.ConnectionState) error { return nil }}
+	if !verified(pinned, "relay.example.test", tls.ConnectionState{}) {
+		t.Fatal("a pinned handshake is not verified")
+	}
+	if verified(&tls.Config{InsecureSkipVerify: true}, "relay.example.test", tls.ConnectionState{}) {
+		t.Fatal("a handshake that checked nothing is verified")
+	}
+	if verified(&tls.Config{ServerName: "other.example.test"}, "relay.example.test", tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{}}}) {
+		t.Fatal("a chain for another name is verified")
+	}
+}

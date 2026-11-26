@@ -43,7 +43,7 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 			return nil, err
 		}
 		connection, err := dialRemote(ctx, remote, tlsConf, conf, early)
-		if err == nil && tlsConf.ServerName == host && len(connection.ConnectionState().TLS.VerifiedChains) > 0 {
+		if err == nil && verified(tlsConf, host, connection.ConnectionState().TLS) {
 			dnscap.Verified(host, connection.RemoteAddr())
 		}
 		return connection, err
@@ -64,6 +64,15 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 		})
 	}
 	return connection, err
+}
+
+// verified: the handshake proved the server is host's: a WebPKI chain for the name, or the caller's own pin (relays and
+// edges are verified by VerifyConnection/VerifyPeerCertificate, so a handshake that finished passed it).
+func verified(config *tls.Config, host string, state tls.ConnectionState) bool {
+	if config.InsecureSkipVerify {
+		return config.VerifyConnection != nil || config.VerifyPeerCertificate != nil
+	}
+	return config.ServerName == host && len(state.VerifiedChains) > 0
 }
 
 // cached is the address host last verified at; tests replace it (dnscap never keeps the loopback a test listens on).
