@@ -27,11 +27,13 @@ func TestASlowPrivilegedInstallStepIsNotReportedAsFailed(t *testing.T) {
 	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
 		operations = append(operations, arguments[len(arguments)-1])
 		if arguments[len(arguments)-1] == "install-supplied" {
-			return exec.CommandContext(ctx, "/bin/sh", "-c", "sleep 0.5 && touch "+finished)
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "sleep 5.5 && touch "+finished)
 		}
 		return exec.CommandContext(ctx, "/bin/false")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	// The step sleeps longer than the caller's whole deadline, so the deadline expires during the step. The setup
+	// before it shares that deadline and needs real room: 100 ms ran out there on a slow runner, so no step started.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	_, err := InstallRunningBinary(ctx, executable, source, filepath.Join(home, "bin"), "")
 	if _, statErr := os.Stat(finished); statErr != nil {
