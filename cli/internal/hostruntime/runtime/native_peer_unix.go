@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
@@ -240,7 +241,11 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 // NeedsLogin (~/ref/tailscale/ipn/ipnlocal/local.go). Exiting killed the network service mid-update
 // and made its rollback fail too (2026-11-26).
 func transientNativePeerStart(err error) bool {
-	if errors.Is(err, errNativePeerPending) || errors.Is(err, context.DeadlineExceeded) {
+	// A removed or revoked machine (credential renewal refused) keeps the carrier up with no network, as an API 401
+	// does: install and recovery need its control pipe, and a carrier that exited left the machine impossible to
+	// reinstall.
+	if errors.Is(err, errNativePeerPending) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, enrollment.ErrRenewalRefused) {
 		return true
 	}
 	var response *clientapi.APIError

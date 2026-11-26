@@ -64,6 +64,9 @@ func TestRenewalRefusedWith401IsAttemptedOnceUntilReEnrollment(t *testing.T) {
 	})
 	source := renewalSourceFor(t, server.URL, root, now, server.Client().Transport)
 	_, err := source.Token(context.Background())
+	if !errors.Is(err, ErrRenewalRefused) {
+		t.Fatalf("first renewal err=%v, want ErrRenewalRefused", err)
+	}
 	if fault := errorreport.ProjectFault(context.Background(), "paperboatd", "machine_control", "control_request", "control_request_failed", err); err == nil || fault.HTTPStatus != http.StatusUnauthorized {
 		t.Fatalf("first renewal err=%v status=%d", err, fault.HTTPStatus)
 	}
@@ -78,6 +81,9 @@ func TestRenewalRefusedWith401IsAttemptedOnceUntilReEnrollment(t *testing.T) {
 		},
 	} {
 		_, err := call()
+		if !errors.Is(err, ErrRenewalRefused) {
+			t.Fatalf("%s: err=%v, want ErrRenewalRefused", name, err)
+		}
 		if fault := errorreport.ProjectFault(context.Background(), "paperboatd", "machine_control", "control_request", "control_request_failed", err); err == nil || fault.HTTPStatus != http.StatusUnauthorized {
 			t.Fatalf("%s: err=%v status=%d, want the refusal", name, err, fault.HTTPStatus)
 		}

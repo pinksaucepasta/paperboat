@@ -210,6 +210,44 @@ func TestProductionNativePeerBuildGenerationClassifiesUnsignedEndpointAsPending(
 	}
 }
 
+func TestProductionNativePeerWaitsOnItsOwnExpiredCertificate(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "identity")
+	store, err := runtimeidentity.Open(runtimeidentity.Config{StateRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued := time.Now().UTC().Add(-48 * time.Hour)
+	if err := store.SaveRegistration(runtimeidentity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "environment_1", PublicKeyID: store.Current().ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(store.Current().Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: issued}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := store.PeerEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPublic, rootPrivate, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_1", Role: endpointidentity.RoleMachine, EndpointID: "machine_1", QUICPublicKey: endpoint.QUICPublicKey(), Generation: 1, Serial: 1, IssuedAt: issued, ExpiresAt: issued.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := certificate.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePeerEndpointCertificate(rootPublic, raw, issued.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := loadNativePeerTLS(root, "machine_1", 1); !errors.Is(err, errNativePeerPending) {
+		t.Fatalf("own expired certificate: %v, want pending", err)
+	}
+	// Another machine's expired certificate is still invalid.
+	if _, _, _, err := loadNativePeerTLS(root, "machine_2", 1); !errors.Is(err, ErrProductionInvalid) || errors.Is(err, errNativePeerPending) {
+		t.Fatalf("foreign expired certificate: %v, want invalid", err)
+	}
+}
+
 func TestProductionNativePeerReloadsRenewedEndpointIdentity(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "identity")
 	store, err := runtimeidentity.Open(runtimeidentity.Config{StateRoot: root})

@@ -27,8 +27,16 @@ func loadNativePeerTLS(stateRoot, machineID string, generation uint64) (*tls.Con
 		// a certificate can be verified for this exact machine generation.
 		return nil, nil, tailnet.NetworkBinding{}, errNativePeerPending
 	}
-	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: endpoint.Generation}, serverclock.Now().UTC())
+	expected := endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: endpoint.Generation}
+	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, expected, serverclock.Now().UTC())
 	if err != nil {
+		// This machine's own certificate, now expired, waits like a missing one: enrollment renews it, and a removed
+		// machine, which gets no new one, keeps its carrier and so can be reinstalled. Anything else stays invalid.
+		if stored, parseErr := endpointidentity.Parse(endpoint.Certificate); parseErr == nil && serverclock.Now().After(stored.Claims.ExpiresAt) {
+			if _, ownErr := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, expected, stored.Claims.IssuedAt); ownErr == nil {
+				return nil, nil, tailnet.NetworkBinding{}, errNativePeerPending
+			}
+		}
 		return nil, nil, tailnet.NetworkBinding{}, errors.Join(ErrProductionInvalid, err)
 	}
 	issueLeaf := func() (tls.Certificate, error) {

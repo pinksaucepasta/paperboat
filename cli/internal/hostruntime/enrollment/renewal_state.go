@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,8 +97,17 @@ func RenewalRefused(root string, now time.Time) bool {
 // refusedRenewalError is the observed 401, returned without a request so callers classify it as before (a removed
 // machine reads as refused, not as an unreachable control plane).
 func refusedRenewalError() error {
-	return errorreport.HTTPStatusFailure(&http.Response{StatusCode: http.StatusUnauthorized})
+	return renewalRefusedError{errorreport.HTTPStatusFailure(&http.Response{StatusCode: http.StatusUnauthorized})}
 }
+
+// ErrRenewalRefused matches the terminal 401 refusal above (and its repeats while held): the machine was removed or
+// its credential revoked. The error keeps the refusal's own message and HTTP status.
+var ErrRenewalRefused = errors.New("machine credential renewal refused")
+
+type renewalRefusedError struct{ error }
+
+func (e renewalRefusedError) Unwrap() error      { return e.error }
+func (renewalRefusedError) Is(target error) bool { return target == ErrRenewalRefused }
 
 type renewalBackoff struct {
 	mu       sync.Mutex

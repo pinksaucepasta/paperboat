@@ -192,7 +192,7 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 			// A 401 whose Date is a minute or more off our clock is not terminal: the proof may have been signed with
 			// a wrong clock, serverclock corrects the next one from this answer, and the retry below is transient.
 			recordRenewalRefusal(s.config.StateRoot, current, now)
-			return "", refusal
+			return "", renewalRefusedError{refusal}
 		}
 		retry.fail(refusal)
 		if response.StatusCode == http.StatusForbidden {
