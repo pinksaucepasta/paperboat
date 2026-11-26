@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
@@ -107,6 +108,10 @@ func (f *updateApprovalControlFixture) handle(connection *net.UnixConn) {
 		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "invalid_request", ErrorMessage: "invalid local test request"}
 	} else if request.Operation == "check" {
 		response.Pending = f.isPending()
+	} else if request.Operation == "status" && f.isPending() {
+		// A pending updater reports the activation it is finishing, as control_unix.go does.
+		response.Pending = true
+		response.Transaction = workerupdate.TransactionState{CandidateVersion: updateApprovalCandidateVersion, HealthDeadline: time.Now().Add(5 * time.Minute)}
 	} else if f.isPending() {
 		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "installation_pending"}
 	} else if request.Operation == "download" {
@@ -484,5 +489,28 @@ func TestUpdateCheckAndUpdateWorkWithoutAnUpdater(t *testing.T) {
 	}
 	if installed.calls != 1 || !installed.force || installed.bundle != installed.exportedTo {
 		t.Fatalf("supplied install = %+v", installed)
+	}
+}
+
+// An explicit update while an activation holds the installation returns at once and names the finishing update instead
+// of waiting out its stability window (smoke 11-26, removed machine .8 to .9).
+func TestUpdateWhileAnActivationFinishesSaysSoAtOnce(t *testing.T) {
+	oldVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
+	buildinfo.Version = "2026.09.01.1"
+	fixture := startUpdateApprovalControlFixture(t)
+	fixture.setPending()
+	var installed pendingInstallRecord
+	ctx := withUpdateDependencies(pendingUpdateContext(t, fixture, &installed, false), func(deps *updateDependencies) {
+		deps.install = func(context.Context, string, installsource.Source, string, bool, string, string) (string, error) {
+			return "", hostdproto.ErrMaintenanceBusy
+		}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"update", "--force"}, &stdout, &stderr); code == 0 {
+		t.Fatalf("update during an activation succeeded: %q", stdout.String())
+	}
+	if want := "an update to " + updateApprovalCandidateVersion + " is installed, finishing its health check (about 5 minutes left); run `pb update status`"; !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
 	}
 }

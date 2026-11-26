@@ -173,6 +173,9 @@ func (e commandRejection) Error() string {
 	case commandRejectUpdatePlatform:
 		return "The official Paperboat release has no build for this platform (" + e.detail + ") yet, so there is no official update to save or install. Nothing was changed. Install a supplied build with `pb update --from <file>`."
 	case commandRejectUpdateBusy:
+		if e.detail != "" {
+			return "Paperboat is busy: " + e.detail + ". The installed version is unchanged."
+		}
 		return "Paperboat is busy; the installed version is unchanged. Wait for active work or another update to finish, then retry. Use --force only if you want to interrupt active sessions."
 	case commandRejectNoninteractiveHome:
 		return "pb requires a command or environment when used without an interactive terminal"

@@ -118,7 +118,7 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 	installed, err := updateDependenciesOf(ctx).install(ctx, executable, source, bundle, force, "", selectedInstallServer(command))
 	if err != nil {
 		if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
-			return commandRejection{reason: commandRejectUpdateBusy, cause: err}
+			return commandRejection{reason: commandRejectUpdateBusy, cause: err, detail: finishingUpdateDetail(ctx)}
 		}
 		return err
 	}
@@ -238,6 +238,21 @@ func exportOfficialBundle(ctx context.Context, proofDirectory, output string) (s
 	}
 	index, err := bootstrap.ExportUpdateBundle(ctx, repository, proofDirectory, output, nil, time.Now())
 	return index.Version, err
+}
+
+// finishingUpdateDetail names the update whose health check holds the installation, or "" when the updater does not say.
+func finishingUpdateDetail(ctx context.Context) string {
+	client, err := newUpdateControlClient(ctx, 5*time.Second)
+	if err != nil {
+		return ""
+	}
+	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	response, err := client.Status(probe)
+	if err != nil || response.Transaction.CandidateVersion == "" {
+		return ""
+	}
+	return "an update to " + response.Transaction.CandidateVersion + " is " + activationFinishingText(response.Transaction.HealthDeadline, time.Now()) + "; run `pb update status`"
 }
 
 // fetchSignedReleaseVersion reads the version of the signed official release for this platform.

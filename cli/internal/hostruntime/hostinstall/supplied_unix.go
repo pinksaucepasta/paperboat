@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
@@ -70,7 +72,16 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 	if err = secureRootDirectory(paths.updateState, 0700); err != nil {
 		return err
 	}
-	nativeLock, err := updated.LockUnixNativeInstall(ctx, paths.updateState)
+	var nativeLock io.Closer
+	if input.SuppliedUpdate {
+		// An explicit update refuses at once while an activation holds the lock: waiting sat silent for its whole
+		// stability window (smoke 11-26, removed machine .8 to .9). The caller says which update is finishing.
+		if nativeLock, err = updated.TryLockUnixNativeInstall(paths.updateState); errors.Is(err, updated.ErrActivationPending) {
+			return hostdproto.ErrMaintenanceBusy
+		}
+	} else {
+		nativeLock, err = updated.LockUnixNativeInstall(ctx, paths.updateState)
+	}
 	if err != nil {
 		return err
 	}
