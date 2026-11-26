@@ -194,8 +194,10 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		command := privilegedInstallCommand(callCtx, os.Geteuid(), rootHome, account.Uid, installerExecutable, "__runtime-service", "inventory")
 		return runInventoryCommand(callCtx, command, installerExecutable)
 	}
-	if err = ctx.Err(); err != nil {
-		return "", err // cancelled before the privileged step: start nothing
+	if ctx.Err() != nil {
+		// Cancelled before the privileged step: start nothing, with the same authored failure and cause a
+		// cancelled start of it gave.
+		return "", runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", runtimeContextFailure(ctx))
 	}
 	// The privileged step is not held to the caller's deadline, like a package manager install (Tailscale
 	// clientupdate/clientupdate.go:511 and :642 run apt-get and dnf without one): killing sudo at that deadline left
