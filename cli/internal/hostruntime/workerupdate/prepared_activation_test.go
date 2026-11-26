@@ -632,3 +632,44 @@ func TestRecoveredCandidateEndsOnTheRestoredVersion(t *testing.T) {
 		})
 	}
 }
+
+type healthFunc func(context.Context, hostdproto.Status, Release) error
+
+func (f healthFunc) Check(ctx context.Context, status hostdproto.Status, release Release) error {
+	return f(ctx, status, release)
+}
+
+// Status reads the journal while the native health check runs: it must carry the health deadline, or status can only
+// say "up to 10 minutes" and never when the activation is overdue (linuxpool .20 to .21, 2026-11-26).
+func TestPreparedActivationStatusShowsTheHealthDeadline(t *testing.T) {
+	f := newFixture(t)
+	var seen []time.Time
+	f.manager.config.Health = healthFunc(func(context.Context, hostdproto.Status, Release) error {
+		state, err := f.manager.TransactionState()
+		if err != nil {
+			return err
+		}
+		seen = append(seen, state.HealthDeadline)
+		return nil
+	})
+	f.manager.config.ApplyPrepared = func(ctx context.Context, a PreparedActivation) (installsource.Source, error) {
+		if err := a.Prepare(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		body, err := os.ReadFile(a.Executable)
+		if err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.WriteFile(f.paths.current, body, 0700); err != nil {
+			return installsource.Source{}, err
+		}
+		f.hostd.active = hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(a.Source.Version), APIVersion: 1, Epoch: 42}
+		return a.Source, a.Validate(ctx)
+	}
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) == 0 || seen[0].IsZero() {
+		t.Fatalf("status during the health check had no deadline: %v", seen)
+	}
+}

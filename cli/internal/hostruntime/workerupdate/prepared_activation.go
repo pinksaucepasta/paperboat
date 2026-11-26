@@ -76,6 +76,7 @@ func (m *Manager) applyPrepared(ctx context.Context, journal updateflow.Journal,
 		window := releaseDuration(signed.StabilityWindow, m.config.MonitorWindow)
 		interval := releaseDuration(signed.StabilityInterval, m.config.HealthInterval)
 		observation.HealthDeadline = m.now().Add(window)
+		m.recordHealthDeadline(journal.TransactionID, observation.HealthDeadline)
 		watchCtx, cancel := context.WithTimeout(validateCtx, window+stabilityCompletionMargin(interval))
 		defer cancel()
 		healthDone := make(chan error, 1)
@@ -337,4 +338,16 @@ func (m *Manager) EndStuckAttempt(ctx context.Context, fault bool) (bool, error)
 type failureDetail interface {
 	FailureStep() string
 	FailureReason() string
+}
+
+// recordHealthDeadline writes when the health window ends into the journal status reads, so status can say how much
+// is left and when the activation is overdue. It changes nothing else: the journal is reread, not overwritten.
+func (m *Manager) recordHealthDeadline(transactionID string, deadline time.Time) {
+	current, err := updateflow.Load(m.config.StatePath)
+	if err != nil || current.TransactionID != transactionID {
+		return
+	}
+	current.HealthDeadline = deadline
+	// shortcut: a failed write only loses the time-left text; the health watch below holds the real deadline.
+	_ = m.write(current)
 }
