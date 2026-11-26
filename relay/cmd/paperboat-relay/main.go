@@ -298,6 +298,13 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 			}
 		}
 	}()
+	if lease.Draining {
+		// The operator drained this node: apply the start lease's drain before the first accept, so a restart inside the
+		// drain admits no client at all (not only after its first heartbeat).
+		if err = server.DrainBeforeServe(nodelifecycle.DrainDeadline(lease)); err != nil {
+			return serviceFailure{error: err, definition: "service_build"}
+		}
+	}
 	errs := make(chan error, 4)
 	go func() { errs <- server.Serve(ctx, socket, &tls.Config{Certificates: []tls.Certificate{pair}}) }()
 	go func() { errs <- httpServer.Serve(tls.NewListener(tcp, wssTLS)) }()
@@ -305,7 +312,11 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	controlDone := make(chan struct{})
 	go func() { defer close(controlDone); errs <- control.Run(ctx, server) }()
 	failureDefinition := "service_run"
-	err = waitReady(ctx, server.Ready, errs)
+	started := server.Ready
+	if lease.Draining {
+		started = server.Serving // drained from the start: it serves no client, so it never turns ready
+	}
+	err = waitReady(ctx, started, errs)
 	if err != nil {
 		failureDefinition = "service_start"
 	}

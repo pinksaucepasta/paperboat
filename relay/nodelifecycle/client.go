@@ -363,6 +363,7 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 		return Lease{}, err
 	}
 	c.lease = out
+	c.operatorDrain = out.Draining // the process applies it before serving (DrainBeforeServe)
 	return out, nil
 }
 
@@ -425,10 +426,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	// grants, a repeated one is a no-op (Server.Revoke keeps the highest), so neither drains the relay.
 	// A malformed entry is a broken authority, not a transient failure: it fences before any is applied.
 	if out.Draining {
-		deadline := time.Now()
-		if out.DrainDeadline > 0 {
-			deadline = time.Unix(out.DrainDeadline, 0)
-		}
+		deadline := DrainDeadline(out)
 		if !c.operatorDrain {
 			slog.Warn("relay drained by the operator", "deadline", deadline.UTC().Format(time.RFC3339))
 		}
@@ -507,6 +505,14 @@ func (c *Client) expireMeshPeers(server *derpquic.Server) {
 	if err := server.SetMeshPeers(nil); err != nil {
 		slog.Error("relay mesh directory could not be cleared", "error", err)
 	}
+}
+
+// DrainDeadline is when a drained lease's relay closes its connections (now when the lease names none).
+func DrainDeadline(l Lease) time.Time {
+	if l.DrainDeadline > 0 {
+		return time.Unix(l.DrainDeadline, 0)
+	}
+	return time.Now()
 }
 
 // meshPeers decodes a lease's mesh_peers; absent means no mesh.

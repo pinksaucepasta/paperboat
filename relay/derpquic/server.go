@@ -49,6 +49,7 @@ type Server struct {
 	connections                                          map[*quic.Conn]struct{}
 	wssConnections                                       map[*peerConn]struct{}
 	draining                                             bool
+	startDrained                                         bool // drained by DrainBeforeServe: Serve may still start
 	drainTimer                                           *time.Timer
 	deadline                                             time.Time
 	listener                                             *quic.Listener
@@ -193,7 +194,7 @@ func (s *Server) Serve(ctx context.Context, socket net.PacketConn, config *tls.C
 		return err
 	}
 	s.mu.Lock()
-	if s.listener != nil || s.draining {
+	if s.listener != nil || s.draining && !s.startDrained {
 		s.mu.Unlock()
 		ln.Close()
 		tr.Close()
@@ -861,8 +862,24 @@ func (s *Server) Snapshot() Stats {
 	defer s.mu.Unlock()
 	return Stats{s.accepted.Load(), s.denied.Load(), s.forwarded.Load(), s.dropped.Load(), s.bytesForwarded.Load(), len(s.connections) + len(s.wssConnections), s.draining}
 }
+
+// DrainBeforeServe starts the server already drained to deadline (the start lease carried the operator's drain): Serve
+// still runs, but it admits no client from its first accept, and the drain timer ends nothing it never admitted.
+func (s *Server) DrainBeforeServe(deadline time.Time) error {
+	s.mu.Lock()
+	if s.listener != nil || s.draining {
+		s.mu.Unlock()
+		return ErrClosed
+	}
+	s.startDrained = true
+	s.mu.Unlock()
+	s.Drain(deadline)
+	return nil
+}
+
 func (s *Server) Close() error {
 	s.mu.Lock()
+	s.startDrained = false
 	s.draining = true
 	s.deadline = time.Now()
 	if s.drainTimer != nil {

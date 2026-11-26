@@ -29,6 +29,13 @@ func (s *Server) Ready() bool {
 	return s.listener != nil && !s.draining
 }
 
+// Serving reports that Serve has bound its listener, drained or not: the startup check of a relay started drained.
+func (s *Server) Serving() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listener != nil
+}
+
 // MatchesControlService gates readiness on the registry's exact public service
 // identity; a DERP-only process cannot advertise a missing peer-relay service.
 func (s *Server) MatchesControlService(identity *ServiceDescriptor) bool {
