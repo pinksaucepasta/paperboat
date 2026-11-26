@@ -40,6 +40,26 @@ func TestASlowPrivilegedInstallStepIsNotReportedAsFailed(t *testing.T) {
 	}
 }
 
+// Past the outer bound pb stops waiting: the root child is still finishing, so the message says so instead of
+// "failed".
+func TestAPrivilegedStepPastItsBoundSaysStillFinishing(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	originalCommand, originalBound := privilegedInstallCommand, suppliedInstallBound
+	t.Cleanup(func() { privilegedInstallCommand, suppliedInstallBound = originalCommand, originalBound })
+	suppliedInstallBound = 100 * time.Millisecond
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		if arguments[len(arguments)-1] == "install-supplied" {
+			return exec.CommandContext(ctx, "/bin/sleep", "5")
+		}
+		return exec.CommandContext(ctx, "/bin/false")
+	}
+	_, err := InstallRunningBinary(t.Context(), executable, source, filepath.Join(home, "bin"), "")
+	message := runtimeFailureMessage(err)
+	if !strings.Contains(message, "still finishing in the background") || strings.Contains(message, "failed") {
+		t.Fatalf("a step past its bound said %q (%v)", message, err)
+	}
+}
+
 // A second pb install while one runs names the other install instead of a generic failure.
 func TestASecondInstallSaysAnotherInstallIsRunning(t *testing.T) {
 	executable, source, home := suppliedInstallFixture(t)

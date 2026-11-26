@@ -3,6 +3,7 @@
 package hostruntimecmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -21,9 +22,20 @@ func TestSuppliedInstallerRunsBelowInteractiveIOPriority(t *testing.T) {
 		}
 		os.Exit(0)
 	}
-	command := privilegedInstallCommand(t.Context(), 0, t.TempDir(), "501", os.Args[0], "-test.run=^TestSuppliedInstallerRunsBelowInteractiveIOPriority$")
+	command := privilegedInstallCommand(context.WithValue(t.Context(), yieldInstallIO{}, true), 0, t.TempDir(), "501", os.Args[0], "-test.run=^TestSuppliedInstallerRunsBelowInteractiveIOPriority$")
 	command.Env = append(os.Environ(), "PB_TEST_INSTALL_PRIORITY=1")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("installer must yield CPU and disk to live terminals: %v: %s", err, strings.TrimSpace(string(output)))
+	}
+}
+
+// A fresh pb install has no live sessions to yield to: its privileged step runs at normal priority (dadape,
+// 2026-11-26: idle I/O made a first install take 4 min on a busy disk).
+func TestFreshInstallRunsAtNormalPriority(t *testing.T) {
+	command := privilegedInstallCommand(t.Context(), 0, t.TempDir(), "501", "/protected/pb", "__runtime-service", "install-supplied")
+	for _, arg := range command.Args {
+		if arg == "/usr/bin/ionice" || arg == "/usr/bin/nice" {
+			t.Fatalf("fresh install runs below normal priority: %v", command.Args)
+		}
 	}
 }

@@ -55,6 +55,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if ctx == nil {
 		return "", hostinstall.ErrInvalidRequest
 	}
+	if explicitUpdate || bundlePath != "" {
+		ctx = context.WithValue(ctx, yieldInstallIO{}, true)
+	}
 	deadline, bounded := ctx.Deadline()
 	budget := time.Until(deadline) // the caller's whole budget, given again to the steps after the privileged one
 	if bundlePath == "" {
@@ -194,12 +197,20 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if err = ctx.Err(); err != nil {
 		return "", err // cancelled before the privileged step: start nothing
 	}
-	// The privileged step runs to its end, like a package manager install (Tailscale clientupdate/clientupdate.go:511
-	// and :642 run apt-get and dnf without a deadline): killing sudo at the caller's deadline left the root step
-	// finishing the install behind a reported failure (dadape, 2026-11-26: 3 min deadline, 4 min idle-I/O install).
-	// Ctrl-C still reaches it through the terminal's process group. The steps after it get the caller's budget again.
+	// The privileged step is not held to the caller's deadline, like a package manager install (Tailscale
+	// clientupdate/clientupdate.go:511 and :642 run apt-get and dnf without one): killing sudo at that deadline left
+	// the root step finishing the install behind a reported failure (dadape, 2026-11-26: 3 min deadline, 4 min
+	// install). It has its own generous bound; Ctrl-C still reaches it through the terminal's process group. The
+	// steps after it get the caller's budget again.
 	fmt.Fprintln(os.Stderr, "Installing Paperboat's system services; on a busy disk this can take a few minutes...")
-	err = invoke(context.WithoutCancel(ctx), "install-supplied")
+	stepCtx, cancelStep := context.WithTimeout(context.WithoutCancel(ctx), suppliedInstallBound)
+	err = invoke(stepCtx, "install-supplied")
+	stepEnded := stepCtx.Err() != nil
+	cancelStep()
+	if err != nil && stepEnded {
+		// The root child outlives its sudo and holds its own locks until it exits; it is not a failure yet.
+		return "", runtimeFailure(fmt.Sprintf("the Paperboat install is still finishing in the background after %s; run `pb status` to see when it is done, then run `pb install` again if it is not", suppliedInstallBound), err)
+	}
 	if bounded {
 		parent := ctx
 		rest, cancelRest := context.WithTimeout(context.WithoutCancel(parent), budget)
@@ -325,14 +336,22 @@ func suppliedCommitRequest(request hostinstall.Request, installed installsource.
 // unit stops and a TERM/KILL wait, far below it.
 const installInventoryTimeout = 2 * time.Minute
 
+// yieldInstallIO marks an update's context: its privileged children run at idle I/O and nice 10 (e4586fcee).
+type yieldInstallIO struct{}
+
+// suppliedInstallBound is the outer bound on the privileged install step (Tailscale runs it with none); past it
+// pb stops waiting and says the step is still finishing, because killing sudo cannot stop the root child.
+var suppliedInstallBound = 15 * time.Minute
+
 // privilegedInstallCommand is a variable so a workspace test can record the privileged children it would start.
 var privilegedInstallCommand = func(ctx context.Context, effectiveUID int, rootHome, invokingUID, executable string, arguments ...string) *exec.Cmd {
 	args := []string{"PAPERBOAT_INVOKING_UID=" + invokingUID}
 	if diagnostics.TerminalHopsEnabled() {
 		args = append(args, "PAPERBOAT_TERMINAL_HOPS=1")
 	}
-	if runtime.GOOS == "linux" {
-		// Set priorities before Go starts so every installer thread and child inherits them.
+	if runtime.GOOS == "linux" && ctx.Value(yieldInstallIO{}) != nil {
+		// Update preparation yields to live terminals; set priorities before Go starts so every installer thread
+		// and child inherits them. A fresh pb install has no sessions to protect and runs at normal priority.
 		args = append(args, "/usr/bin/ionice", "-c", service.UpdateIOClass, "/usr/bin/nice", "-n", service.UpdateNice)
 	}
 	args = append(args, executable)
