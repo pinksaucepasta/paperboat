@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
@@ -89,7 +90,8 @@ func (a *Authority) refusedConfiguration(ctx context.Context, client NetworkAPI,
 // An explicit denial revokes the restart cache too; an outage never does.
 func (a *Authority) rejectRefusedAuthority(err error) error {
 	var response *api.APIError
-	if !errors.Is(err, api.ErrUnauthenticated) && !(errors.As(err, &response) && (response.Status == 401 || response.Status == 403)) {
+	// A refused credential renewal is the same denial, answered before the request could be sent.
+	if !errors.Is(err, api.ErrUnauthenticated) && !errors.Is(err, enrollment.ErrRenewalRefused) && !(errors.As(err, &response) && (response.Status == 401 || response.Status == 403)) {
 		return err
 	}
 	a.updateMu.Lock()

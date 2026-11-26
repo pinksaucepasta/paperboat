@@ -7,12 +7,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"math/big"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 	"tailscale.com/types/key"
 )
 
@@ -330,14 +331,18 @@ func TestRestartRestoresVerifiedNetworkBeforeContactingControl(t *testing.T) {
 }
 
 func TestExplicitRefusalCannotBeUndoneByAnOfflineRestart(t *testing.T) {
-	for _, status := range []int{401, 403} {
-		t.Run(strconv.Itoa(status), func(t *testing.T) {
+	for name, denial := range map[string]error{
+		"401":             &api.APIError{Status: 401, Code: "peer_network_denied"},
+		"403":             &api.APIError{Status: 403, Code: "peer_network_denied"},
+		"renewal refused": fmt.Errorf("machine authentication token: %w", enrollment.ErrRenewalRefused),
+	} {
+		t.Run(name, func(t *testing.T) {
 			a, cfg, signer, _ := networkTestAuthority(t)
 			if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
 				t.Fatal(err)
 			}
 			refused := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
-				return "", &api.APIError{Status: status, Code: "peer_network_denied"}
+				return "", denial
 			}}
 			if err := a.Refresh(t.Context(), refused); err == nil {
 				t.Fatal("server refusal was hidden")
