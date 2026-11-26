@@ -29,6 +29,16 @@ jobs:
       matrix:
         slot: ${{ fromJSON(format('[{0}]', inputs.slots)) }}
     steps:
+      - name: free port 80 (the image's IIS holds it)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # IIS's "Default Web Site" holds :80 through HTTP.sys on the hosted image, so pb's :80 browser links can't be
+          # served and `pb doctor` reports degraded. Stop and disable it, then prove the port is free.
+          Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
+          Set-Service W3SVC -StartupType Disabled
+          $held = @(Get-NetTCPConnection -LocalPort 80 -State Listen -ErrorAction SilentlyContinue)
+          if ($held.Count -gt 0) { throw "port 80 is still held by PID $($held[0].OwningProcess) after W3SVC was stopped" }
       - name: sshd behind a reverse tunnel
         shell: pwsh
         env:
