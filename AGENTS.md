@@ -51,7 +51,7 @@ component directory. Go 1.27.4.
 
 1. **Main paths of every feature first, then edge cases** (PLAN.md section 3 overrides the rest
    of this point until pass 1 is done). **Feature by feature.** Take one feature from PLAN.md, make it work on every supported
-   platform (Linux and macOS for launch; Windows after launch, PLAN.md 1.1) in every way a user can use it, including edge cases,
+   platform (Linux, macOS and Windows, all three at launch with full parity, PLAN.md section 1) in every way a user can use it, including edge cases,
    failures and recovery, before moving to the next. A feature is done only when its PLAN
    rows in CHECKLIST.md are `[x]` on real devices.
 2. **One commit per fix.** Message: what broke, root cause, the change, the test that proves
