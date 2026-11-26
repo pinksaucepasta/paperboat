@@ -442,6 +442,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/admin/selfhost/installations/{installationID}", operatorRoute(opts, global))
 			mux.Handle("DELETE /v1/admin/selfhost/installations/{installationID}", operatorRoute(opts, global))
 			mux.Handle("POST /v1/admin/selfhost/installations/{installationID}/update", operatorRoute(opts, global))
+			mux.Handle("GET /v1/admin/selfhost/install-options", operatorRoute(opts, selfhostInstallOptionsGet(opts.Config)))
 		}
 		if opts.EdgeControl != nil {
 			mux.Handle("/v1/", opts.EdgeControl)

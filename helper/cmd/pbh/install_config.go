@@ -104,15 +104,8 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode, region stri
 		failure = host
 	}
 	c := selfhost.Config{Name: name, EndpointHost: host, EndpointDetected: value("endpoint-host") == "", Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserAccess: value("browser-access") == "true"}
-	if mode == "relay" || mode == "both" {
-		tcp := 443
-		if mode == "both" {
-			tcp = edgeports.RelayWSS
-		}
-		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: edgeports.RelayQUIC, Region: region, FailureDomain: failure})
-	}
-	if mode == "tunnel" || mode == "both" {
-		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: edgeports.CarrierTCP, QUICPort: edgeports.CarrierQUIC, Region: region, FailureDomain: failure})
+	for _, v := range edgeports.NodeComponents(mode) {
+		c.Components = append(c.Components, selfhost.Component{Capability: v.Capability, TCPPort: v.TCP, QUICPort: v.QUIC, Region: region, FailureDomain: failure})
 	}
 	return c, nil
 }

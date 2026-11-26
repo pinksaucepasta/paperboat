@@ -9703,6 +9703,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/selfhost/install-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Install command parts and inbound firewall rules for a Paperboat-run node */
+        get: operations["get_admin_selfhost_install_options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -15701,6 +15718,24 @@ export interface components {
             /** @description Rows matching the filters, capped at 100000 (total_capped true). */
             total: number;
             total_capped?: boolean;
+        };
+        SelfhostInboundRule: {
+            /** @enum {string} */
+            protocol: "tcp" | "udp";
+            /** @description A port or a low-high range. */
+            ports: string;
+        };
+        SelfhostInstallOptions: {
+            /** Format: uri */
+            installer_url: string;
+            /** @description pbh install arguments a Paperboat-run global node needs, in order. */
+            server_flags: string[];
+            claim_port: number;
+            inbound: {
+                relay: components["schemas"]["SelfhostInboundRule"][];
+                edge: components["schemas"]["SelfhostInboundRule"][];
+                both: components["schemas"]["SelfhostInboundRule"][];
+            };
         };
     };
     responses: {
@@ -39303,6 +39338,31 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    get_admin_selfhost_install_options: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installer URL, server flags and per-role inbound rules from server configuration. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SelfhostInstallOptions"];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }

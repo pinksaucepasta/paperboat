@@ -109,30 +109,16 @@ type firewallRule struct {
 	Ports string `json:"ports"`
 }
 
-// hostFirewallRules is what a node's host firewall must let in, from the ports its components really
-// listen on: the claim port; a relay's WSS (TCP), STUN (UDP, same port) and QUIC; a tunnel edge's 443
-// (TCP, and UDP for HTTP/3), carrier TCP and QUIC, and the public tunnel range.
+// hostFirewallRules is what a node's host firewall must let in (edgeports.InboundRules), with ranges
+// in the colon form the host firewalls take.
 func hostFirewallRules(c selfhost.Config) []firewallRule {
-	var rules []firewallRule
-	add := func(proto, ports string) {
-		if r := (firewallRule{proto, ports}); !slices.Contains(rules, r) {
-			rules = append(rules, r)
-		}
+	role := ""
+	if len(c.Components) > 0 {
+		role = installationMode(c)
 	}
-	add("tcp", strconv.Itoa(claimPortOf(c.Listen)))
-	for _, v := range c.Components {
-		switch v.Capability {
-		case "relay":
-			add("tcp", strconv.Itoa(v.TCPPort))
-			add("udp", strconv.Itoa(v.TCPPort))
-			add("udp", strconv.Itoa(v.QUICPort))
-		case "tunnel":
-			add("tcp", "443")
-			add("udp", "443")
-			add("tcp", strconv.Itoa(v.TCPPort))
-			add("udp", strconv.Itoa(v.QUICPort))
-			add("tcp", publicRange)
-		}
+	var rules []firewallRule
+	for _, r := range edgeports.InboundRules(role, claimPortOf(c.Listen)) {
+		rules = append(rules, firewallRule{r.Protocol, strings.Replace(r.Ports, "-", ":", 1)})
 	}
 	return rules
 }

@@ -1,6 +1,9 @@
 package edgeports
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRangesAreValidAndDisjoint(t *testing.T) {
 	if err := Check(); err != nil {
@@ -23,5 +26,24 @@ func TestNodePortsAreDistinctAndClearOfThePublicRange(t *testing.T) {
 			t.Fatalf("node port %d is privileged, inside the public range or repeated", p)
 		}
 		seen[p] = true
+	}
+}
+
+func TestInboundRulesPerRole(t *testing.T) {
+	text := func(rules []Rule) string {
+		var s []string
+		for _, r := range rules {
+			s = append(s, r.Protocol+" "+r.Ports)
+		}
+		return strings.Join(s, ", ")
+	}
+	for role, want := range map[string]string{
+		"relay":  "tcp 7277, tcp 443, udp 443, udp 7275",
+		"tunnel": "tcp 7277, tcp 443, udp 443, tcp 7272, udp 7273, tcp 10000-59999",
+		"both":   "tcp 7277, tcp 7274, udp 7274, udp 7275, tcp 443, udp 443, tcp 7272, udp 7273, tcp 10000-59999",
+	} {
+		if got := text(InboundRules(role, Claim)); got != want {
+			t.Errorf("%s: %s, want %s", role, got, want)
+		}
 	}
 }

@@ -4,7 +4,12 @@
 // listener, the host firewall rule and the doctor check cannot drift apart.
 package edgeports
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+)
 
 const (
 	// PublicTCPMin and PublicTCPMax bound the ports a public TCP tunnel gets, on every edge.
@@ -55,4 +60,59 @@ func Check() error {
 		return ErrOverlap
 	}
 	return nil
+}
+
+// Component is one service a node runs and the ports it listens on.
+type Component struct {
+	Capability string // "relay" or "tunnel" (an edge)
+	TCP, QUIC  int
+}
+
+// NodeComponents is what a node of a role ("relay", "tunnel" or "both") runs. A relay alone takes 443;
+// next to an edge, which owns 443, it moves to RelayWSS.
+func NodeComponents(role string) []Component {
+	var c []Component
+	if role == "relay" {
+		c = append(c, Component{"relay", 443, RelayQUIC})
+	}
+	if role == "both" {
+		c = append(c, Component{"relay", RelayWSS, RelayQUIC})
+	}
+	if role == "tunnel" || role == "both" {
+		c = append(c, Component{"tunnel", CarrierTCP, CarrierQUIC})
+	}
+	return c
+}
+
+// Rule is one inbound allow rule: "tcp" or "udp", and a port or a "low-high" range.
+type Rule struct {
+	Protocol string `json:"protocol"`
+	Ports    string `json:"ports"`
+}
+
+// InboundRules is what a node's firewall must let in: the claim port; a relay's WSS (TCP), STUN (UDP,
+// same port) and QUIC; an edge's 443 (TCP, and UDP for HTTP/3), carrier TCP and QUIC, and the public
+// tunnel range.
+func InboundRules(role string, claim int) []Rule {
+	var rules []Rule
+	add := func(proto string, ports string) {
+		if r := (Rule{proto, ports}); !slices.Contains(rules, r) {
+			rules = append(rules, r)
+		}
+	}
+	add("tcp", strconv.Itoa(claim))
+	for _, v := range NodeComponents(role) {
+		if v.Capability == "tunnel" {
+			add("tcp", "443")
+			add("udp", "443")
+			add("tcp", strconv.Itoa(v.TCP))
+			add("udp", strconv.Itoa(v.QUIC))
+			add("tcp", fmt.Sprintf("%d-%d", PublicTCPMin, PublicTCPMax))
+			continue
+		}
+		add("tcp", strconv.Itoa(v.TCP))
+		add("udp", strconv.Itoa(v.TCP))
+		add("udp", strconv.Itoa(v.QUIC))
+	}
+	return rules
 }

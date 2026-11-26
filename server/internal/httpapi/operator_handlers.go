@@ -37,6 +37,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/server-nodes/{node_id}/resume":                    {"admin", "node_id", ""},
 	"POST /v1/admin/server-nodes/{node_id}/remove":                    {"admin", "node_id", ""},
 	"GET /v1/admin/selfhost/installations":                            {"operations", "", "selfhost"},
+	"GET /v1/admin/selfhost/install-options":                          {"operations", "", "selfhost"},
 	"GET /v1/admin/selfhost/installations/{installationID}":           {"operations", "installationID", ""},
 	"DELETE /v1/admin/selfhost/installations/{installationID}":        {"admin", "installationID", "selfhost"},
 	"POST /v1/admin/selfhost/installations/{installationID}/update":   {"admin", "installationID", "selfhost"},
