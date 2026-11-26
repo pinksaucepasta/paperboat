@@ -10,6 +10,14 @@ from teammate_profile import environment, prepare
 
 
 class TeammateProfileTest(unittest.TestCase):
+    def test_staged_sign_in_files_import_on_their_own(self):
+        from teammate_signin import STAGED
+        with tempfile.TemporaryDirectory() as directory:
+            for name in STAGED:
+                (Path(directory) / name).write_bytes((Path(__file__).parent / name).read_bytes())
+            subprocess.run([sys.executable, '-B', '-c', 'import teammate_login'], cwd=directory,
+                           env={**os.environ, 'HOME': directory, 'PYTHONPATH': ''}, check=True)
+
     def test_child_profile_keeps_primary_credentials_and_security_policy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'teammate'

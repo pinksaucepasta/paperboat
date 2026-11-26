@@ -23,6 +23,8 @@ from pairing_lifecycle import invoke
 from teammate_profile import environment, prepare, profile_root
 
 HERE = Path(__file__).resolve().parent
+# teammate_login.py and everything it imports: all the container gets
+STAGED = ('teammate_login.py', 'teammate_profile.py', 'winhost.py', 'dev_targets.py')
 
 
 def mint():
@@ -63,7 +65,7 @@ def main():
         return 0
     host, container, user = sys.argv[1:4]
     exec_in = 'ssh %s docker exec -i -u %s -e HOME=/home/%s -w /tmp/pbts %s ' % (host, user, user, container)
-    tarball = subprocess.run(['tar', 'czf', '-', '-C', str(HERE), 'teammate_login.py', 'teammate_profile.py', 'winhost.py'], capture_output=True, check=True).stdout
+    tarball = subprocess.run(['tar', 'czf', '-', '-C', str(HERE), *STAGED], capture_output=True, check=True).stdout
     stage = 'sh -c ' + shlex.quote('rm -rf /tmp/pbts && mkdir /tmp/pbts && tar xzf - -C /tmp/pbts')
     subprocess.run(exec_in.replace('-w /tmp/pbts ', '') + shlex.quote(stage), shell=True, input=tarball, check=True)
     login = shlex.quote('sh -c ' + shlex.quote('XDG_RUNTIME_DIR=/run/user/$(id -u) python3 teammate_login.py'))
