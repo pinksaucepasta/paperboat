@@ -286,7 +286,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		return windowsActivationJournal{}, err
 	}
 	journal := windowsActivationJournal{
-		Release: release, Schema: windowsActivationJournalSchema, TransactionID: hex.EncodeToString(transaction[:]), PreviousVersion: config.ActiveVersion, Version: release.Version, Architecture: config.Architecture, Stage: windowsActivationAwaitingApproval,
+		Release: release, Schema: windowsActivationJournalSchema, TransactionID: hex.EncodeToString(transaction[:]), PreviousVersion: config.ActiveVersion, Version: release.Version, Architecture: config.Architecture, Stage: windowsActivationAwaitingApproval, StartedAt: time.Now().UTC(),
 		Runtime: staged, CLI: staged, Hostd: staged, Updater: staged, PreviousBinary: previousBinary,
 		OldHostd: oldHostd, OldUpdater: oldUpdater, OldSSH: oldSSH, NewSSH: newSSH,
 		LocalDaemonWasRunning: localDaemonWasRunning,

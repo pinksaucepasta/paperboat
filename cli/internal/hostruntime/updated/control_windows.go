@@ -517,6 +517,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 		journal.ApprovedCandidateID = candidate.ID
 		journal.ManualApproval = !automatic
 		journal.Force = !automatic && request.Force
+		journal.StartedAt = time.Now().UTC()
 		if err = backend.WriteJournal(journal); err != nil {
 			return response, err
 		}
@@ -548,7 +549,7 @@ func windowsTransactionState(journal windowsActivationJournal) workerupdate.Tran
 	state := workerupdate.TransactionState{
 		Schema: workerupdate.TransactionSchemaV1, TransactionID: journal.TransactionID,
 		ActiveVersion: journal.PreviousVersion, CandidateVersion: journal.Version,
-		UpdatedAt: time.Now().UTC(),
+		UpdatedAt: journal.StartedAt, HealthDeadline: journal.HealthDeadline,
 	}
 	switch journal.Stage {
 	case windowsActivationAwaitingApproval:

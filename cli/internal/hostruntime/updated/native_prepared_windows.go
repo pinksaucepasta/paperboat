@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
@@ -136,6 +137,7 @@ func activateWindowsPreparedNative(ctx context.Context, b *windowsSCMActivationB
 			}
 			receipt.GateTarget = &target.Target
 			receipt.Stage = windowsActivationSwitching
+			receipt.HealthDeadline = time.Now().UTC().Add(receipt.Release.StabilityWindow)
 			if err := b.WriteJournal(*receipt); err != nil {
 				return err
 			}

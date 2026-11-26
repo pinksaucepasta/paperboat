@@ -48,3 +48,14 @@ func TestWindowsStabilityCallTimeoutIncludesBoundedCompletionMargin(t *testing.T
 		}
 	}
 }
+
+func TestWindowsTransactionStateReportsJournalTimes(t *testing.T) {
+	journal := testWindowsActivationJournal()
+	journal.Stage = windowsActivationServicesLive
+	journal.StartedAt = time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	journal.HealthDeadline = journal.StartedAt.Add(12 * time.Minute)
+	state := windowsTransactionState(journal)
+	if !state.UpdatedAt.Equal(journal.StartedAt) || !state.HealthDeadline.Equal(journal.HealthDeadline) {
+		t.Fatalf("status times = %v/%v, want %v/%v", state.UpdatedAt, state.HealthDeadline, journal.StartedAt, journal.HealthDeadline)
+	}
+}

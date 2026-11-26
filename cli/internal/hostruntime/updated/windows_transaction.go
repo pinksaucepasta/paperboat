@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
@@ -59,6 +60,10 @@ type windowsActivationJournal struct {
 	PreviousRuntime                                               windowsActivationComponent
 	GateTarget                                                    *hostdproto.UpdateGateTargetBinding
 	Failure                                                       string
+	// StartedAt is when the activation was created or approved; HealthDeadline is when its health window
+	// (started at cutover) ends. Both mean what updateflow.Journal's StageUpdatedAt/HealthDeadline mean in status.
+	StartedAt      time.Time `json:"started_at,omitzero"`
+	HealthDeadline time.Time `json:"health_deadline,omitzero"`
 }
 
 var errInvalidWindowsActivation = errors.New("invalid Windows activation transaction")
