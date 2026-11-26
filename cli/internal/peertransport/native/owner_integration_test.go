@@ -45,6 +45,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
+	"github.com/quic-go/quic-go"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"
 	"tailscale.com/types/nettype"
@@ -387,10 +388,12 @@ func TestRealTerminalAndFileProtocolsOverNativeTailnet(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer serverOwner.Close()
-	_ = runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, dm.Regions[1], nil)
+	_ = runRealTerminalAndFileProtocols(t.Context(), t, clientOwner, serverOwner, serverAuthority, dm.Regions[1], nil)
 }
 
-func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *native.Owner, serverAuthority *tailnet.Authority, region *tailcfg.DERPRegion, beforeProtocols func(mesh.Addr), afterProtocol ...func(string)) func(context.Context) error {
+// ctx is the caller's own deadline and bounds every dial: with none, Owner.Dial gives a setup 20 s, which a starved
+// runner outlasts.
+func runRealTerminalAndFileProtocols(ctx context.Context, t *testing.T, clientOwner, serverOwner *native.Owner, serverAuthority *tailnet.Authority, region *tailcfg.DERPRegion, beforeProtocols func(mesh.Addr), afterProtocol ...func(string)) func(context.Context) error {
 	t.Helper()
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("requires /bin/sh") // the terminal and exec fixtures are POSIX shell commands
@@ -430,7 +433,9 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 		_ = protocolServer.Shutdown(ctx)
 		_ = sessions.Shutdown(ctx)
 	})
-	limiter, _ := hostserver.NewConnectionLimiter(4)
+	// One slot per terminal dial and spare: a starved host loses a client's CONNECTION_CLOSE and keeps its association
+	// until the idle timeout, and a full limiter closes the next one ("native terminal transport unavailable").
+	limiter, _ := hostserver.NewConnectionLimiter(8)
 	association, err := hostserver.NewNativeAssociationManager(hostserver.NativeAssociationConfig{Server: protocolServer, Authorizer: func(token string) (hostserver.Authorizer, error) {
 		if token != "terminal-token" && token != "exec-token" {
 			return nil, errors.New("credential rejected")
@@ -477,20 +482,20 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	dialSession := func(ctx context.Context, _ resolver.ConnectInfo) (*native.Session, error) {
 		return clientOwner.Dial(ctx, descriptor, "machine_slice", peerquic.ClassInteractive)
 	}
-	expires := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	// Every stream here and in the returned transfer opens under this expiry, and past it a new stream is refused as
+	// "context deadline exceeded": it outlives every caller's deadline.
+	expires := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
 	terminalTunnel := tunnel.TailnetTerminalTunnel{DialSession: dialSession}
 	var firstSequence atomic.Int64
-	terminalConn, err := terminalTunnel.Dial(t.Context(), resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", SessionID: "session_slice", CWD: root, Cols: 80, Rows: 24, RestartIfNotRunning: true, ReplayHistory: true, InputAttachmentID: "attachment_slice", SequenceSink: func(sequence int) { firstSequence.Store(int64(sequence)) }, Auth: resolver.AuthTarget{Method: "bearer", Token: "terminal-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	terminalConn := redial(ctx, t, func() (tunnel.Conn, error) {
+		return terminalTunnel.Dial(ctx, resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", SessionID: "session_slice", CWD: root, Cols: 80, Rows: 24, RestartIfNotRunning: true, ReplayHistory: true, InputAttachmentID: "attachment_slice", SequenceSink: func(sequence int) { firstSequence.Store(int64(sequence)) }, Auth: resolver.AuthTarget{Method: "bearer", Token: "terminal-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}})
+	})
 	if got := readTerminalUntil(t, terminalConn, "ready"); !strings.Contains(got, "ready") {
 		t.Fatalf("initial terminal output=%q", got)
 	}
-	secondConn, err := terminalTunnel.Dial(t.Context(), resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", SessionID: "session_slice", CWD: root, Cols: 132, Rows: 43, ReplayHistory: true, InputAttachmentID: "attachment_second", Auth: resolver.AuthTarget{Method: "bearer", Token: "terminal-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	secondConn := redial(ctx, t, func() (tunnel.Conn, error) {
+		return terminalTunnel.Dial(ctx, resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", SessionID: "session_slice", CWD: root, Cols: 132, Rows: 43, ReplayHistory: true, InputAttachmentID: "attachment_second", Auth: resolver.AuthTarget{Method: "bearer", Token: "terminal-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}})
+	})
 	defer secondConn.Close()
 	if err := secondConn.Resize(43, 132); err != nil {
 		t.Fatal(err)
@@ -524,10 +529,9 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	if got := readTerminalUntil(t, secondConn, "resumed:again"); !strings.Contains(got, "resumed:again") {
 		t.Fatalf("second attachment resumed output=%q", got)
 	}
-	resumedConn, err := terminalTunnel.Dial(t.Context(), resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", SessionID: "session_slice", CWD: root, Cols: 100, Rows: 31, ReplayHistory: false, AfterSequence: int(resumeFrom), InputAttachmentID: "attachment_slice", Auth: resolver.AuthTarget{Method: "bearer", Token: "terminal-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	resumedConn := redial(ctx, t, func() (tunnel.Conn, error) {
+		return terminalTunnel.Dial(ctx, resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", SessionID: "session_slice", CWD: root, Cols: 100, Rows: 31, ReplayHistory: false, AfterSequence: int(resumeFrom), InputAttachmentID: "attachment_slice", Auth: resolver.AuthTarget{Method: "bearer", Token: "terminal-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}})
+	})
 	defer resumedConn.Close()
 	if got := readTerminalUntil(t, resumedConn, "resumed:again"); !strings.Contains(got, "resumed:again") {
 		t.Fatalf("resumed attachment replay=%q", got)
@@ -545,10 +549,9 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 		check("terminal")
 	}
 
-	execConn, err := terminalTunnel.DialExec(t.Context(), resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", CWD: root, Auth: resolver.AuthTarget{Method: "bearer", Token: "exec-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}}, tunnel.ExecRequest{OperationID: "operation_exec_slice", Argv: []string{"/bin/sh", "-c", `printf %s "$EXACT"; printf %s "$PWD" >&2; exit 23`}, CWD: root, Environment: map[string]string{"EXACT": "exact-argv"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	execConn := redial(ctx, t, func() (tunnel.ExecConn, error) {
+		return terminalTunnel.DialExec(ctx, resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", CWD: root, Auth: resolver.AuthTarget{Method: "bearer", Token: "exec-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}}, tunnel.ExecRequest{OperationID: "operation_exec_slice", Argv: []string{"/bin/sh", "-c", `printf %s "$EXACT"; printf %s "$PWD" >&2; exit 23`}, CWD: root, Environment: map[string]string{"EXACT": "exact-argv"}})
+	})
 	var execStdout, execStderr strings.Builder
 	for event := range execConn.Events() {
 		switch event.Stream {
@@ -565,10 +568,9 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	for _, check := range afterProtocol {
 		check("exec")
 	}
-	cancelConn, err := terminalTunnel.DialExec(t.Context(), resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", CWD: root, Auth: resolver.AuthTarget{Method: "bearer", Token: "exec-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}}, tunnel.ExecRequest{OperationID: "operation_exec_cancel_slice", Argv: []string{"/bin/sh", "-c", "sleep 30"}, CWD: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	cancelConn := redial(ctx, t, func() (tunnel.ExecConn, error) {
+		return terminalTunnel.DialExec(ctx, resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", CWD: root, Auth: resolver.AuthTarget{Method: "bearer", Token: "exec-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "grant_test"}}}, tunnel.ExecRequest{OperationID: "operation_exec_cancel_slice", Argv: []string{"/bin/sh", "-c", "sleep 30"}, CWD: root})
+	})
 	started := false
 	var cancelCallErr error
 	for event := range cancelConn.Events() {
@@ -589,10 +591,7 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 		check("exec cancellation")
 	}
 
-	fileSession, err := dialSession(t.Context(), resolver.ConnectInfo{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	var fileSession *native.Session
 	transport, err := clienttransfer.NewNativeRoundTripper(func(ctx context.Context) (net.Conn, error) {
 		header, headerErr := streamauth.New("operation_file_transfer", "file_transfer", "stream_file_transfer", "file-token", expires, 1<<20)
 		if headerErr != nil {
@@ -620,13 +619,33 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 		}
 		return nil
 	}
-	if err := assertTransfer(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	redial(ctx, t, func() (_ struct{}, err error) {
+		if fileSession, err = dialSession(ctx, resolver.ConnectInfo{}); err != nil {
+			return
+		}
+		return struct{}{}, assertTransfer(ctx)
+	})
 	for _, check := range afterProtocol {
 		check("file transfer")
 	}
 	return assertTransfer
+}
+
+// redial runs dial again, until ctx ends, only while the host refuses the connection: a starved host drops a handshake
+// its dialler already counts as done (Owner.Listen bounds it at 10 s).
+func redial[T any](ctx context.Context, t *testing.T, dial func() (T, error)) T {
+	t.Helper()
+	for {
+		value, err := dial()
+		if err == nil {
+			return value
+		}
+		var refused *quic.TransportError
+		if ctx.Err() != nil || !errors.As(err, &refused) || refused.ErrorCode != quic.ConnectionRefused {
+			t.Fatal(err)
+		}
+		t.Log("redialing a refused connection:", err)
+	}
 }
 
 func readTerminalUntil(t *testing.T, connection tunnel.Conn, markers ...string) string {
@@ -671,7 +690,7 @@ func readTerminalUntil(t *testing.T, connection tunnel.Conn, markers ...string) 
 			t.Fatalf("read terminal through %q: %v (output %q)", marker, got.err, got.value)
 		}
 		return got.value
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second): // a bound for a hang, not a speed requirement
 		_ = connection.Close()
 		t.Fatalf("timed out reading terminal through %q", marker)
 		return ""

@@ -168,8 +168,8 @@ func testAutomaticPeerRelay(t *testing.T) {
 		t.Skip("real UDP peer relay integration")
 	}
 	t.Setenv("IN_TS_TEST", "true")
-	// Setup plus the fault phases' own bounds (20+35+8+8+35s); each phase reports its own failure.
-	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Second)
+	// A bound for a hang: each fault phase has its own (20+35+8+8+35s) and a starved setup alone takes over a minute.
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
 	defer cancel()
 
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)
@@ -320,7 +320,7 @@ func testAutomaticPeerRelay(t *testing.T) {
 	}()
 	defer func() { stopRenew(); <-renewDone }()
 	var previousClient, previousServer uint64
-	repeatTransfer := runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, serverRegion, func(address mesh.Addr) {
+	repeatTransfer := runRealTerminalAndFileProtocols(ctx, t, clientOwner, serverOwner, serverAuthority, serverRegion, func(address mesh.Addr) {
 		readyCtx, cancelReady := context.WithTimeout(ctx, 8*time.Second)
 		if readyErr := serverAuthority.PrepareRegional(readyCtx, ""); readyErr != nil {
 			cancelReady()
