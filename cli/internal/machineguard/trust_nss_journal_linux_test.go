@@ -22,12 +22,15 @@ func TestNSSWriteSurvivesACancelledCaller(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	time.AfterFunc(200*time.Millisecond, cancel) // the caller gives up while the write runs
 	if _, err := runNSSCommand(ctx, "-A", "-d", "sql:/nowhere"); err != nil {
 		t.Fatalf("write was cancelled: %v", err)
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("certutil was killed before it finished")
+	}
+	if _, err := runNSSCommand(ctx, "-A", "-d", "sql:/nowhere"); err == nil {
+		t.Fatal("a write must not start after the caller's budget ran out")
 	}
 	if _, err := runNSSCommand(ctx, "-L", "-d", "sql:/nowhere"); err == nil {
 		t.Fatal("a read must still follow the caller's deadline")
