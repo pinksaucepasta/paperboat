@@ -25,6 +25,7 @@ var (
 	ErrInvalidTransition = errors.New("invalid worker update transition")
 	versionPattern       = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`)
 	digestPattern        = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	failurePartPattern   = regexp.MustCompile(`^[a-z_]{0,32}$`)
 )
 
 type Stage string
@@ -157,6 +158,9 @@ func (j Journal) Validate() error {
 		return ErrInvalidJournal
 	}
 	if j.RollbackVersion != "" && !validVersion(j.RollbackVersion) && !(j.validLocalActive() && j.RollbackVersion == j.ActiveVersion) || j.CandidateVersion != "" && !validVersion(j.CandidateVersion) {
+		return ErrInvalidJournal
+	}
+	if j.FailedVersion != "" && !validVersion(j.FailedVersion) || !failurePartPattern.MatchString(j.FailedStep) || !failurePartPattern.MatchString(j.FailedReason) {
 		return ErrInvalidJournal
 	}
 	if !digestPattern.MatchString(j.ActiveDigest) || j.ActiveLength < 1 || invalidRange(j.ActiveHostdAPIMin, j.ActiveHostdAPIMax) || j.ActiveHostdAPIMin == 0 || invalidRange(j.ActiveRuntimeAPIMin, j.ActiveRuntimeAPIMax) || j.ActiveRuntimeAPIMin == 0 {

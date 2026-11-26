@@ -83,6 +83,14 @@ func TestValidateReadyToleratesTransientDegradedAfterHealth(t *testing.T) {
 	if err := stuck.validateReady(t.Context(), "2", 5*time.Second, func(context.Context) error { return nil }); !errors.Is(err, ErrParticipantReadiness) {
 		t.Fatalf("daemon degraded past the settle window must still fail: %v", err)
 	}
+	// A daemon that never becomes ready again after health fails within one budget, not two.
+	notRunning := UnixParticipantProbe{Running: false, Version: "2", UpdaterVersion: "2"}
+	slow := &unixParticipantReadiness{participants: &sequencedParticipants{probes: []UnixParticipantProbe{notRunning, notRunning, ready, notRunning}}, handoff: handoff}
+	started := time.Now()
+	err = slow.validateReady(t.Context(), "2", 600*time.Millisecond, func(context.Context) error { return nil })
+	if !errors.Is(err, ErrParticipantReadiness) || time.Since(started) > 850*time.Millisecond {
+		t.Fatalf("never-ready candidate: err=%v after %v, want a failure within one budget", err, time.Since(started))
+	}
 }
 
 // A machine removed from its account waits for enrollment before and after the update; that is its
@@ -92,6 +100,10 @@ func TestRemovedMachineUpdatesWhileAwaitingEnrollment(t *testing.T) {
 	awaiting := UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "awaiting_enrollment"}
 	next := awaiting
 	next.Version, next.UpdaterVersion = "2", "2"
+	// Preflight (activation_unix.go) checks the baseline against itself before approving.
+	if err := unixParticipantReady(awaiting, "1", awaiting, false); err != nil {
+		t.Fatalf("preflight of a removed machine: %v", err)
+	}
 	if err := unixParticipantReady(next, "2", awaiting, false); err != nil {
 		t.Fatalf("removed machine: %v", err)
 	}

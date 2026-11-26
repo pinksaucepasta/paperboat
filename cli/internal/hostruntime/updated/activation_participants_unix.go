@@ -147,16 +147,21 @@ func (s *Service) recoverPrepared(ctx context.Context) (installsource.Source, er
 // same settle rules: the daemon may still be reconciling with a just-restarted machine guard, and a
 // single exact-"ready" probe there rolled back healthy updates (canary 2026-11-26, daemon_state).
 func (g *unixParticipantReadiness) validateReady(ctx context.Context, version string, timeout time.Duration, validate func(context.Context) error) error {
-	wait := func() error {
-		readyCtx, cancel := context.WithTimeout(ctx, timeout)
+	// Both waits share one RecoveryTimeout budget; signed health has its own window.
+	wait := func(budget time.Duration) (time.Duration, error) {
+		started := time.Now()
+		readyCtx, cancel := context.WithTimeout(ctx, budget)
 		defer cancel()
-		return g.waitReady(readyCtx, version, true)
+		err := g.waitReady(readyCtx, version, true)
+		return time.Since(started), err
 	}
-	if err := wait(); err != nil {
+	used, err := wait(timeout)
+	if err != nil {
 		return err
 	}
 	if err := validate(ctx); err != nil {
 		return err
 	}
-	return wait()
+	_, err = wait(max(timeout-used, 0))
+	return err
 }
