@@ -31,6 +31,10 @@ func probeDoctorGuardVersion(ctx context.Context) doctorpkg.Check {
 		check.Status = doctorpkg.StatusWarning
 		check.Summary = "The machine guard runs " + status.Version + ", pb is " + buildinfo.Version + "."
 		check.Recovery = "Run `pb install` again to install the matching machine guard, then run `pb doctor` again."
+	} else if status.Ready && status.DefaultBrowserDomain != "" && !status.TrustReady {
+		check.Status = doctorpkg.StatusWarning
+		check.Summary = "Browser HTTPS trust is pending: browser URLs for local services are not trusted yet."
+		check.Recovery = "Run `pb install` again and approve the operating system certificate prompt (on a Mac, at its screen)."
 	}
 	return check
 }

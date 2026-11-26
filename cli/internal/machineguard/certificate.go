@@ -317,6 +317,7 @@ func prepareInstalledLocalCA(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer lock.Close()
+	cfg.promptTrust = true
 	g := &guardServer{cfg: cfg}
 	// Bounded like the guard's own start: an unanswered OS approval prompt leaves trust pending.
 	trustCtx, cancel := context.WithTimeout(ctx, guardTrustTimeout)

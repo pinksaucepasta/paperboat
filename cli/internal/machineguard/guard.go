@@ -90,6 +90,9 @@ func responseError(out response) error {
 type Config struct {
 	Socket, StateDir string
 	LoopbackCIDR     string
+	// promptTrust lets the trust step ask at the screen (macOS keychain prompt). Only an explicit install does:
+	// a guard start on a headless Mac would raise an unanswerable prompt at every start.
+	promptTrust bool
 }
 type request struct {
 	Operation string            `json:"operation"`

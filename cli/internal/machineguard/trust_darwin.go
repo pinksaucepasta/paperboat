@@ -45,6 +45,9 @@ func installDarwinLocalTrust(ctx context.Context, cfg Config, certificatePEM []b
 	if err = writeOwnedTrustState(pemPath, certificatePEM, 0644); err != nil {
 		return err
 	}
+	if !cfg.promptTrust {
+		return ensureDarwinSystemTrust(ctx, pemPath, -1, run)
+	}
 	return ensureDarwinSystemTrust(ctx, pemPath, darwinConsoleUID(ctx), run)
 }
 
@@ -61,9 +64,13 @@ func darwinConsoleUID(ctx context.Context) int {
 	return uid
 }
 
+// ensureDarwinSystemTrust adds the root unless already trusted; consoleUID -1 only checks (no prompt).
 func ensureDarwinSystemTrust(ctx context.Context, pemPath string, consoleUID int, run darwinTrustRunner) error {
 	if err := verifyDarwinSystemTrust(ctx, pemPath, run); err == nil {
 		return recordDarwinTrustOwnership(pemPath)
+	}
+	if consoleUID < 0 {
+		return trustPending(ctx, errors.New("browser HTTPS trust is pending: run `pb install` again while signed in at the Mac and approve its certificate prompt"))
 	}
 	name, args, ok := darwinTrustAddCommand(consoleUID, pemPath)
 	if !ok {

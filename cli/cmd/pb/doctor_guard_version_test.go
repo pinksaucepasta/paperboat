@@ -54,3 +54,16 @@ func TestDoctorNamesWhyTheMachineGuardDidNotStart(t *testing.T) {
 		t.Fatalf("start failure not named: %+v", check)
 	}
 }
+
+// A headless Mac's unanswered keychain prompt leaves trust pending; pb doctor says so and names the retry.
+func TestDoctorReportsPendingBrowserTrust(t *testing.T) {
+	pending := withGuardStatus(machineguard.RuntimeStatus{Version: buildinfo.Version, Ready: true, DefaultBrowserDomain: "example.test"}, nil)
+	check := probeDoctorGuardVersion(pending)
+	if check.Status != doctorpkg.StatusWarning || !strings.Contains(check.Recovery, "pb install") {
+		t.Fatalf("pending trust: %+v", check)
+	}
+	trusted := withGuardStatus(machineguard.RuntimeStatus{Version: buildinfo.Version, Ready: true, DefaultBrowserDomain: "example.test", TrustReady: true}, nil)
+	if check := probeDoctorGuardVersion(trusted); check.Status != doctorpkg.StatusPass {
+		t.Fatalf("trusted: %+v", check)
+	}
+}
