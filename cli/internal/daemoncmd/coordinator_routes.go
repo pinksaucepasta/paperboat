@@ -116,7 +116,7 @@ const guardCallBudget = 5 * time.Second
 // stageCtx is one reconcile stage's budget: it ends with the reconcile's caller (its deadline or cancellation), with
 // Stop (the coordinator's lifetime) and after timeout, never with an earlier stage's spent budget. c.mu is held.
 func (c *Coordinator) stageCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
-	if c.ctx == nil || c.stageParent == nil {
+	if c.ctx == nil || c.stageParent == nil || c.ctx.Err() != nil { // AfterFunc on a done ctx fires only later
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // not reconciling: every stage ends before it starts
 		return ctx, cancel

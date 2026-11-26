@@ -269,3 +269,17 @@ func TestBrowserCertificatesShareOneStageBudget(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// A stage started after Stop cancelled the lifetime (Stop has not taken mu yet) is done at once, so it never
+// passes the certutil write's time-left check.
+func TestStageAfterStopIsDoneAtOnce(t *testing.T) {
+	c := &Coordinator{}
+	life, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.ctx, c.stageParent = life, context.Background()
+	stage, cancelStage := c.stageCtx(time.Minute)
+	defer cancelStage()
+	if stage.Err() == nil {
+		t.Fatal("a stage started after Stop is still alive")
+	}
+}
