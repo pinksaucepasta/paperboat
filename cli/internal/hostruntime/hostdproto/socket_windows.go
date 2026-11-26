@@ -307,7 +307,10 @@ func (s *Server) serveOne(ctx context.Context, connection net.Conn) (result erro
 		if s.config.UpdateGate == nil {
 			return errors.Join(ErrNotReady, s.writeError(ctx, connection, ErrNotReady))
 		}
-		gateCtx, cancel := context.WithTimeout(ctx, s.config.RequestTimeout)
+		// A client that gave up (an activation that failed mid-window) must release the gate at once: a stability
+		// observation otherwise held it until the window ended and the immediate rollback timed out behind it.
+		peerCtx, stopWatching := watchPeerDisconnect(ctx, connection)
+		gateCtx, cancel := context.WithTimeout(peerCtx, s.config.RequestTimeout)
 		var value UpdateGateResponse
 		var gateErr error
 		if gate.Operation == UpdateGateCommit {
@@ -329,6 +332,7 @@ func (s *Server) serveOne(ctx context.Context, connection net.Conn) (result erro
 			}
 		}
 		cancel()
+		stopWatching()
 		response, err = &value, gateErr
 	} else {
 		response, err = s.controller.Handle(request)

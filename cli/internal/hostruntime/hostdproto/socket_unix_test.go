@@ -875,3 +875,34 @@ func TestListenReplacesOnlyAStaleSocket(t *testing.T) {
 	}
 	_ = replacement.Close()
 }
+
+type blockingUpdateGate struct{ released chan struct{} }
+
+func (g blockingUpdateGate) HandleUpdateGate(ctx context.Context, _ UpdateGateRequest) (UpdateGateResponse, error) {
+	<-ctx.Done() // as a stability observation holding the gate
+	close(g.released)
+	return UpdateGateResponse{}, ctx.Err()
+}
+
+// A client that gives up (an activation that failed mid-window) releases the gate at once: hostd held the stability
+// observation, and its lock, until the window ended, so the immediate rollback timed out behind it.
+func TestSocketUpdateGateEndsWhenTheClientDisconnects(t *testing.T) {
+	config := testSocketConfig(t)
+	gate := blockingUpdateGate{released: make(chan struct{})}
+	config.UpdateGate = gate
+	_, cancel, done := startSocketServer(t, config)
+	defer stopSocketServer(t, cancel, done)
+	client := testSocketClient(t, config)
+	ctx, stop := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer stop()
+	if _, err := client.UpdateGate(ctx, UpdateGateRequest{
+		Operation: UpdateGateTarget, TransactionID: "transaction_01", Version: "2026.09.02.6", ManifestSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}); err == nil {
+		t.Fatal("blocked gate request unexpectedly succeeded")
+	}
+	select {
+	case <-gate.released:
+	case <-time.After(time.Second):
+		t.Fatal("hostd kept the gate operation after its client disconnected")
+	}
+}

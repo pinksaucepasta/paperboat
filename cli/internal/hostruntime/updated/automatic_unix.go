@@ -33,6 +33,10 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	}
 	if !settings.Enabled {
 		lock, err := unixActivationLock(s.config.StateRoot)
+		if errors.Is(err, ErrActivationPending) {
+			// As the download path below: an activation in progress is not a failed check (no backoff).
+			return autoupdate.Result{Version: s.currentManager().ActiveVersion()}, nil
+		}
 		if err != nil {
 			return autoupdate.Result{}, err
 		}

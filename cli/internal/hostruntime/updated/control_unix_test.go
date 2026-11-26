@@ -420,6 +420,15 @@ func TestControlPendingInstallationBecomesCommittedWithoutRestart(t *testing.T) 
 	if !errors.Is(err, resolved) {
 		t.Fatal("committed source stayed fenced", err)
 	}
+	// An activation holding the lock is not a failed automatic check (no check_failed, no backoff).
+	lock, err := unixActivationLock(service.config.StateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if _, err := service.automaticCheck(ctx); err != nil {
+		t.Fatal("automatic check during an activation reported a failure", err)
+	}
 }
 
 // A peer that connects and never sends its request frees the handler after controlRequestReadTimeout, not after the
