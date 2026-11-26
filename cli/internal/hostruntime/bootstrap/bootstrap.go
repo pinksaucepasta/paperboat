@@ -69,6 +69,7 @@ type Pairing struct {
 type Material struct {
 	Schema                 string         `json:"schema"`
 	UserMachineID          string         `json:"user_machine_id"`
+	Alias                  string         `json:"alias,omitempty"` // the name the server gave the machine
 	PairingID              string         `json:"pairing_id"`
 	EnvironmentID          string         `json:"environment_id"`
 	ControlURL             string         `json:"control_url"`

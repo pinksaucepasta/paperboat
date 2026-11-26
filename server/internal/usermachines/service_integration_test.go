@@ -2627,6 +2627,7 @@ func TestInstallationFailureRevokesIdentityReleasesSeatAndRetryIssuesNewIdentity
 	}
 	var recoveryMaterial struct {
 		UserMachineID       string `json:"user_machine_id"`
+		Alias               string `json:"alias"`
 		PairingID           string `json:"pairing_id"`
 		EnvironmentID       string `json:"environment_id"`
 		HelperID            string `json:"helper_id"`
@@ -2636,6 +2637,11 @@ func TestInstallationFailureRevokesIdentityReleasesSeatAndRetryIssuesNewIdentity
 	}
 	if json.Unmarshal(material, &recoveryMaterial) != nil || recoveryMaterial.UserMachineID != userMachineID || recoveryMaterial.PairingID != enrollmentID || recoveryMaterial.EnvironmentID != environmentID || recoveryMaterial.HelperID != "helper_install_retry_"+suffix || recoveryMaterial.ReuseIdentity || recoveryMaterial.Credential != "retry-credential" || recoveryMaterial.HelperListenAddress != "127.0.0.1:38080" {
 		t.Fatal("recovery material binding mismatch")
+	}
+	// The material names the machine as the server stored it (a taken name gets a -N suffix), for pairing's last line.
+	var storedAlias string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT alias FROM paperboat.user_machines WHERE id=$1`, userMachineID).Scan(&storedAlias); err != nil || recoveryMaterial.Alias == "" || recoveryMaterial.Alias != storedAlias {
+		t.Fatalf("material alias=%q stored=%q err=%v", recoveryMaterial.Alias, storedAlias, err)
 	}
 	var routeCount int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.control_routes WHERE environment_id=$1 AND kind='runtime_https_wss' AND public_host=$2 AND target_host='127.0.0.1' AND target_port=38080`, environmentID, "recovery-"+suffix+".example.test").Scan(&routeCount); err != nil || routeCount != 1 {

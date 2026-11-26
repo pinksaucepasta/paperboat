@@ -517,7 +517,7 @@ func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, 
 		cliAccessToken, cliRefreshToken = oneShotToken(32), oneShotToken(32)
 	}
 	materialMap := map[string]any{
-		"schema": "paperboat.machine-installation/v1", "user_machine_id": machine.ID, "pairing_id": installationEnrollmentID, "environment_id": machine.EnvironmentID,
+		"schema": "paperboat.machine-installation/v1", "user_machine_id": machine.ID, "alias": machine.Alias, "pairing_id": installationEnrollmentID, "environment_id": machine.EnvironmentID,
 		"control_url": s.issuer, "helper_id": grant.HelperID, "enrollment_id": grant.EnrollmentID,
 		"enrollment_credential": grant.Credential, "reuse_identity": reuseIdentity, "expires_at": grant.ExpiresAt,
 		"helper_listen_address":   fmt.Sprintf("127.0.0.1:%d", s.helperListenPort),

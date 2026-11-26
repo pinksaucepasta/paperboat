@@ -333,9 +333,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 				return &installationStageError{Stage: "daemon_readiness", Cause: err}
 			}
 			paired := pairedMessage(ctx, localdaemon.ProbeCurrentUserForUpdate)
-			if paired == pairedReadyMessage && *name != "" {
-				paired = "Ready: this machine is " + *name + ". Open it from any device with: pb connect " + *name
-			}
+			paired = namedReadyMessage(paired, material.Alias)
 			fmt.Fprintln(stderr, "Setting up encrypted environment...")
 			environmentErr := hostruntime.PreparePairEnvironment(ctx, *stateRoot, material.ControlURL, httptransport.Default())
 			if err := bootstrap.ClearResume(*stateRoot); err != nil {
