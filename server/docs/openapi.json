@@ -25852,10 +25852,14 @@
         "description": "Returns bounded GitHub repository identifiers and display metadata available through the user's current authorization. No provider credential is returned.",
         "security": [
           {
-            "bearerAuth": [
-              "machines:read"
-            ]
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
           }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
         ],
         "responses": {
           "200": {

@@ -51,6 +51,21 @@ for (const [path, item] of Object.entries(doc.paths)) {
   }
 }
 
+// A literal path with nothing to check (or not browser-documented) is still listed, as `{}`, when a checked template
+// matches it: /v1/config-repositories/candidates must never be checked as /v1/config-repositories/{repository_id}.
+const shadows = (template, key) => {
+  const parts = key.split("/")
+  const wanted = template.split("/")
+  return wanted.length === parts.length && wanted.every((part, i) => part.startsWith("{") || part === parts[i])
+}
+const checked = Object.keys(ops)
+for (const [path, item] of Object.entries(doc.paths)) {
+  for (const method of Object.keys(item)) {
+    const key = `${method.toUpperCase()} ${path}`
+    if (!ops[key] && checked.some((template) => shadows(template, key))) ops[key] = {}
+  }
+}
+
 const defs = {}
 const queue = [...used]
 while (queue.length) {

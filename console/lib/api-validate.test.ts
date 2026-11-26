@@ -3,6 +3,7 @@ import { api, ApiError, checked } from "@/lib/api"
 import { checkResponse, documentedOperations, operationFor, operationSchema, problem, sharedSchema } from "@/lib/api-validate"
 
 import { sample, type Schema } from "@/lib/api-sample"
+import openapi from "../../server/docs/openapi.json"
 
 /** The first required field of the object a schema describes, with its schema; undefined for other shapes. */
 function firstRequired(schema: Schema): [string, Schema] | undefined {
@@ -99,6 +100,17 @@ describe("operations", () => {
     expect(checkResponse("PATCH", "tunnels/tunnel_1", { id: 1 })).toContain("matches none of the shapes")
   })
   test("an undocumented path is not checked", () => expect(checkResponse("GET", "no/such/path", "anything")).toBeUndefined())
+  test("a documented literal path is never checked as the `{id}` path beside it", () => {
+    // What production answered when the console showed "data.id is missing" on Connect a repository.
+    expect(checkResponse("GET", "config-repositories/candidates?workspace=personal&limit=20", { items: [], next_cursor: "" })).toBeUndefined()
+    for (const [path, item] of Object.entries(openapi.paths)) {
+      for (const method of Object.keys(item)) {
+        const found = operationFor(method.toUpperCase(), path.slice("/v1/".length).replace(/\{[^}]+\}/g, "an-id"))
+        // Undocumented-for-the-validator is fine; another path's shape is not.
+        if (found && path.startsWith("/v1/")) expect([method, path, found.split(" ")[1].replace(/\{[^}]+\}/g, "{}")]).toEqual([method, path, path.replace(/\{[^}]+\}/g, "{}")])
+      }
+    }
+  })
 })
 
 describe("api() at the boundary", () => {

@@ -139,7 +139,7 @@ export function checked<T>(method: string | undefined, path: string, data: T): T
     throw new ApiError(
       502,
       "invalid_response",
-      `Paperboat sent an answer this console cannot read (${wrong}). Reload the page; if it stays, update the console.`,
+      `Paperboat’s answer couldn’t be read (${wrong}). Try again; if it keeps failing, send support the reference below.`,
     )
   return data
 }
