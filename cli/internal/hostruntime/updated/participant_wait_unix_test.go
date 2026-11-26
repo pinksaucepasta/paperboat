@@ -84,13 +84,19 @@ func TestValidateReadyToleratesTransientDegradedAfterHealth(t *testing.T) {
 	if err := stuck.validateReady(t.Context(), "2", 5*time.Second, func(context.Context) error { return nil }); !errors.Is(err, ErrParticipantReadiness) {
 		t.Fatalf("daemon degraded past the settle window must still fail: %v", err)
 	}
-	// A daemon that never becomes ready again after health fails within one budget, not two.
+	// A daemon that never becomes ready again after health still fails, within two budgets.
 	notRunning := UnixParticipantProbe{Running: false, Version: "2", UpdaterVersion: "2"}
 	slow := &unixParticipantReadiness{participants: &sequencedParticipants{probes: []UnixParticipantProbe{notRunning, notRunning, ready, notRunning}}, handoff: handoff}
 	started := time.Now()
 	err = slow.validateReady(t.Context(), "2", 600*time.Millisecond, func(context.Context) error { return nil })
-	if !errors.Is(err, ErrParticipantReadiness) || time.Since(started) > 850*time.Millisecond {
-		t.Fatalf("never-ready candidate: err=%v after %v, want a failure within one budget", err, time.Since(started))
+	if !errors.Is(err, ErrParticipantReadiness) || time.Since(started) > 1450*time.Millisecond {
+		t.Fatalf("never-ready candidate: err=%v after %v, want a failure within two budgets", err, time.Since(started))
+	}
+	// A slow first start used most of a shared budget and left the post-health wait ~0 s: a healthy update that
+	// settles again after health was rolled back. Each wait has its own budget.
+	late := &unixParticipantReadiness{participants: &sequencedParticipants{probes: []UnixParticipantProbe{notRunning, notRunning, ready, notRunning, notRunning, ready}}, handoff: handoff}
+	if err := late.validateReady(t.Context(), "2", 600*time.Millisecond, func(context.Context) error { return nil }); err != nil {
+		t.Fatalf("slow first start, then settling after health: %v", err)
 	}
 }
 
