@@ -53,3 +53,14 @@ func TestPendingInstallIsNeverReplacedByAnOlderSignedRelease(t *testing.T) {
 		t.Fatalf("an official bundle over a custom pending build was refused: %v", err)
 	}
 }
+
+// Canaries 2026-11-26: custom → official left automatic updates off.
+func TestBundleOverACustomBuildTurnsAutomaticUpdatesOn(t *testing.T) {
+	custom := installsource.Source{Version: "dev-1", Distribution: installsource.Custom}
+	candidate := installsource.Source{Version: "2026.10.20.7", Distribution: installsource.Official, AutomaticUpdates: true}
+	for _, pending := range []bool{false, true} {
+		if got, err := ReplaceBundleSource(custom, pending, candidate); err != nil || !got.AutomaticUpdates {
+			t.Fatalf("pending=%v: %+v %v", pending, got, err)
+		}
+	}
+}

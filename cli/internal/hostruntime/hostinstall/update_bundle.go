@@ -171,6 +171,9 @@ func ReplaceBundleSource(previous installsource.Source, previousPending bool, ca
 			return installsource.Source{}, hostInstallFailure("the signed release "+candidate.Version+" is older than the installed "+previous.Version+"; nothing was changed", ErrInvalidRequest)
 		}
 	}
-	candidate.AutomaticUpdates = previous.AutomaticUpdates
+	// A custom build has automatic updates off by rule; moving to a signed release turns them on.
+	if previous.Distribution == installsource.Official {
+		candidate.AutomaticUpdates = previous.AutomaticUpdates
+	}
 	return candidate, nil
 }

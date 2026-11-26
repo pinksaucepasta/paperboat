@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 )
@@ -30,10 +31,17 @@ func checkPendingInstallation(journal installJournal, request Request) error {
 	if journal.Stage != "services_started" {
 		return hostInstallFailure("the pending installation has not started its services yet", ErrInvalidRequest)
 	}
-	if journal.Source != request.Source {
+	if !sameCommittedArtifact(journal.Source, request.Source) {
 		return hostInstallFailure("the pending installation is a different executable than the one being committed", ErrInvalidRequest)
 	}
 	return nil
+}
+
+// sameCommittedArtifact compares the executable and its provenance, not the update policy: a
+// paired bundle update records the policy itself (ReplaceBundleSource) while the client cannot
+// know it, so a differing policy alone made a finished update report an unconfirmed commit.
+func sameCommittedArtifact(recorded, requested installsource.Source) bool {
+	return recorded.SameArtifact(requested) && recorded.Distribution == requested.Distribution
 }
 
 func commitPreparedInstallationLocked(ctx context.Context, request Request, paths installPaths, nativeLockHeld bool) (resultErr error) {
@@ -47,7 +55,7 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 		if err != nil {
 			return err
 		}
-		if installed.Source != request.Source || installed.SessionOwnerGeneration != generation {
+		if !sameCommittedArtifact(installed.Source, request.Source) || installed.SessionOwnerGeneration != generation {
 			return hostInstallFailure("the recorded installation is not the executable being committed", ErrInvalidRequest)
 		}
 		return hostInstallFailure("the installed executable no longer matches its record", installed.Source.Verify(paths.worker))
@@ -58,6 +66,7 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 	if err := checkPendingInstallation(journal, request); err != nil {
 		return err
 	}
+	request.Source = journal.Source // the same artifact; the journal's update policy is the one recorded
 	if !nativeLockHeld {
 		// Absent update state is no reason to commit unlocked: the lock creates the directory it needs.
 		lock, lockErr := lockUnixInstallState(ctx, paths.updateState)
