@@ -5,7 +5,6 @@ package hostinstall
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 )
 
 // A fresh machine guard learns the local access domain from the server the install
@@ -24,7 +23,7 @@ func TestUnboundSuppliedRequestKeepsTheControlURL(t *testing.T) {
 // transaction. The pending record is re-pointed at the new slot and stays pending, so the enrollment commit that follows
 // accepts the new binary (journal source == request source) and refuses a stale commit of the old one.
 func TestUpdatingAPendingInstallKeepsItPendingAtTheNewSlotAndTheCommitVerifiesIt(t *testing.T) {
-	oldSource, newSource := installsource.Source{Version: "old"}, installsource.Source{Version: "new"}
+	oldSource, newSource := testSource("dev-old", "a"), testSource("dev-new", "b")
 	update := unboundSuppliedRequest(Request{Schema: SchemaV1, Platform: "linux", User: "tester", UID: 1000, GID: 1000, Group: "tester", Home: "/home/tester", Executable: "/pb", Source: newSource})
 	if !update.EnrollmentPending || update.Source != newSource {
 		t.Fatalf("update of a pending install = %+v", update)

@@ -33,3 +33,8 @@ func TestCommitComparesTheArtifactNotTheUpdatePolicy(t *testing.T) {
 		}
 	}
 }
+
+// testSource is a valid custom source; commit checks compare only valid artifacts.
+func testSource(version, digit string) installsource.Source {
+	return installsource.Source{Version: version, Platform: runtime.GOOS, Architecture: runtime.GOARCH, SHA256: strings.Repeat(digit, 64), Length: 1, Distribution: installsource.Custom}
+}
