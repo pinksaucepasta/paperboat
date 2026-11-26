@@ -203,6 +203,8 @@ record() { # record ID STATUS SECONDS DETAIL
   # NOT RUN: a row that needs something this run does not have (its own line in the summary, never PASS, never SKIP)
   [ "$status" = PASS ] || [ "$status" = SKIP ] || [ "$status" = "NOT RUN" ] || FAILED=1
   printf '%-28s %-5s %6ss  %s\n' "$id" "$status" "$secs" "${detail:0:150}"
+  # copy the devices' logs before the next check changes them
+  [ "$status" != FAIL ] || [ -z "${SMOKE_ON_FAIL:-}" ] || timeout 900 "$SMOKE_ON_FAIL" fail "$id" </dev/null >/dev/null 2>&1 || true
 }
 # Preserve the actual failure without exposing command output in shared receipts.
 record_command_failure() {
