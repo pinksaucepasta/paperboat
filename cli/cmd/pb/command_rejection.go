@@ -53,6 +53,7 @@ const (
 	commandRejectUpdateFlags
 	commandRejectUpdateUnpaired
 	commandRejectUpdatePlatform
+	commandRejectHostLocalSendNoSession
 	commandRejectMacRootInstall
 )
 
@@ -72,6 +73,8 @@ func (e commandRejection) valid() bool {
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
+	case commandRejectHostLocalSendNoSession:
+		return "pb send could not start host-local delivery: this process runs with a Paperboat terminal's file delivery settings but outside a terminal session. Run pb send from a Paperboat terminal, or pass --session <id> of the terminal that should receive the file."
 	case commandRejectMacRootInstall:
 		return "On macOS, Paperboat installs for your own user, not root. Run `pb install`, `pb pair` and `pb update` (or the install command) as your normal macOS user without sudo; it asks for administrator approval when it needs it."
 	case commandRejectPreviewExpired:

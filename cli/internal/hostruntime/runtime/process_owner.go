@@ -91,7 +91,7 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 		connections.Close()
 		return nil, errors.Join(err, durable.Close())
 	}
-	executions := hostdExecutions{RemoteManager: remote, environment: environment}
+	executions := hostdExecutions{RemoteManager: remote, environment: executionEnvironment(environment)}
 	owner := &ProcessOwner{sessions: sessions, sessionOwners: connections, executions: executions, durable: durable, listen: listen}
 	owner.status.sessions = sessions
 	owner.status.executions = executions

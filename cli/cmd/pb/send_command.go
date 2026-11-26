@@ -270,7 +270,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 			return localErr
 		} else if localSender != nil {
 			if sessionID == "" {
-				return errors.New("host-local file delivery requires a Paperboat terminal session")
+				return commandRejection{reason: commandRejectHostLocalSendNoSession}
 			}
 			batch, err = localSender.SendNativeBatch(ctx.Context, batchID, sourceMachineID, destination.ID, descriptor.InitiatingUserID, sessionID, prepared.Sources, expiresAt)
 		} else {

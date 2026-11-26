@@ -308,7 +308,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		return filetransfer.WriterRecipient(writers, machineID)
 	}
 	executionConfig := execprocess.Config{
-		WorkspaceRoot: config.WorkspaceRoot, BaseEnvironment: config.AgentEnvironment,
+		WorkspaceRoot: config.WorkspaceRoot, BaseEnvironment: executionEnvironment(config.AgentEnvironment),
 		MaximumActive: resources.MaxConcurrentOps, MaximumOperations: resources.MaxConcurrentOps * 32,
 		ReplayBytes: int(config.Runtime.Limits.PendingOutputBytes), CancelGrace: 2 * time.Second, Store: durable,
 	}

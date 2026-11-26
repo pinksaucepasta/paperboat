@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	runtimeconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
@@ -33,4 +34,16 @@ type hostdExecutions struct {
 func (h hostdExecutions) Start(ctx context.Context, request execprocess.Request) (execprocess.ExecutionService, bool, error) {
 	launch := append(append([]string(nil), h.environment...), execprocess.LaunchEnvironment(ctx)...)
 	return h.RemoteManager.Start(execprocess.WithLaunchEnvironment(ctx, launch), request)
+}
+
+// executionEnvironment drops the host-local file delivery credentials: that delivery is bound to a terminal
+// session's writers, so pb send inside pb exec uses this machine's normal send path instead.
+func executionEnvironment(agent []string) []string {
+	result := make([]string, 0, len(agent))
+	for _, entry := range agent {
+		if !strings.HasPrefix(entry, "PAPERBOAT_FILE_TRANSFER_STAGING_ENDPOINT=") && !strings.HasPrefix(entry, "PAPERBOAT_RUNTIME_AGENT_TOKEN_FILE=") {
+			result = append(result, entry)
+		}
+	}
+	return result
 }
