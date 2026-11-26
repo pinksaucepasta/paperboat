@@ -918,6 +918,21 @@ func LockUnixActivationForUninstall(root string) (io.Closer, error) {
 	return lock, nil
 }
 
+// RetireUnixActivationForUninstall drops any activation handoff, committed or not, so uninstall can finish from a
+// half-switched update: the helper that owned it was killed or cannot finish (2026-11-26: an interrupted stability
+// window left uninstall failing at uninstall_recover forever). Uninstall removes every generation and file anyway,
+// so there is nothing left for the helper to restore. The caller holds the lock from LockUnixActivationForUninstall.
+func RetireUnixActivationForUninstall(ctx context.Context, root string, controller UnixActivationController) error {
+	if ctx == nil || controller == nil {
+		return ErrInvalidConfig
+	}
+	h, err := readUnixHandoff(root)
+	if err != nil || h == nil {
+		return err
+	}
+	return retireUnixHandoff(ctx, root, controller)
+}
+
 func retireUnixHandoff(ctx context.Context, root string, controller UnixActivationController) error {
 	if err := controller.Retire(ctx); err != nil {
 		return err

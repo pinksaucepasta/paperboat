@@ -965,6 +965,40 @@ func TestReleaseCommittedUnixActivationFreesOnlyACommittedFinishRetry(t *testing
 	}
 }
 
+// An activation interrupted mid stability window (helper killed, not committed) blocked uninstall at
+// uninstall_recover for good (2026-11-26). Uninstall retires it whatever its stage; a refused retirement
+// keeps the handoff so nothing is half-removed.
+func TestUninstallRetiresAnUncommittedActivation(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires protected activation custody")
+	}
+	for _, retireErr := range []error{nil, errors.New("systemctl failed")} {
+		root := t.TempDir()
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		previous := workerupdate.Release{Version: "2026.10.13.1", SHA256: strings.Repeat("a", 64), Length: 1, Platform: runtime.GOOS, Architecture: runtime.GOARCH}
+		if err := writeUnixHandoff(root, &unixActivationHandoff{Schema: unixHandoffSchema, Previous: previous, Candidate: "2026.10.13.2", ApprovalID: strings.Repeat("b", 64), Started: true, ParticipantsTouched: true}); err != nil {
+			t.Fatal(err)
+		}
+		err := RetireUnixActivationForUninstall(context.Background(), root, &controllerFixture{retireErr: retireErr})
+		handoff, _ := readUnixHandoff(root)
+		if retireErr == nil && (err != nil || handoff != nil) {
+			t.Fatalf("uninstall did not retire the interrupted activation: err=%v handoff=%v", err, handoff)
+		}
+		if retireErr != nil && (!errors.Is(err, retireErr) || handoff == nil) {
+			t.Fatalf("failed retirement: err=%v handoff kept=%v", err, handoff != nil)
+		}
+	}
+	empty := t.TempDir()
+	if err := os.Chmod(empty, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := RetireUnixActivationForUninstall(context.Background(), empty, &controllerFixture{}); err != nil {
+		t.Fatalf("no handoff: %v", err)
+	}
+}
+
 // Every point at which an update can be interrupted, against every combination of signed policy refusing the
 // candidate and the previous version, either finishes forward or ends the attempt: no cell may leave the helper
 // restarting on the same refusal. A refused previous version never changes whether an attempt ends; the label

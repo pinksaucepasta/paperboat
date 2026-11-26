@@ -158,6 +158,12 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		}()
 	}
 
+	controller := service.UnixUpdateActivator{Platform: request.Platform, UID: request.UID, Runner: service.ExecRunner{}}
+	if activationLock != nil {
+		if err := updated.RetireUnixActivationForUninstall(ctx, paths.updateState, controller); err != nil {
+			return withUninstallStage("uninstall_recover", err)
+		}
+	}
 	if err := prepareUnixNativeRecovery(ctx, paths, request.UID, false); err != nil {
 		return withUninstallStage("uninstall_recover", err)
 	}
@@ -174,7 +180,6 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		if err := RetireSessionOwners(ctx, request, true); err != nil {
 			return withUninstallStage("uninstall_sessions", err)
 		}
-		controller := service.UnixUpdateActivator{Platform: request.Platform, UID: request.UID, Runner: service.ExecRunner{}}
 		if err := uninstallWithActivation(ctx, controller.RemoveForUninstall, lifecycle.Uninstall); err != nil {
 			return err
 		}
