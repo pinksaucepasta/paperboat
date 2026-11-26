@@ -233,3 +233,35 @@ func TestTeamMachineTransferToPersonalRefusalsHaveTheirOwnCodes(t *testing.T) {
 		}
 	}
 }
+
+type inviteErrorTeamHTTPStub struct {
+	teamAPI
+	err error
+}
+
+func (s inviteErrorTeamHTTPStub) Invite(context.Context, string, string, teams.InviteRequest) (teams.Invitation, error) {
+	return teams.Invitation{}, s.err
+}
+
+// An invite refused for a pending invitation or a current member says so, never team_changed.
+func TestTeamInviteRefusalsHaveTheirOwnCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{teams.ErrInvitationPending, "invitation_pending"},
+		{teams.ErrAlreadyMember, "already_member"},
+	} {
+		mux := http.NewServeMux()
+		pass := func(h http.Handler) http.Handler { return h }
+		registerTeamRoutes(mux, inviteErrorTeamHTTPStub{err: tc.err}, pass, pass)
+		r := httptest.NewRequest(http.MethodPost, "/v1/teams/team_a/invitations", strings.NewReader(`{"operation_id":"inv","expected_generation":4,"email":"a@example.test"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "actor"}}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) {
+			t.Fatalf("%v: status %d body %s", tc.err, w.Code, w.Body.String())
+		}
+	}
+}

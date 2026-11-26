@@ -139,6 +139,10 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 				writeError(w, r, http.StatusConflict, "machine_team_resources_active", teams.ErrMachineTeamResources.Error())
 			case expectedHTTPErrorOnly(err, teams.ErrMachineOwnerLeft):
 				writeError(w, r, http.StatusConflict, "machine_owner_not_member", teams.ErrMachineOwnerLeft.Error())
+			case expectedHTTPErrorOnly(err, teams.ErrInvitationPending):
+				writeError(w, r, http.StatusConflict, "invitation_pending", "Invite step: this person already has a pending invitation. Ask them to accept it, or cancel it (pb team invitations) and invite again.")
+			case expectedHTTPErrorOnly(err, teams.ErrAlreadyMember):
+				writeError(w, r, http.StatusConflict, "already_member", "Invite step: this person is already a member of the team. Nothing to do.")
 			case expectedHTTPErrorOnly(err, teams.ErrConflict):
 				writeError(w, r, http.StatusConflict, "team_changed", "Team changed. Refresh its current state before retrying.")
 			case expectedHTTPErrorOnly(err, teams.ErrExpired):

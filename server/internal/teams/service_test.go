@@ -134,7 +134,7 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if gi.Email != other+".member@example.test" {
 		t.Fatal("invitation did not store canonical email")
 	}
-	if _, e = s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_duplicate", ExpectedGeneration: state.Generation, Email: other + ".member+other@example.test"}); !errors.Is(e, ErrConflict) {
+	if _, e = s.Invite(ctx, owner, team, InviteRequest{OperationID: "canonical_duplicate", ExpectedGeneration: state.Generation, Email: other + ".member+other@example.test"}); !errors.Is(e, ErrInvitationPending) {
 		t.Fatalf("canonical duplicate invitation: %v", e)
 	}
 	state, e = s.CancelInvite(ctx, owner, team, gi.InvitationID, MutationRequest{OperationID: "cancel_canonical", ExpectedGeneration: state.Generation})
@@ -177,7 +177,7 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "duplicate_account", ExpectedGeneration: state.Generation, AccountID: other}); !errors.Is(e, ErrConflict) {
+	if _, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "duplicate_account", ExpectedGeneration: state.Generation, AccountID: other}); !errors.Is(e, ErrInvitationPending) {
 		t.Fatalf("account invitation duplicated pending email: %v", e)
 	}
 	if _, e := s.DeclineInvitation(ctx, other, emailInvite.InvitationID, AcceptRequest{OperationID: "email_decline"}); e != nil {
@@ -195,6 +195,12 @@ func TestPostgresTeamAuthorityLifecycle(t *testing.T) {
 	state, err = s.Accept(ctx, other, emailInvite.InvitationID, AcceptRequest{OperationID: "email_accept"})
 	if err != nil {
 		t.Fatalf("verified email accept: %v", err)
+	}
+	if _, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "member_by_account", ExpectedGeneration: state.Generation, AccountID: other}); !errors.Is(e, ErrAlreadyMember) {
+		t.Fatalf("invite of a current member by account: %v", e)
+	}
+	if _, e := s.Invite(ctx, owner, team, InviteRequest{OperationID: "member_by_email", ExpectedGeneration: state.Generation, Email: other + ".member@example.test"}); !errors.Is(e, ErrAlreadyMember) {
+		t.Fatalf("invite of a current member by email: %v", e)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET primary_email=$2 WHERE id=$1`, other, other+"-changed@invalid.test"); err != nil {
 		t.Fatal(err)

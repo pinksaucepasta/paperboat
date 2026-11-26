@@ -391,7 +391,7 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 			return err
 		}
 		if _, ok := member(t, r.AccountID); ok {
-			return ErrConflict
+			return ErrAlreadyMember
 		}
 		if err = checkNewInvitation(ctx, tx, team, r); err != nil {
 			return err

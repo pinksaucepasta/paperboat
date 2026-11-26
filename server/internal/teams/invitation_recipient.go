@@ -32,7 +32,7 @@ func checkNewInvitation(ctx context.Context, tx *db.Tx, team string, r InviteReq
 			return err
 		}
 		if existingMember {
-			return ErrConflict
+			return ErrAlreadyMember
 		}
 	}
 	var verifiedDomain bool
@@ -56,7 +56,7 @@ func checkNewInvitation(ctx context.Context, tx *db.Tx, team string, r InviteReq
 		return err
 	}
 	if exists {
-		return ErrConflict
+		return ErrInvitationPending
 	}
 	if count >= MaximumInvitations {
 		return &LimitError{Kind: "invitation", Used: count, Limit: MaximumInvitations}

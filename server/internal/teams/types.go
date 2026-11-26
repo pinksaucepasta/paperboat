@@ -24,6 +24,8 @@ var (
 	ErrMachineOwnerLeft     = errors.New("the person who enrolled this machine is no longer in the team; remove the machine instead")
 	ErrBillingActive        = errors.New("cancel the team subscription before deleting the team")
 	ErrExpired              = errors.New("team invitation expired or already used")
+	ErrInvitationPending    = errors.New("this person already has a pending invitation to the team; ask them to accept it, or cancel it (pb team invitations) and invite again")
+	ErrAlreadyMember        = errors.New("this person is already a member of the team")
 	ErrLimit                = errors.New("team capacity reached")
 	// ErrReceiptTooLarge is a team change whose result is larger than the stored operation receipt bound
 	// (MaximumReceiptBytes); nothing was changed. It is a server bound, not a team limit the user reached.
