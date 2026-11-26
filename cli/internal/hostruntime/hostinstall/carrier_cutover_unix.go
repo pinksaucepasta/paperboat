@@ -34,7 +34,7 @@ func stageUnixUpgrade(ctx context.Context, request Request, paths installPaths, 
 		if retained, err = ReadCarrierConfig(ctx, paths.instance); err != nil {
 			return nil, err
 		}
-		carrier = retained.Source != request.Source
+		carrier = !retained.Source.SameArtifact(request.Source)
 	}
 	staged, err := stageCandidateByExecutable(ctx, request, carrier)
 	if err != nil || !carrier {

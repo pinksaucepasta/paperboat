@@ -31,7 +31,7 @@ func stageWindowsCarrierUpgrade(ctx context.Context, request Request) (*carrierU
 	if err != nil {
 		return nil, err
 	}
-	if retained.Source.SHA256 == request.Source.SHA256 && retained.Source.Length == request.Source.Length {
+	if retained.Source.SameArtifact(request.Source) {
 		return nil, nil
 	}
 	// The serving carrier releases the network to the candidate later: it must serve now.

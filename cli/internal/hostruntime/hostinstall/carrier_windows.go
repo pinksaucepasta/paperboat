@@ -560,7 +560,7 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 			return pinCleanupFailure{cause: err}
 		}
 	}
-	if retained.Source.SHA256 == config.Source.SHA256 && retained.Source.Length == config.Source.Length {
+	if retained.Source.SameArtifact(config.Source) {
 		return nil
 	}
 	// The activation moves the carrier with the runtime; a carrier still on another source moves the same way,
