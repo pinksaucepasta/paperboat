@@ -108,9 +108,10 @@ func connectDirectlyWithoutARelay(t *testing.T, lateHost, noInboundEndpoints boo
 	if n, err := connection.Read(buffer); err != nil || string(buffer[:n]) != "direct" {
 		t.Fatalf("echo %q err %v: no direct path without a relay", buffer[:n], err)
 	}
-	if took := time.Since(started); !lateHost && !noInboundEndpoints && took > 700*time.Millisecond {
-		// Over 1 s the dialer's QUIC handshake times out and the peer is redialed (peerquic HandshakeTimeout).
-		t.Fatalf("first echo after %v, want well under 1 s: the host's first handshake response was lost", took)
+	// The first initiation waits newHandshakeHold by design; a lost response costs wireguard-go's 5 s retry on top.
+	// Over 1 s the dialer's QUIC handshake times out and the peer is redialed (peerquic HandshakeTimeout).
+	if took := time.Since(started); !lateHost && !noInboundEndpoints && took >= time.Second {
+		t.Fatalf("first echo after %v, want under 1 s (hold %v): the host's first handshake response was lost", took, newHandshakeHold)
 	}
 	if path := dialer.PeerPath(hostKey.Public()); path != "direct" {
 		t.Fatalf("path %q, want direct", path)
