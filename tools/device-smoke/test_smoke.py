@@ -783,6 +783,13 @@ TLIST=($DEVICES)
             self.assertRegex(trace.read_text(), r'^\S+ \d+s rc=7 dev: run \*\*\* now\n$')
             self.assertEqual(trace.stat().st_mode & 0o77, 0)
 
+    def test_every_application_pair_check_reports_what_the_pair_row_requires(self):
+        text = (HERE / 'smoke.sh').read_text()
+        for line in text.splitlines():
+            if line.startswith('test_application_pairs ') and not line.startswith('test_application_pairs()'):
+                script = (HERE / line.split()[2]).read_text()
+                self.assertIn('enrollment_unchanged', script, line)
+
     def test_exec_ssh_after_restart_needs_a_remote_answer_inside_the_deadline(self):
         import exec_ssh_after_restart as e
         self.assertEqual(e.verdict(1.0, 0, '12345\r\n', '12345'), (True, ''))
@@ -810,7 +817,7 @@ TLIST=($DEVICES)
         restarts = []
         with patch.object(p, 'set_port', fake_set), patch.object(p, 'works', lambda *a: None), \
                 patch.object(p, 'restart_worker', lambda *a: restarts.append(list(calls))), \
-                patch.object(p.winhost, 'pb_path', lambda: 'pb'), patch.object(p.sys, 'argv', ['x', 'peer']):
+                patch.object(p.winhost, 'pb_path', lambda: 'pb'), patch.object(p, 'registration', dict), patch.object(p.sys, 'argv', ['x', 'peer']):
             p.main()
         self.assertEqual(calls, [p.UNUSED_PORT, 22, 22])  # away, back, and the exit-path restore
         self.assertEqual(restarts, [[p.UNUSED_PORT]])  # the new worker starts while the unusable port is saved
@@ -823,7 +830,7 @@ TLIST=($DEVICES)
                 raise outcome
         with patch.object(p, 'set_port', fake_set), patch.object(p, 'works', second_fails), \
                 patch.object(p, 'restart_worker', lambda *a: None), \
-                patch.object(p.winhost, 'pb_path', lambda: 'pb'), patch.object(p.sys, 'argv', ['x', 'peer']):
+                patch.object(p.winhost, 'pb_path', lambda: 'pb'), patch.object(p, 'registration', dict), patch.object(p.sys, 'argv', ['x', 'peer']):
             with self.assertRaisesRegex(RuntimeError, 'did not work again within 30s of the port going back to 22 on a worker started while 2201 was saved'):
                 p.main()
         self.assertEqual(calls[-1], 22)  # restored although the check failed
@@ -852,7 +859,7 @@ TLIST=($DEVICES)
         FakeDevice.results[2] = dict(leg, leg='ssh self', ok=False, seconds=10.0, limit=10, why='exit -1')
         with is_windows, self.assertRaisesRegex(RuntimeError, 'ssh self: exit -1 after 10.0s, over its 10s limit'):
             e.windows_legs(FakePb, 'me', 'peer')
-        with is_windows, patch.object(e, 'windows_legs') as windows, patch.object(e, 'restart_local'), patch.object(e, 'run_all'), \
+        with is_windows, patch.object(e, 'registration', dict), patch.object(e, 'windows_legs') as windows, patch.object(e, 'restart_local'), patch.object(e, 'run_all'), \
                 patch.object(e.winhost, 'pb_path', lambda: 'pb'), patch.object(sys, 'argv', ['x', 'peer', '--self', 'me']):
             e.main()  # a Unix or Mac client keeps the old flow
         windows.assert_not_called()

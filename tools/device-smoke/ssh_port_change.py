@@ -9,11 +9,13 @@ worker kept dialling the unusable port, so every ssh ended with zero bytes for m
 change without a worker restart recovered, so that alone proves nothing). The answer is a sum the target's shell
 computes. The port is put back to 22 on every exit path."""
 import argparse
+import json
 import subprocess
 import sys
 import time
 
 from exec_ssh_after_restart import attempt, probe
+from install_lifecycle import registration
 import windows_target
 import winhost
 
@@ -68,6 +70,7 @@ def main():
     parser.add_argument('target')
     args = parser.parse_args()
     binary = winhost.pb_path()
+    before = None if hasattr(binary, 'device') else registration()  # a Windows client's row reads only the status
     works(binary, args.target, SETTLE)  # the control: ssh works before anything is changed
     failure = None
     try:
@@ -88,7 +91,12 @@ def main():
             if failure is None:
                 raise
             failure.add_note('putting the port back to 22 failed: ' + str(error))
-    print('{"check": "ssh-port-change", "status": "PASS", "settle_s": %d}' % SETTLE)
+    report = {'check': 'ssh-port-change', 'target': args.target, 'status': 'PASS', 'settle_s': SETTLE}
+    if before is not None:
+        if registration() != before:
+            raise RuntimeError('the port change changed the enrolled identity')
+        report['enrollment_unchanged'] = True
+    print(json.dumps(report))
 
 
 if __name__ == '__main__':

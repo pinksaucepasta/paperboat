@@ -12,6 +12,7 @@ Limits: exec 5 s, ssh 10 s. Measured cold after a restart (p50/max, d0b4dc735): 
 Pool Macs share the image's SSH host keys: regenerate them before installing, or ssh legs fail on a host-key mismatch."""
 import argparse
 import json
+import json
 import random
 import subprocess
 import time
@@ -133,6 +134,7 @@ def main():
         windows_legs(binary, own, args.peer)
         print('{"check": "exec-ssh-after-restart", "status": "PASS", "deadline_s": {"exec": %d, "ssh": %d}}' % (DEADLINE['exec'], DEADLINE['ssh']))
         return
+    before = registration()
     steps = []
     for command, label, target in leg_order(own, args.peer):
         argv, expected = probe(binary, target, command)
@@ -140,7 +142,10 @@ def main():
     # One after the other, each from its own restart with its own 5 s: a blackout after any restart fails its leg; four at once
     # contend for the same connections and are slower than any one.
     run_all(*steps)
-    print('{"check": "exec-ssh-after-restart", "status": "PASS", "deadline_s": {"exec": %d, "ssh": %d}}' % (DEADLINE['exec'], DEADLINE['ssh']))
+    if registration() != before:
+        raise RuntimeError('the daemon restarts changed the enrolled identity')
+    print(json.dumps({'check': 'exec-ssh-after-restart', 'target': args.peer, 'status': 'PASS', 'enrollment_unchanged': True,
+                      'deadline_s': DEADLINE}))
 
 
 if __name__ == '__main__':
