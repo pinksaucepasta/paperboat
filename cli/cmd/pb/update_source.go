@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 	"github.com/spf13/cobra"
 )
@@ -258,16 +259,32 @@ func activationRefusal(response updated.ControlResponse, cause error) error {
 		update += " to " + response.Transaction.CandidateVersion
 	}
 	state := response.Transaction
-	// Without a deadline the signed window bounds the activation; one started longer ago than that is stuck.
-	if state.HealthDeadline.IsZero() && !state.UpdatedAt.IsZero() && time.Since(state.UpdatedAt) > activationWindow {
-		return commandRejection{reason: commandRejectUpdateBusy, cause: cause, detail: update + " has not finished its health check after 10 minutes; run `pb doctor`, and `pb update status` to see whether it recovered"}
+	if activationOverdue(state, time.Now()) {
+		return commandRejection{reason: commandRejectUpdateActivating, cause: cause, detail: "A" + update[1:] + " has not finished its health check after 10 minutes. Run `pb doctor`, and `pb update status` to see whether it recovered."}
 	}
 	finishing := strings.TrimPrefix(activationFinishingText(state.HealthDeadline, time.Now()), "installed, ")
 	return commandRejection{reason: commandRejectUpdateActivating, cause: cause, detail: "A" + update[1:] + " is in progress: " + finishing + ". Run `pb update status` to follow it."}
 }
 
-// activationWindow is the signed stability window (releasepolicy StabilityWindowSeconds) that bounds an activation.
-const activationWindow = 10 * time.Minute
+// activationWindow is the signed stability window (releasepolicy StabilityWindowSeconds) that bounds an activation;
+// activationMargin is the most the updater's health watch runs past it (workerupdate.stabilityCompletionMargin).
+const (
+	activationWindow = 10 * time.Minute
+	activationMargin = 30 * time.Second
+)
+
+// activationOverdue reports an activation past the end of its health watch: the recorded deadline, or without one
+// the signed window from the activation's start, plus the watch's margin.
+func activationOverdue(state workerupdate.TransactionState, now time.Time) bool {
+	end := state.HealthDeadline
+	if end.IsZero() {
+		if state.UpdatedAt.IsZero() {
+			return false
+		}
+		end = state.UpdatedAt.Add(activationWindow)
+	}
+	return now.After(end.Add(activationMargin))
+}
 
 // updaterActivation reads the updater's status within a few seconds: status answers without the control lock an
 // activation holds, where a check or install waits behind it.

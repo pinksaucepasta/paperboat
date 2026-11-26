@@ -43,6 +43,8 @@ type updateApprovalControlFixture struct {
 	pending  bool // answer as an install whose enrollment is not committed; guarded by mu
 	// activating answers status as an activation in progress (zero health deadline: before monitoring); guarded by mu
 	activating bool
+	// drop closes every request unanswered, as an updater restarting after an activation does; guarded by mu
+	drop bool
 }
 
 func (f *updateApprovalControlFixture) setActivating() {
@@ -114,8 +116,11 @@ func (f *updateApprovalControlFixture) handle(connection *net.UnixConn) {
 		f.mu.Unlock()
 	}
 	f.mu.Lock()
-	activating := f.activating
+	activating, drop := f.activating, f.drop
 	f.mu.Unlock()
+	if drop {
+		return
+	}
 
 	response := updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "ok", Version: updateApprovalCandidateVersion}
 	if decodeErr != nil {
@@ -600,8 +605,49 @@ func TestUpdateBusyTextForAStuckActivationSaysHowToRecover(t *testing.T) {
 	if text := activationRefusal(response, nil).Error(); !strings.Contains(text, "has not finished its health check after 10 minutes") || !strings.Contains(text, "pb doctor") {
 		t.Fatalf("stuck activation text = %q", text)
 	}
+	if text := activationRefusal(response, nil).Error(); strings.Contains(text, "installed version is unchanged") {
+		t.Fatalf("an activation in progress was called unchanged: %q", text)
+	}
 	response.Transaction.UpdatedAt = time.Now()
 	if text := activationRefusal(response, nil).Error(); text != "An update to 2026.11.26.11 is in progress: finishing its health check (up to 10 minutes). Run `pb update status` to follow it." {
 		t.Fatalf("fresh activation text = %q", text)
+	}
+}
+
+// The health watch ends at the recorded deadline plus its margin (or, before cutover, the signed window from the start
+// plus the margin): a check just past the bare deadline is not stuck (linuxpool .20 to .21, 2026-11-26).
+func TestActivationOverdueWaitsForTheWholeHealthWatch(t *testing.T) {
+	now := time.Now()
+	for _, test := range []struct {
+		name  string
+		state workerupdate.TransactionState
+		want  bool
+	}{
+		{"deadline just passed", workerupdate.TransactionState{UpdatedAt: now.Add(-15 * time.Minute), HealthDeadline: now.Add(-10 * time.Second)}, false},
+		{"deadline and margin passed", workerupdate.TransactionState{UpdatedAt: now.Add(-15 * time.Minute), HealthDeadline: now.Add(-31 * time.Second)}, true},
+		{"no deadline, window just passed", workerupdate.TransactionState{UpdatedAt: now.Add(-10*time.Minute - 10*time.Second)}, false},
+		{"no deadline, window and margin passed", workerupdate.TransactionState{UpdatedAt: now.Add(-11 * time.Minute)}, true},
+		{"no times", workerupdate.TransactionState{}, false},
+	} {
+		if got := activationOverdue(test.state, now); got != test.want {
+			t.Errorf("%s: overdue = %v, want %v", test.name, got, test.want)
+		}
+	}
+}
+
+// An updater that drops the request while it restarts after a commit gets the same retry answer from check as from
+// status, not the generic failure (linuxpool .20 to .21, 2026-11-26: check --json was fine, text check was generic).
+func TestUpdateCheckWhileTheUpdaterRestartsSaysRetry(t *testing.T) {
+	fixture := startUpdateApprovalControlFixture(t)
+	fixture.mu.Lock()
+	fixture.drop = true
+	fixture.mu.Unlock()
+	var installed pendingInstallRecord
+	ctx := pendingUpdateContext(t, fixture, &installed, false)
+	for _, args := range [][]string{{"update", "check"}, {"update", "status"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(ctx, args, &stdout, &stderr); code == 0 || !strings.Contains(stderr.String(), "The Paperboat updater is not answering") {
+			t.Fatalf("%v while the updater restarts: %d %q %q", args, code, stdout.String(), stderr.String())
+		}
 	}
 }

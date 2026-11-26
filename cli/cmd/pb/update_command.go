@@ -105,6 +105,16 @@ func actionUpdateCheck(command *cobra.Command, _ []string) error {
 	return updateControlFailure("check with the Paperboat updater", err)
 }
 
+// updaterRestarting reports an updater that dropped the request or does not answer while its socket exists: it
+// restarts after an activation. A refusal it answered, or a denied peer, is a real answer.
+func updaterRestarting(ctx context.Context, err error) bool {
+	var remote *updated.ControlError
+	if errors.As(err, &remote) || errors.Is(err, updated.ErrControlDenied) {
+		return false
+	}
+	return errors.Is(err, updated.ErrUnavailable) || !updaterNotInstalled(ctx)
+}
+
 // checkSignedRelease asks the updater for the signed release. Without a reachable updater (an install that was never
 // paired, or was signed out, has none) it reads the same signed public TUF metadata itself: checking needs no sign-in
 // (prior art: `tailscale update` works logged out, ~/ref/tailscale/clientupdate/clientupdate.go).
@@ -112,6 +122,9 @@ func checkSignedRelease(ctx context.Context, client *updated.Client) (string, er
 	response, err := client.Check(ctx)
 	if errors.Is(err, updated.ErrUnavailable) {
 		return updateDependenciesOf(ctx).releaseVersion(ctx)
+	}
+	if err != nil && updaterRestarting(ctx, err) {
+		return "", commandRejection{reason: commandRejectUpdaterRestarting, cause: err}
 	}
 	return response.Version, err
 }
@@ -195,7 +208,7 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 		result := updateStatusCommandResult(buildinfo.Version, response, snapshot)
 		return writeUpdateStatusResult(command, result)
 	}
-	if errors.Is(err, updated.ErrUnavailable) {
+	if updaterRestarting(ctx, err) {
 		// The updater socket is gone while the updater restarts to activate an approved update (the test host 2026-10-27).
 		return commandRejection{reason: commandRejectUpdaterRestarting}
 	}

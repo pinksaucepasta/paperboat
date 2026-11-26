@@ -162,6 +162,9 @@ func writeUpdateSettingsResult(output io.Writer, result updateSettingsResult) er
 }
 
 func updateControlFailure(operation string, err error) error {
+	if rejection := (commandRejection{}); errors.As(err, &rejection) {
+		return err
+	}
 	var remote *updated.ControlError
 	if errors.As(err, &remote) {
 		switch remote.Code {
