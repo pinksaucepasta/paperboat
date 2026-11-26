@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
@@ -184,6 +185,10 @@ func runtimeFailureMessage(err error) string {
 	var remote *elevation.RemoteError
 	if errors.As(err, &remote) && remote != nil {
 		if message := elevation.RuntimeInstallFailureMessage(remote.Code); message != "" {
+			// The helper's message is the step plus its cause (RuntimeStepFailureMessage).
+			if strings.HasPrefix(remote.Message, message) {
+				message = strings.TrimSpace(remote.Message)
+			}
 			return message + " Run pb doctor, then retry."
 		}
 	}
@@ -191,7 +196,7 @@ func runtimeFailureMessage(err error) string {
 	// without this the user saw only the generic string below (a Windows test VM, Windows test machine: first pair after ~100 s).
 	var named interface{ ElevationFailureCode() string }
 	if errors.As(err, &named) {
-		if message := elevation.RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {
+		if message := elevation.RuntimeStepFailureMessage(err); message != "" {
 			return message + " Run pb doctor, then run the same command again."
 		}
 	}

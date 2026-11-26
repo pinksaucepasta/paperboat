@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/causetext"
 )
 
 // CodeOpenSSHUnobtainable is the RemoteError code of an OpenSSH operation that failed only because this machine cannot
@@ -162,6 +164,25 @@ func RuntimeInstallFailureMessage(code string) string {
 		return "Paperboat installed its background service but it is still starting (a first start on a new machine can take a few minutes)."
 	}
 	return ""
+}
+
+// RuntimeStepFailureMessage is the public message of a named install step followed by its cause leaves, so the user
+// reads why the step failed (Unix prints the privileged step's "pb: cause:" line the same way); "" when err names no step.
+func RuntimeStepFailureMessage(err error) string {
+	var named interface{ ElevationFailureCode() string }
+	if !errors.As(err, &named) {
+		return ""
+	}
+	message := RuntimeInstallFailureMessage(named.ElevationFailureCode())
+	if message == "" {
+		return ""
+	}
+	if step, ok := named.(interface{ Unwrap() error }); ok {
+		if detail := causetext.Text(step.Unwrap()); detail != "" {
+			message += " " + detail
+		}
+	}
+	return message
 }
 
 func (e *RemoteError) Error() string {

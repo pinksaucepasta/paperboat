@@ -545,7 +545,7 @@ func TestExecutePreservesOperationFailureCode(t *testing.T) {
 		message string
 	}{
 		{"generic", errors.New("deliberate operation failure"), operationFailed, "deliberate operation failure"},
-		{"named-install-permission", namedInstallPermissionFailure{}, "install_candidate", "Windows installation failed while preparing the replacement executable."},
+		{"named-install-permission", namedInstallPermissionFailure{}, "install_candidate", "Windows installation failed while preparing the replacement executable. Access is denied."},
 		{"maintenance", &RemoteError{Code: "maintenance_busy", Message: "protected work remains"}, "maintenance_busy", "elevated Windows operation failed (maintenance_busy): protected work remains"},
 		{"signed-owner-pending", &RemoteError{Code: "activation_pending", Message: "wait for the approved update owner"}, "activation_pending", "elevated Windows operation failed (activation_pending): wait for the approved update owner"},
 		{"joined-signed-owner-io", errors.Join(&RemoteError{Code: "activation_pending", Message: "wait for the approved update owner"}, errors.New("independent IO")), operationFailed, "elevated Windows operation failed (activation_pending): wait for the approved update owner independent IO"},

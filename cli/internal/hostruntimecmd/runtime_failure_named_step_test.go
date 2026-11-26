@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
 type namedStep struct{ step string }
@@ -24,5 +26,14 @@ func TestRuntimeFailureMessageNamesAnUnelevatedStepFailure(t *testing.T) {
 	}
 	if generic := runtimeFailureMessage(errors.New("something else")); !strings.Contains(generic, "host runtime command failed") {
 		t.Fatalf("an unnamed failure lost the generic message: %q", generic)
+	}
+}
+
+// Windows parity with 83b3408ab: the elevated helper's step message carries its cause; pair must show it.
+func TestRuntimeFailureMessageKeepsTheElevatedStepCause(t *testing.T) {
+	step := elevation.RuntimeInstallFailureMessage("install_commit")
+	got := runtimeFailureMessage(&elevation.RemoteError{Code: "install_commit", Message: step + " install inventory: lock held"})
+	if !strings.Contains(got, "install inventory: lock held") || !strings.Contains(got, "pb doctor") {
+		t.Fatalf("message = %q", got)
 	}
 }

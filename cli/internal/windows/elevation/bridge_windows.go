@@ -22,7 +22,6 @@ import (
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/cli/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"golang.org/x/sys/windows"
@@ -451,10 +450,8 @@ func Execute(ctx context.Context, requestPath, resultPath, cancelPath string, ha
 			result.ErrorErrno = fault.Errno
 		}
 		var named interface{ ElevationFailureCode() string }
-		if errors.As(operationErr, &named) {
-			if message := RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {
-				result.ErrorCode, result.ErrorMessage = named.ElevationFailureCode(), message
-			}
+		if message := RuntimeStepFailureMessage(operationErr); message != "" && errors.As(operationErr, &named) {
+			result.ErrorCode, result.ErrorMessage = named.ElevationFailureCode(), sanitizeMessage(message, 2048)
 		}
 		if typed, ok := operationErr.(*RemoteError); ok && (typed.Code == "maintenance_busy" || typed.Code == "activation_pending" || typed.Code == "update_verification_failed" || typed.Code == "legacy_carrier_running" || typed.Code == "insufficient_disk_space" || typed.Code == "update_not_ready" || typed.Code == "rollback_incomplete" || typed.Code == CodeOpenSSHUnobtainable) {
 			result.ErrorCode = typed.Code
@@ -484,17 +481,11 @@ func resultContextError(base error, message string) error {
 // machine guard: context deadline exceeded" was only in a log file, the message repeated the step twice).
 func timedOutMessage(operationErr error) string {
 	var named interface{ ElevationFailureCode() string }
-	if errors.As(operationErr, &named) {
-		if message := RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {
-			detail := ""
-			if step, ok := named.(interface{ Unwrap() error }); ok {
-				detail = causetext.Text(step.Unwrap())
-			}
-			if detail == "" {
-				detail = boundedContextMessage(ErrElevationTimedOut, operationErr)
-			}
-			return sanitizeMessage(message+" "+detail, 2048)
+	if message := RuntimeStepFailureMessage(operationErr); message != "" && errors.As(operationErr, &named) {
+		if message == RuntimeInstallFailureMessage(named.ElevationFailureCode()) {
+			message += " " + boundedContextMessage(ErrElevationTimedOut, operationErr)
 		}
+		return sanitizeMessage(message, 2048)
 	}
 	return boundedContextMessage(ErrElevationTimedOut, operationErr)
 }
