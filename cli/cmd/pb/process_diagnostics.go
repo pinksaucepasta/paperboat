@@ -31,7 +31,12 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	// the invoking user; a disk segment would land in root's home, where no uninstall removes it. An admin's own
 	// `sudo pb ...` has no PAPERBOAT_INVOKING_UID and keeps disk diagnostics.
 	elevated := runtime.GOOS != "windows" && hostDependenciesOf(ctx).euid() == 0 && os.Getenv("PAPERBOAT_INVOKING_UID") != ""
-	removesStorage := elevated || findErr == nil && diagnosticsStayInMemory(command, args, runtime.GOOS)
+	// macOS refuses root install, pair and update before any step; under plain sudo HOME is still the user's,
+	// so a disk segment would only print a storage warning above the refusal.
+	macRootRefusal := findErr == nil && command.HasParent() && !command.Parent().HasParent() &&
+		refuseMacRootInstall(runtime.GOOS, hostDependenciesOf(ctx).euid()) != nil &&
+		(command.Name() == "install" || command.Name() == "pair" || command.Name() == "update")
+	removesStorage := elevated || macRootRefusal || findErr == nil && diagnosticsStayInMemory(command, args, runtime.GOOS)
 	if removesStorage {
 		// These commands remove the diagnostics directory itself. A disk segment
 		// would lock that directory on Windows or fail to save at exit. The

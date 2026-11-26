@@ -93,6 +93,10 @@ if [ "$setup" = true ] || [ "$pair" = true ]; then join=false; fi
 [ -z "$recovery_output" ] || [ "$setup" = true ] || { echo "pb installer: --recovery-output requires --setup" >&2; exit 2; }
 
 case $(uname -s) in Darwin) os=darwin ;; Linux) os=linux ;; *) echo "pb installer: only macOS and Linux are supported" >&2; exit 1 ;; esac
+if [ "$os" = darwin ] && [ "$(id -u)" -eq 0 ]; then
+  echo "On macOS, Paperboat installs for your own user, not root. Run \`pb install\`, \`pb pair\` and \`pb update\` (or the install command) as your normal macOS user without sudo; it asks for administrator approval when it needs it." >&2
+  exit 1
+fi
 case $(uname -m) in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) echo "pb installer: unsupported architecture: $(uname -m)" >&2; exit 1 ;; esac
 [ "$os" != darwin ] || [ "$arch" = arm64 ] || { echo "pb installer: macOS releases support arm64" >&2; exit 1; }
 
