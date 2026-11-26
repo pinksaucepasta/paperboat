@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -87,6 +88,9 @@ func testRestartedPeerPath(t *testing.T, region *tailcfg.DERPRegion) {
 	if err := client.SetPeerContacts(nil); err != nil {
 		t.Fatal(err)
 	}
+	if region == nil {
+		holdUDPPorts(t, previous)
+	}
 	host = start(hostKey, hostAddr, clientKey.Public(), clientAddr)
 	if slices.Equal(previous, endpoints(host)) {
 		t.Fatal("fixture reused the prior listener endpoints")
@@ -95,14 +99,44 @@ func testRestartedPeerPath(t *testing.T, region *tailcfg.DERPRegion) {
 	contacts(client, host)
 	restartExchange(t, client, host)
 	restartExchange(t, host, client)
+	previous = endpoints(client)
 	if err := client.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if region == nil {
+		holdUDPPorts(t, previous)
+	}
 	client = start(clientKey, clientAddr, hostKey.Public(), hostAddr)
+	if slices.Equal(previous, endpoints(client)) {
+		t.Fatal("fixture reused the prior listener endpoints")
+	}
 	contacts(client, host)
 	contacts(host, client)
 	restartExchange(t, host, client)
 	restartExchange(t, client, host)
+}
+
+// holdUDPPorts keeps a closed listener's ports bound until the test ends, so its replacement cannot be given
+// one of them again.
+func holdUDPPorts(t *testing.T, endpoints []netip.AddrPort) {
+	t.Helper()
+	held := map[string]bool{}
+	for _, ep := range endpoints {
+		network := "udp4"
+		if ep.Addr().Is6() {
+			network = "udp6"
+		}
+		key := fmt.Sprint(network, ep.Port())
+		if held[key] {
+			continue
+		}
+		held[key] = true
+		conn, err := net.ListenUDP(network, &net.UDPAddr{Port: int(ep.Port())})
+		if err != nil {
+			t.Fatalf("holding the prior listener port: %v", err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+	}
 }
 
 func restartExchange(t *testing.T, from, to *Server) {
