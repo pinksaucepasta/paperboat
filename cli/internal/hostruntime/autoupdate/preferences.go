@@ -88,21 +88,50 @@ type MaintenanceState struct {
 	LocalDate string `json:"local_date"`
 	LocalTime string `json:"local_time"`
 	Pending   bool   `json:"pending"`
+	// Active is the SHA-256 of the executable running when the state was saved. Another one means an
+	// install or a manual pb update chose the version outside a window: it stays until the next window.
+	Active string `json:"active"`
 }
 
 // MaintenanceDue also handles a machine waking after its scheduled time.
 // Pending work retries until a verified activation succeeds or is rejected.
-func (p Preferences) MaintenanceDue(now time.Time, state MaintenanceState) bool {
+// A version chosen outside a window (state.Active differs from active) is not due:
+// Due records that choice as the latest window's run.
+func (p Preferences) MaintenanceDue(now time.Time, state MaintenanceState, active string) bool {
 	if !p.Enabled || p.Validate() != nil {
+		return false
+	}
+	// Checked before Pending: a version chosen while an automatic attempt was pending replaces that attempt.
+	if state.Active != active {
 		return false
 	}
 	if state.LocalTime == p.LocalTime && state.Pending {
 		return true
 	}
-	if state.LocalTime == p.LocalTime && state.LocalDate == now.Format("2006-01-02") {
+	if state.LocalTime == p.LocalTime && state.LocalDate == p.latestWindow(now).Format("2006-01-02") {
 		return false
 	}
 	return !now.Before(p.maintenanceOn(now))
+}
+
+// Due is MaintenanceDue that also records a version chosen outside a window, so the
+// machine keeps it until the next window instead of updating at once (smoke 1126 mp5).
+func (p Preferences) Due(path string, now time.Time, state MaintenanceState, active string) (bool, error) {
+	if p.MaintenanceDue(now, state, active) {
+		return true, nil
+	}
+	if p.Enabled && state.Active != active {
+		return false, SaveMaintenanceState(path, p, now, false, active)
+	}
+	return false, nil
+}
+
+// latestWindow is the start of the most recent window at or before now.
+func (p Preferences) latestWindow(now time.Time) time.Time {
+	if start := p.maintenanceOn(now); !start.After(now) {
+		return start
+	}
+	return p.maintenanceOn(now.AddDate(0, 0, -1))
 }
 
 func LoadPreferences(path string, enabled bool) (Preferences, error) {
@@ -148,11 +177,12 @@ func LoadMaintenanceState(path string) (MaintenanceState, error) {
 	return state, nil
 }
 
-func SaveMaintenanceState(path string, p Preferences, now time.Time, pending bool) error {
+// SaveMaintenanceState records the latest window at or before now as run, with the active executable.
+func SaveMaintenanceState(path string, p Preferences, now time.Time, pending bool, active string) error {
 	if p.Validate() != nil {
 		return ErrInvalidConfig
 	}
-	return writePrivateJSON(path, MaintenanceState{Schema: "paperboat.update-maintenance/v1", LocalDate: now.Format("2006-01-02"), LocalTime: p.LocalTime, Pending: pending})
+	return writePrivateJSON(path, MaintenanceState{Schema: "paperboat.update-maintenance/v1", LocalDate: p.latestWindow(now).Format("2006-01-02"), LocalTime: p.LocalTime, Pending: pending, Active: active})
 }
 
 func readPrivateJSON(path string, out any) (result error) {

@@ -55,7 +55,6 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	if err != nil {
 		return autoupdate.Result{}, err
 	}
-	now := time.Now()
 	// Download ahead of the window, retaining normal cohort eligibility. The
 	// same exact verified candidate is reused by preparation and activation.
 	candidate, err := s.downloadWithResolver(ctx, s.source.Resolve, false)
@@ -73,13 +72,15 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	if settings, err = machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, nil); err != nil {
 		return result, err
 	}
-	if !settings.MaintenanceDue(time.Now(), state) {
-		return result, nil
+	active := s.config.Active.SHA256
+	now := time.Now() // after the download, which can take a while: the window is decided and recorded on one clock
+	if due, err := settings.Due(statePath, now, state, active); !due || err != nil {
+		return result, err
 	}
 	if candidate.ID == "" {
-		return result, autoupdate.SaveMaintenanceState(statePath, settings, now, false)
+		return result, autoupdate.SaveMaintenanceState(statePath, settings, now, false, active)
 	}
-	if err := autoupdate.SaveMaintenanceState(statePath, settings, now, true); err != nil {
+	if err := autoupdate.SaveMaintenanceState(statePath, settings, now, true, active); err != nil {
 		return result, err
 	}
 	installed, err := s.queueActivationWithApproval(ctx, candidate.ID, false, false)
@@ -87,5 +88,5 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 		return result, err
 	}
 	result.Version, result.Updated = installed.Version, installed.Updated
-	return result, autoupdate.SaveMaintenanceState(statePath, settings, now, false)
+	return result, autoupdate.SaveMaintenanceState(statePath, settings, now, false, active)
 }
