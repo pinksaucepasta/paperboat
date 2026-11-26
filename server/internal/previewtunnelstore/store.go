@@ -120,8 +120,9 @@ func (s *Store) GetOperation(ctx context.Context, accountID, operationID string)
  WHERE o.id=$2 AND o.account_id=$1 AND o.resource_kind='route' AND o.resource_id=r.id
  AND o.operation_type IN ('route.create','route.patch') AND o.state IN ('pending','running') AND t.account_id=$1
  AND r.deleted_at IS NULL AND r.desired_state='active'
- AND EXISTS (SELECT 1 FROM endpoint_routes er JOIN endpoint_edge_assignments x ON x.route_id=er.id
-   WHERE er.tunnel_route_id=r.id AND er.revision=r.generation AND x.desired='active' AND x.observed_ready)`, accountID, operationID, s.now())
+ -- Every live holder edge serves the current generation, so the first request on either edge of the pair works.
+ AND coalesce((SELECT bool_and(er.revision=r.generation AND paperboat.endpoint_route_ready(er.id,$3,true))
+   FROM endpoint_routes er WHERE er.tunnel_route_id=r.id),false)`, accountID, operationID, s.now())
 		if refreshErr != nil {
 			return dbsqlc.Operation{}, translate(refreshErr)
 		}

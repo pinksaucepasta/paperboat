@@ -34,9 +34,13 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  AND orr.desired_state='active' AND orr.deleted_at IS NULL) THEN 'origin_unreachable'
  WHEN count(r.id)>0 AND bool_and(coalesce(probe.ready,false)) THEN 'ready'
  WHEN bool_or(coalesce(probe.failed,false)) THEN 'route_unavailable'
- ELSE 'pending' END AS code
+ ELSE 'pending' END AS code,
+ -- Operations (what --wait polls) settle only once every live holder edge serves the route, so a
+ -- visitor's first request on either edge of the pair is answered; the summary keeps any-holder.
+ count(r.id)>0 AND bool_and(coalesce(probe.all_ready,false)) AS all_ready
  FROM locked t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
- LEFT JOIN LATERAL (SELECT bool_and(paperboat.endpoint_route_ready(er.id,$3,false)) AS ready, false AS failed
+ LEFT JOIN LATERAL (SELECT bool_and(paperboat.endpoint_route_ready(er.id,$3,false)) AS ready,
+ bool_and(paperboat.endpoint_route_ready(er.id,$3,true)) AS all_ready, false AS failed
  FROM endpoint_routes er JOIN endpoints e ON e.id=er.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
  WHERE er.tunnel_route_id=r.id) probe ON true
  GROUP BY t.id,t.account_id,t.desired_state,t.expires_at
@@ -49,7 +53,7 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  SELECT o.id,t.code AS summary_code
  FROM operations o JOIN health t ON t.id=o.resource_id WHERE o.account_id=$1 AND o.resource_kind='tunnel'
  AND o.state IN ('pending','running') AND (
- ((t.code='expired' OR t.code IN ('ready','origin_unreachable')
+ ((t.code='expired' OR (t.code IN ('ready','origin_unreachable') AND t.all_ready)
  -- An address change is done when the old name stops serving: SettleAddressMoves drops the hold, the next probe settles it.
  AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds h WHERE h.tunnel_id=t.id AND h.kind='incoming' AND h.operation_id=o.id)) AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch'))
  OR (t.desired_state IN ('paused','deleted') AND o.operation_type=CASE t.desired_state WHEN 'paused' THEN $5::text ELSE $6::text END

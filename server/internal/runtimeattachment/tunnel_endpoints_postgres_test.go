@@ -292,11 +292,27 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	f.exec(t, `UPDATE control_environments SET workspace_id=$2 WHERE id=$1`, f.env, f.machine)
 	f.exec(t, `INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,now()-interval '1 minute',now()+interval '1 hour',1)`, "renew_"+f.prefix, f.machine)
 	f.exec(t, `INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) SELECT machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at FROM machine_control_renewals WHERE operation_id=$1`, "renew_"+f.prefix)
+	// `pb tunnel create --wait` polls this operation: it must not end while the backup edge would still
+	// answer a visitor 404/502 (smoke 11-26: 3 of 4 new tunnels failed their first request).
+	createOperation := "op_create_" + f.prefix
+	f.exec(t, `INSERT INTO operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at)
+VALUES ($1,$2,$3,decode(repeat('43',32),'hex'),'tunnel.create','tunnel',$4,'connecting','running',50,'changed',$5,now(),now())`, createOperation, f.account, "idem_"+createOperation, tunnel, "cor_"+createOperation)
+	createState := func() string {
+		t.Helper()
+		var state string
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT state FROM operations WHERE id=$1`, createOperation).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
 	if err := tunnelv1.RefreshHealth(f.ctx, f.database.Pool(), f.account, []string{tunnel}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if code := health(); code != "ready" {
 		t.Fatalf("tunnel health with one of two edges ready = %s, want ready", code)
+	}
+	if state := createState(); state != "running" {
+		t.Fatalf("tunnel.create with one of two edges ready = %s, want running", state)
 	}
 	backupRows, err := control.ListTunnelEdgeRouteAssignmentsForNodeV1(f.ctx, f.backupNode, f.backupEdge.ProcessEpoch)
 	if err != nil || len(backupRows) != 1 {
@@ -317,6 +333,9 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	}
 	if code := health(); code != "ready" {
 		t.Fatalf("tunnel health with both edges ready = %s, want ready", code)
+	}
+	if state := createState(); state != "succeeded" {
+		t.Fatalf("tunnel.create with both edges ready = %s, want succeeded", state)
 	}
 	// No connector applies an engine tunnel's config: its newest generation is active.
 	var activation string
@@ -501,6 +520,12 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if err != nil {
 		t.Fatal(err)
 	}
+	// While the backup edge has not observed the route, `route add --wait` must not end (its visitors would get 404/502).
+	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=false WHERE edge_node_id=$1`, f.backupNode)
+	if operation, err := routeStore.GetOperation(f.ctx, f.account, routeOperation); err != nil || operation.State != "running" {
+		t.Fatalf("engine route operation with one of two edges ready = %+v, %v; want running", operation, err)
+	}
+	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE edge_node_id=$1`, f.backupNode)
 	if operation, err := routeStore.GetOperation(f.ctx, f.account, routeOperation); err != nil || operation.State != "succeeded" {
 		t.Fatalf("engine route operation = %+v, %v; want succeeded once its engine edges serve it", operation, err)
 	}
