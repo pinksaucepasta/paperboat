@@ -148,6 +148,20 @@ func TestControlStatusWhilePendingCarriesJournalCandidate(t *testing.T) {
 	if err != nil || !response.Pending || response.Candidate != nil || response.Transaction.CandidateVersion != "2026.10.28.2" || !response.Transaction.Approved || response.Transaction.ActiveVersion != "" || response.Transaction.ActiveDigest != "" || response.Transaction.ActiveLength != 0 {
 		t.Fatalf("pending status: %+v %v", response, err)
 	}
+	// Pending enrollment without a handoff is an unpaired install, not an activation: `pb update` may proceed.
+	if response.Activating {
+		t.Fatalf("pending status without a handoff reported an activation: %+v", response)
+	}
+	// With the activation's handoff, status says so: `pb update` refuses at once instead of waiting on the lock.
+	if err := writeUnixHandoff(root, &unixActivationHandoff{Schema: unixHandoffSchema, Previous: active, Candidate: j.CandidateVersion, ApprovalID: approval}); err != nil {
+		t.Fatal(err)
+	}
+	if response, err = s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"}); err != nil || !response.Activating || !response.Pending {
+		t.Fatalf("pending status during an activation: %+v %v", response, err)
+	}
+	if err := os.Remove(unixHandoffPath(root)); err != nil {
+		t.Fatal(err)
+	}
 	// A candidate that was only downloaded is not reported as approved, so it is not "activating".
 	j.ApprovedCandidateID = ""
 	if err := updateflow.Write(journal, j, os.Geteuid(), os.Getegid()); err != nil {

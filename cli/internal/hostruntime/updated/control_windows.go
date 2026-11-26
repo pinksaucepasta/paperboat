@@ -386,6 +386,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 				// Recovery has acknowledged the existing activator. Return the
 				// pending handoff to run so this controller also releases its pipe.
 				response.Pending = true
+				response.Activating = true
 				response.Transaction = windowsTransactionState(journal)
 				response.Transaction.ActiveVersion = response.Version
 				response.Transaction.ActiveDigest = committedSource.SHA256
@@ -415,6 +416,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 			}
 
 			response.Pending = journal.Stage != windowsActivationAwaitingApproval && journal.Stage != windowsActivationCommitted && journal.Stage != windowsActivationRolledBack
+			response.Activating = response.Pending
 			response.Updated = journal.Version == c.activeVersion && journal.Stage == windowsActivationCommitted
 			if journal.PreviousVersion == c.activeVersion {
 				switch journal.Stage {

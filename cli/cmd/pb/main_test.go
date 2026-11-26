@@ -305,7 +305,7 @@ func TestUpdateStatusIncludesNewerVerifiedCandidate(t *testing.T) {
 }
 
 func TestUpdateStatusPendingTransactionReportsTargetWithoutOfferingAnotherUpdate(t *testing.T) {
-	response := updated.ControlResponse{Pending: true}
+	response := updated.ControlResponse{Pending: true, Activating: true}
 	response.Observation.Version = "2026.10.08.35"
 	response.Transaction.ActiveVersion = "2026.10.08.35"
 	response.Transaction.CandidateVersion = "2026.10.08.36"
@@ -328,7 +328,7 @@ func TestUpdateStatusPendingTransactionReportsTargetWithoutOfferingAnotherUpdate
 }
 
 func TestUpdateStatusPreservesWindowsActivationState(t *testing.T) {
-	response := updated.ControlResponse{Version: "2026.08.27.50", Pending: true, ActivationFailure: "activation_failed"}
+	response := updated.ControlResponse{Version: "2026.08.27.50", Pending: true, Activating: true, ActivationFailure: "activation_failed"}
 	result := updateStatusCommandResult("2026.08.27.46", response, nil)
 	if !result.ActivationPending || result.ActivationFailure != "activation_failed" {
 		t.Fatalf("result = %+v", result)

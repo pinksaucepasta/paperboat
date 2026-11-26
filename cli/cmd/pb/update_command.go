@@ -199,7 +199,7 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
-	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, HealthDeadline: response.Transaction.HealthDeadline, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
+	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Activating, HealthDeadline: response.Transaction.HealthDeadline, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
 	result.LatestVersion = response.Observation.Version
 	if state := response.Transaction; result.ActivationFailure != "" && state.FailedVersion != "" {
 		result.FailedUpdate = &failedUpdate{Version: state.FailedVersion, Step: state.FailedStep, Reason: state.FailedReason, RolledBackAt: state.UpdatedAt}
@@ -323,6 +323,9 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 func actionUpdateDownload(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
 	defer cancel()
+	if err := refuseUpdateWhileActivating(ctx); err != nil {
+		return err
+	}
 	client, err := newUpdateControlClient(ctx, 15*time.Minute)
 	if err != nil {
 		return err
@@ -430,6 +433,9 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 	approvalID, _ := command.Flags().GetString("approve")
 	if approvalID != "" && !updateApprovalIDPattern.MatchString(approvalID) {
 		return commandRejection{reason: commandRejectUpdateApprovalID}
+	}
+	if err := refuseUpdateWhileActivating(ctx); err != nil {
+		return err
 	}
 	if approvalID == "" {
 		response, err := updateWithProgress(command, ctx, client.Download)

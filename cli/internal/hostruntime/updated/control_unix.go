@@ -157,6 +157,8 @@ func controlErrorCode(err error) string {
 		return "installation_pending"
 	case errors.Is(err, ErrCustomInstallation):
 		return "custom_installation"
+	case errors.Is(err, ErrActivationPending):
+		return "activation_pending"
 	case errors.Is(err, ErrApprovalRequired), errors.Is(err, workerupdate.ErrApprovalRequired):
 		return "approval_required"
 	case errors.Is(err, ErrCandidateChanged), errors.Is(err, workerupdate.ErrPreparedCandidate):
@@ -205,6 +207,7 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 				state.ActiveVersion, state.ActiveDigest, state.ActiveLength = "", "", 0
 				response.Transaction = state
 			}
+			s.markActivating(&response)
 			return response, nil
 		}
 		return response, err
@@ -331,6 +334,7 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 				response.Transaction.ActiveVersion = ""
 				response.Transaction.ActiveDigest = ""
 				response.Transaction.ActiveLength = 0
+				s.markActivating(response)
 				return nil
 			}
 			return sourceErr
@@ -345,6 +349,7 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 			return ErrRecoveryState
 		}
 		response.Pending = handoff != nil
+		response.Activating = response.Pending
 	}
 	if state.Stage == updateflow.StageAwaitingApproval {
 		candidate, candidateErr := s.currentManager().PreparedCandidate()
@@ -369,4 +374,18 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 		}
 	}
 	return nil
+}
+
+// markActivating reports an activation in progress on a status whose installation is still pending enrollment: Pending
+// alone cannot tell it apart from an unpaired install, and `pb update` must refuse at once only for the activation.
+func (s *Service) markActivating(response *ControlResponse) {
+	if s.config.StateRoot == "" {
+		return
+	}
+	if handoff, _ := readUnixHandoff(s.config.StateRoot); handoff != nil {
+		response.Activating = true
+		if response.Transaction.CandidateVersion == "" {
+			response.Transaction.CandidateVersion = handoff.Candidate
+		}
+	}
 }

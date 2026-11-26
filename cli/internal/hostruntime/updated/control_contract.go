@@ -58,13 +58,16 @@ type CandidateRejection struct {
 }
 
 type ControlResponse struct {
-	UpdaterVersion string                          `json:"updater_version,omitempty"`
-	Schema         string                          `json:"schema"`
-	Status         string                          `json:"status"`
-	Version        string                          `json:"version,omitempty"`
-	Updated        bool                            `json:"updated"`
-	Pending        bool                            `json:"pending,omitempty"`
-	Candidate      *workerupdate.PreparedCandidate `json:"candidate,omitempty"`
+	UpdaterVersion string `json:"updater_version,omitempty"`
+	Schema         string `json:"schema"`
+	Status         string `json:"status"`
+	Version        string `json:"version,omitempty"`
+	Updated        bool   `json:"updated"`
+	Pending        bool   `json:"pending,omitempty"`
+	// Activating reports an activation in progress (its handoff exists). Pending alone also covers an install whose
+	// enrollment is not committed, which lasts until the machine is paired again.
+	Activating bool                            `json:"activating,omitempty"`
+	Candidate  *workerupdate.PreparedCandidate `json:"candidate,omitempty"`
 	// CandidateRejected reports a downloaded update that no longer verifies for a reason a user must know (an unsafe
 	// file, another target, a signature that did not verify). A replaced or removed payload is not reported.
 	CandidateRejected *CandidateRejection                `json:"candidate_rejected,omitempty"`

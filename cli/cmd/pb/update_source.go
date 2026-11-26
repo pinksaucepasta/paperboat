@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
@@ -242,17 +243,40 @@ func exportOfficialBundle(ctx context.Context, proofDirectory, output string) (s
 
 // finishingUpdateDetail names the update whose health check holds the installation, or "" when the updater does not say.
 func finishingUpdateDetail(ctx context.Context) string {
-	client, err := newUpdateControlClient(ctx, 5*time.Second)
+	response, err := updaterActivation(ctx)
 	if err != nil {
 		return ""
 	}
+	return activationDetail(response)
+}
+
+func activationDetail(response updated.ControlResponse) string {
+	update := "an update"
+	if response.Transaction.CandidateVersion != "" {
+		update += " to " + response.Transaction.CandidateVersion
+	}
+	return update + " is " + activationFinishingText(response.Transaction.HealthDeadline, time.Now()) + "; run `pb update status`"
+}
+
+// updaterActivation reads the updater's status within a few seconds: status answers without the control lock an
+// activation holds, where a check or install waits behind it.
+func updaterActivation(ctx context.Context) (updated.ControlResponse, error) {
+	client, err := newUpdateControlClient(ctx, 5*time.Second)
+	if err != nil {
+		return updated.ControlResponse{}, err
+	}
 	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	response, err := client.Status(probe)
-	if err != nil || response.Transaction.CandidateVersion == "" {
-		return ""
+	return client.Status(probe)
+}
+
+// refuseUpdateWhileActivating refuses at once while an activation is finishing; a status that cannot be read proceeds.
+func refuseUpdateWhileActivating(ctx context.Context) error {
+	response, err := updaterActivation(ctx)
+	if err != nil || !response.Activating {
+		return nil
 	}
-	return "an update to " + response.Transaction.CandidateVersion + " is " + activationFinishingText(response.Transaction.HealthDeadline, time.Now()) + "; run `pb update status`"
+	return commandRejection{reason: commandRejectUpdateBusy, cause: hostdproto.ErrMaintenanceBusy, detail: activationDetail(response)}
 }
 
 // fetchSignedReleaseVersion reads the version of the signed official release for this platform.

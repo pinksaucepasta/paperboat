@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -39,6 +40,14 @@ type updateApprovalControlFixture struct {
 	mu       sync.Mutex
 	requests []updated.ControlRequest
 	pending  bool // answer as an install whose enrollment is not committed; guarded by mu
+	// activating answers status as an activation in progress (zero health deadline: before monitoring); guarded by mu
+	activating bool
+}
+
+func (f *updateApprovalControlFixture) setActivating() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.activating = true
 }
 
 func (f *updateApprovalControlFixture) setPending() {
@@ -97,15 +106,26 @@ func (f *updateApprovalControlFixture) handle(connection *net.UnixConn) {
 			decodeErr = errors.New("updater request contained trailing data")
 		}
 	}
-	if decodeErr == nil {
+	// Status takes no control lock: only the requests that do are recorded.
+	if decodeErr == nil && request.Operation != "status" {
 		f.mu.Lock()
 		f.requests = append(f.requests, request)
 		f.mu.Unlock()
 	}
+	f.mu.Lock()
+	activating := f.activating
+	f.mu.Unlock()
 
 	response := updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "ok", Version: updateApprovalCandidateVersion}
 	if decodeErr != nil {
 		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "invalid_request", ErrorMessage: "invalid local test request"}
+	} else if request.Operation == "status" && activating {
+		// As the updater reports an approved activation on a removed machine: enrollment pending, handoff present.
+		response.Pending, response.Activating = true, true
+		response.Transaction = workerupdate.TransactionState{CandidateVersion: updateApprovalCandidateVersion}
+	} else if activating {
+		// A lock-taking request during the activation would wait; the command must not send one.
+		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "check_failed"}
 	} else if request.Operation == "check" {
 		response.Pending = f.isPending()
 	} else if request.Operation == "status" && f.isPending() {
@@ -512,5 +532,39 @@ func TestUpdateWhileAnActivationFinishesSaysSoAtOnce(t *testing.T) {
 	}
 	if want := "an update to " + updateApprovalCandidateVersion + " is installed, finishing its health check (about 5 minutes left); run `pb update status`"; !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
+	}
+}
+
+// Smoke rehearsal (removed machine, .10→.11): during the approved activation `pb update` printed "available", --force
+// --json returned ok with an empty result, and later forms waited 36 s on the updater's lock and failed generically.
+// Every update form now reads status first and refuses at once while the activation finishes.
+func TestUpdateDuringAnActivationRefusesAtOnceAsBusy(t *testing.T) {
+	for _, args := range [][]string{
+		{"update"}, {"update", "--json"}, {"update", "--force"}, {"update", "--force", "--json"},
+		{"update", "--approve", updateApprovalCandidateID, "--json"}, {"update", "download", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			fixture := startUpdateApprovalControlFixture(t)
+			fixture.setActivating()
+			ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+				deps.socket = func() (string, error) { return fixture.socket, nil }
+				deps.inputIsTerminal = func(*cobra.Command) bool { return true }
+			})
+			var stdout, stderr bytes.Buffer
+			started := time.Now()
+			code := run(ctx, args, &stdout, &stderr)
+			output := stdout.String() + stderr.String()
+			if code == 0 || time.Since(started) > 10*time.Second {
+				t.Fatalf("exit %d after %v: %q", code, time.Since(started), output)
+			}
+			want := "an update to " + updateApprovalCandidateVersion + " is installed, finishing its health check (up to 10 minutes)"
+			if !strings.Contains(output, want) || strings.Contains(output, `"ok":true`) {
+				t.Fatalf("busy refusal missing: %q", output)
+			}
+			if slices.Contains(args, "--json") && !strings.Contains(output, `"code":"update_busy"`) {
+				t.Fatalf("JSON code is not update_busy: %q", output)
+			}
+			requireUpdateRequests(t, fixture)
+		})
 	}
 }
