@@ -37,6 +37,7 @@ type installDependencies struct {
 	guardStatus        func(context.Context) (machineguard.RuntimeStatus, error) // the only owner of the local access domain
 	applyLocalAccess   func(context.Context, *config.Config, string) error
 	disconnectMachine  func(*command.Context) error
+	awaitingEnrollment func(context.Context) bool // the local daemon says this computer is signed out or not added
 }
 
 func defaultInstallDependencies() installDependencies {
@@ -55,6 +56,7 @@ func defaultInstallDependencies() installDependencies {
 		guardStatus:        machineGuardStatus,
 		applyLocalAccess:   applyLocalAccessConfig,
 		disconnectMachine:  disconnectOwnMachine,
+		awaitingEnrollment: localDaemonAwaitingEnrollment,
 	}
 }
 

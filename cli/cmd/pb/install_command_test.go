@@ -68,6 +68,32 @@ func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
 	}
 }
 
+// A reinstall on a revoked computer printed "Enrollment is unchanged" while `pb status` said to sign in again
+// (2026-11-26). The message says whether the computer is signed in and what to run next.
+func TestInstallSaysWhenTheComputerMustSignIn(t *testing.T) {
+	source := installsource.Source{Version: "custom-test", Distribution: installsource.Custom, SHA256: "source-digest"}
+	for _, awaiting := range []bool{true, false} {
+		command := platformInstallCommand()
+		command.SetContext(withInstallDependencies(t.Context(), func(d *installDependencies) {
+			d.runningSource = func() (string, installsource.Source, error) { return "/supplied/pb", source, nil }
+			d.installExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) {
+				return "/commands/pb", nil
+			}
+			d.awaitingEnrollment = func(context.Context) bool { return awaiting }
+		}))
+		var out bytes.Buffer
+		command.SetOut(&out)
+		command.SetErr(&bytes.Buffer{})
+		command.SetArgs([]string{"--install-dir", "/commands"})
+		if err := command.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "`pb login`") != awaiting || strings.Contains(out.String(), "Enrollment is unchanged") {
+			t.Fatalf("awaiting=%t: %q", awaiting, out.String())
+		}
+	}
+}
+
 func TestSuppliedInstallTimeoutPreservesNativeRecoveryBudget(t *testing.T) {
 	if got := suppliedInstallTimeout("windows"); got != elevation.RuntimeInstallDuration || got <= elevation.RuntimeInstallRecoveryDuration {
 		t.Fatal("Windows install caller must allow recovery and local installation", got)

@@ -57,7 +57,13 @@ func platformInstallCommand() *cobra.Command {
 					return err
 				}
 			}
-			_, err = fmt.Fprintf(c.OutOrStdout(), "Installed Paperboat %s at %s. Background update checks: %t. Enrollment is unchanged.\n", source.Version, installed, source.AutomaticUpdates)
+			// Install never signs in or pairs: say where this computer stands and the next step (2026-11-26: "Enrollment
+			// is unchanged" on a revoked computer hid that only `pb login` would bring it back).
+			next := "Sign-in and pairing are unchanged; `pb status` shows them."
+			if installDependenciesOf(c.Context()).awaitingEnrollment(c.Context()) {
+				next = "This computer is not signed in to Paperboat; run `pb login` to add it to your account."
+			}
+			_, err = fmt.Fprintf(c.OutOrStdout(), "Installed Paperboat %s at %s. Background update checks: %t. %s\n", source.Version, installed, source.AutomaticUpdates, next)
 			return err
 		}}
 	command.Flags().String("install-dir", "", "absolute directory for the Unix pb command")
