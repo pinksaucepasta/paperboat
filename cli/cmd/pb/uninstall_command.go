@@ -67,8 +67,7 @@ func uninstallCommand() *cobra.Command {
 			if strings.TrimSpace(first) != "UNINSTALL PAPERBOAT" {
 				return usageError{err: errors.New("uninstall confirmation did not match"), publicMessage: "The confirmation must be exactly: UNINSTALL PAPERBOAT"}
 			}
-			if strings.TrimSpace(second) != hostname {
-				// Case counts: Windows test machine reports "Windows test machine" (F26 device check).
+			if !hostnameConfirmed(runtime.GOOS, strings.TrimSpace(second), hostname) {
 				return usageError{err: errors.New("hostname confirmation did not match"), publicMessage: fmt.Sprintf("The hostname confirmation must be this machine's exact hostname: %s", hostname)}
 			}
 			jsonWriter := command.OutOrStdout()
@@ -544,4 +543,13 @@ func uninstallJSONResult(hostname string, removedByName []string) map[string]any
 		result["removed_by_name"] = removedByName
 	}
 	return result
+}
+
+// hostnameConfirmed matches the typed hostname exactly, except on Windows, whose hostnames are
+// case-insensitive ($env:COMPUTERNAME is upper case while the hostname pb reads may not be).
+func hostnameConfirmed(goos, typed, hostname string) bool {
+	if goos == "windows" {
+		return strings.EqualFold(typed, hostname)
+	}
+	return typed == hostname
 }

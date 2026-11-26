@@ -333,7 +333,7 @@ func TestCLIJSONServerValidationRefusalIsNotLocalIO(t *testing.T) {
 	}
 }
 
-// A hostname that differs only in case is refused and the message names the exact hostname.
+// A hostname that differs from the real one is refused and the message names the exact hostname.
 func TestUninstallNamesTheExactHostnameOnAMismatch(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {

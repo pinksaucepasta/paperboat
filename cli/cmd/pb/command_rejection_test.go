@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -388,8 +389,12 @@ func TestApproveRefusalsAreCodedAndChangeNothing(t *testing.T) {
 // An ENV command on a computer that holds no vault for the account (the record is absent) says ENV is
 // not set up and how to set it up; it is not an authentication failure.
 func TestENVNotSetUpIsNamedNotAuthentication(t *testing.T) {
+	// A healthy daemon snapshot, so the runner's own daemon state cannot turn this into the offline message.
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.readSnapshot = func(context.Context) (localapi.Snapshot, error) { return localapi.Snapshot{}, nil }
+	})
 	for _, cause := range []error{config.ErrSecretNotFound, fmt.Errorf("load vault: %w", config.ErrSecretNotFound)} {
-		err := safeEnvironmentVariableCommandError(t.Context(), cause)
+		err := safeEnvironmentVariableCommandError(ctx, cause)
 		failure := classifyCommandFailure(err)
 		result := classifyCLIJSONFailure(err, failure)
 		if failure.kind != commandRejected || result.Code != "env_not_set_up" || result.StateChanged != false || result.Retryable {
