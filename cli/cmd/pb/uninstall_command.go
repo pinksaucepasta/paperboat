@@ -75,6 +75,9 @@ func uninstallCommand() *cobra.Command {
 				command.SetOut(io.Discard)
 				command.SetErr(io.Discard)
 			}
+			if err := waitForUpdateActivation(command.Context(), platformUpdateActivating); err != nil {
+				return err
+			}
 			serverRecordNotice := removeOwnServerRecord(actionContext(command, nil))
 			if serverRecordNotice != "" && !jsonOutput {
 				fmt.Fprintln(command.ErrOrStderr(), serverRecordNotice)
