@@ -50,7 +50,16 @@ type PeerTerminalTunnel struct {
 	lifetime       context.Context
 	cancelLifetime context.CancelFunc
 	warmWG         sync.WaitGroup
+	// After a failed warm build, warms wait until warmRetryAt (doubling to warmRetryMax) so a refused registration
+	// is not retried on every inventory refresh; opens still build on demand. Guarded by nativeMu.
+	warmRetryAt time.Time
+	warmDelay   time.Duration
 }
+
+const (
+	warmRetryFirst = 30 * time.Second
+	warmRetryMax   = 10 * time.Minute
+)
 
 func NewPeerTerminalTunnel(config PeerTerminalConfig) (*PeerTerminalTunnel, error) {
 	if config.Issuer == "" || config.Store.Path == "" || config.Store.Secrets == nil || config.Auth == nil || config.TLS == nil {
@@ -72,6 +81,10 @@ func (t *PeerTerminalTunnel) WarmMachines(ctx context.Context, machines []api.Us
 	if t.nativeClosed {
 		t.nativeMu.Unlock()
 		return net.ErrClosed
+	}
+	if t.nativeRuntime == nil && time.Now().Before(t.warmRetryAt) {
+		t.nativeMu.Unlock()
+		return nil
 	}
 	t.warmWG.Add(1)
 	t.nativeMu.Unlock()
@@ -111,6 +124,14 @@ func (t *PeerTerminalTunnel) WarmMachines(ctx context.Context, machines []api.Us
 	if !consumed {
 		authority.Clear()
 	}
+	t.nativeMu.Lock()
+	if err != nil {
+		t.warmDelay = min(max(2*t.warmDelay, warmRetryFirst), warmRetryMax)
+		t.warmRetryAt = time.Now().Add(t.warmDelay)
+	} else {
+		t.warmDelay, t.warmRetryAt = 0, time.Time{}
+	}
+	t.nativeMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -121,6 +142,10 @@ func (t *PeerTerminalTunnel) Close() error {
 	if t == nil {
 		return nil
 	}
+	// Cancel first: a warm build holds nativeMu until its register ends, and the lifetime aborts it at once.
+	if t.cancelLifetime != nil {
+		t.cancelLifetime()
+	}
 	t.nativeMu.Lock()
 	if t.nativeClosed {
 		t.nativeMu.Unlock()
@@ -130,9 +155,6 @@ func (t *PeerTerminalTunnel) Close() error {
 	runtime := t.nativeRuntime
 	t.nativeRuntime = nil
 	t.nativeMu.Unlock()
-	if t.cancelLifetime != nil {
-		t.cancelLifetime()
-	}
 	t.warmWG.Wait()
 	var err error
 	if runtime != nil {

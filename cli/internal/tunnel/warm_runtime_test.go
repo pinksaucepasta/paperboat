@@ -23,6 +23,7 @@ import (
 // most that were in flight at once.
 type warmFixture struct {
 	builds, inFlight, maxInFlight atomic.Int32
+	block                         bool // hold each registration until its request is cancelled
 }
 
 func (f *warmFixture) tunnel(t *testing.T) (*PeerTerminalTunnel, clientauthority.Authority) {
@@ -49,7 +50,11 @@ func (f *warmFixture) tunnel(t *testing.T) (*PeerTerminalTunnel, clientauthority
 			n := f.inFlight.Add(1)
 			for m := f.maxInFlight.Load(); n > m && !f.maxInFlight.CompareAndSwap(m, n); m = f.maxInFlight.Load() {
 			}
-			time.Sleep(20 * time.Millisecond)
+			if f.block {
+				<-r.Context().Done()
+			} else {
+				time.Sleep(20 * time.Millisecond)
+			}
 			f.inFlight.Add(-1)
 			return &http.Response{StatusCode: 503, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"down"}}`)), Request: r}, nil
 		}
@@ -65,23 +70,57 @@ func (f *warmFixture) tunnel(t *testing.T) (*PeerTerminalTunnel, clientauthority
 var warmOnline = []api.UserMachine{{MachineID: "machine_connected", Online: true, InstallationGeneration: 1, State: "active"}}
 
 // First opens built the engine themselves (~2 s, first-open-steps.md §12): WarmMachines resolved the identity and
-// dropped it. It now builds the runtime; a refused build leaves none and the next warm or open builds again.
+// dropped it. It now builds the runtime. A refused build leaves none, later warms back off instead of registering
+// on every inventory refresh, and an open still builds on demand.
 func TestWarmMachinesBuildsTheNativeRuntimeAndAFailedBuildLeavesNone(t *testing.T) {
 	f := &warmFixture{}
-	peer, _ := f.tunnel(t)
-	for i := int32(1); i <= 2; i++ {
-		if err := peer.WarmMachines(t.Context(), warmOnline); err == nil || f.builds.Load() < i {
-			t.Fatalf("warm %d: err=%v builds=%d, want a refused runtime build", i, err, f.builds.Load())
-		}
-		peer.nativeMu.Lock()
-		left := peer.nativeRuntime
-		peer.nativeMu.Unlock()
-		if left != nil {
-			t.Fatalf("warm %d left a half-built runtime", i)
+	peer, identity := f.tunnel(t)
+	if err := peer.WarmMachines(t.Context(), warmOnline); err == nil || f.builds.Load() != 1 {
+		t.Fatalf("warm: err=%v builds=%d, want one refused runtime build", err, f.builds.Load())
+	}
+	for i := 0; i < 3; i++ {
+		if err := peer.WarmMachines(t.Context(), warmOnline); err != nil || f.builds.Load() != 1 {
+			t.Fatalf("warm in backoff %d: err=%v builds=%d, want no registration", i, err, f.builds.Load())
 		}
 	}
-	if err := peer.WarmMachines(t.Context(), []api.UserMachine{{MachineID: "machine_connected"}}); err != nil || f.builds.Load() != 2 {
+	peer.nativeMu.Lock()
+	left := peer.nativeRuntime
+	peer.nativeMu.Unlock()
+	if left != nil {
+		t.Fatal("a refused warm build left a half-built runtime")
+	}
+	if _, _, err := peer.acquireNativeRuntime(t.Context(), "account_connected", "cli_connected", identity, nil); err == nil || f.builds.Load() != 2 {
+		t.Fatalf("open after a failed warm: err=%v builds=%d, want it to build on demand", err, f.builds.Load())
+	}
+	peer.nativeMu.Lock()
+	peer.warmRetryAt = time.Now().Add(-time.Second)
+	peer.nativeMu.Unlock()
+	if err := peer.WarmMachines(t.Context(), warmOnline); err == nil || f.builds.Load() != 3 || peer.warmDelay != 2*warmRetryFirst {
+		t.Fatalf("warm after backoff: err=%v builds=%d delay=%v, want a retry and a doubled delay", err, f.builds.Load(), peer.warmDelay)
+	}
+	if err := peer.WarmMachines(t.Context(), []api.UserMachine{{MachineID: "machine_connected"}}); err != nil || f.builds.Load() != 3 {
 		t.Fatalf("no reachable machine: err=%v builds=%d, want nothing started", err, f.builds.Load())
+	}
+}
+
+// A stop or pb update right after start must not wait out a warm build's registration (up to 10 s).
+func TestCloseDuringABlockedWarmBuildReturnsAtOnce(t *testing.T) {
+	f := &warmFixture{block: true}
+	peer, _ := f.tunnel(t)
+	warmed := make(chan error, 1)
+	go func() { warmed <- peer.WarmMachines(context.Background(), warmOnline) }()
+	for f.inFlight.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	started := time.Now()
+	if err := peer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(started); took > time.Second {
+		t.Fatalf("Close waited %v for the warm build", took)
+	}
+	if err := <-warmed; err == nil {
+		t.Fatal("the cancelled warm build reported success")
 	}
 }
 
