@@ -110,6 +110,11 @@ func TestPeerEnrollmentRetriesTransientFailuresUntilRegistered(t *testing.T) {
 	if err := waitForPeerEnrollment(ctx, enrollment, 10*time.Millisecond); err != nil || enrollment.calls != 3 {
 		t.Fatalf("err=%v after %d registrations; want registered on the 3rd", err, enrollment.calls)
 	}
+	// A removed machine (401) keeps retrying in the background until `pb pair` replaces its credential.
+	removed := &sequencePeerEnrollment{results: []error{&clientapi.APIError{Status: 401, Code: "unauthenticated"}, nil}}
+	if err := waitForPeerEnrollment(ctx, removed, 10*time.Millisecond); err != nil || removed.calls != 2 {
+		t.Fatalf("err=%v after %d registrations; want a retry past the 401", err, removed.calls)
+	}
 	refused := &sequencePeerEnrollment{results: []error{timeout, &clientapi.APIError{Status: 403, Code: "machine_revoked"}}}
 	if err := waitForPeerEnrollment(ctx, refused, 10*time.Millisecond); err == nil || refused.calls != 2 {
 		t.Fatalf("err=%v after %d registrations; want the refusal returned on the 2nd", err, refused.calls)

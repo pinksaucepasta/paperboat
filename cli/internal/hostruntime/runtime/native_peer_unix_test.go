@@ -362,11 +362,11 @@ func TestProductionNativePeerRecoversInitialControlFailure(t *testing.T) {
 func TestNativePeerRestartDelayBacksOffToAMinute(t *testing.T) {
 	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, time.Minute, time.Minute}
 	for failures, expected := range want {
-		if got := nativePeerRestartDelay(failures); got != expected {
-			t.Fatalf("after %d failures: %v, want %v", failures, got, expected)
+		if got := nativePeerRestartDelay(failures); got < expected/2 || got >= expected*3/2 {
+			t.Fatalf("after %d failures: %v, want %v jittered", failures, got, expected)
 		}
 	}
-	if got := nativePeerRestartDelay(100); got != time.Minute {
+	if got := nativePeerRestartDelay(100); got < 30*time.Second || got >= 90*time.Second {
 		t.Fatalf("many failures: %v", got)
 	}
 }

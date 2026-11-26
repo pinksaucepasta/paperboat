@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"log/slog"
 	"net"
 	"net/http"
@@ -776,7 +777,7 @@ func waitForPeerEnrollment(ctx context.Context, enrollment peerEnrollmentEnsurer
 				return err
 			}
 			failures = min(failures+1, 6)
-			wait = min(interval<<failures, time.Minute)
+			wait = backoff.Retry(failures+1, interval, time.Minute)
 		} else if !reported {
 			var pending *peeridentityenrollment.PendingError
 			if errors.As(err, &pending) {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
@@ -105,10 +106,8 @@ const productionNativePeerMaxRestartDelay = time.Minute
 // starts: the base delay, doubling to the maximum, so a machine whose identity was revoked does
 // not ask the server every second forever.
 func nativePeerRestartDelay(failures int) time.Duration {
-	if failures >= 6 {
-		return productionNativePeerMaxRestartDelay
-	}
-	return min(productionNativePeerRestartDelay<<failures, productionNativePeerMaxRestartDelay)
+	// Jittered: machines revoked or failing together (a server deploy) do not retry together.
+	return backoff.Retry(failures+1, productionNativePeerRestartDelay, productionNativePeerMaxRestartDelay)
 }
 
 var errNativePeerPending = errors.New("machine endpoint certificate is pending")
