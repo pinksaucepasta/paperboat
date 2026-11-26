@@ -10,10 +10,12 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"net/netip"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	"github.com/quic-go/quic-go"
 )
 
@@ -129,4 +131,50 @@ func TestDialRejectsBadAddress(t *testing.T) {
 			t.Errorf("Dial(%q) succeeded", address)
 		}
 	}
+}
+
+// A kept address nobody answers at: after dnscap.KeptDialWait the name is looked up and dialed too, in one Dial.
+func TestDialLeavesADeadKeptAddress(t *testing.T) {
+	certificate := serverCertificate(t)
+	port := listen(t, "udp4", net.IPv4(127, 0, 0, 1), certificate)
+	defer func(previous func(context.Context, string) ([]net.IPAddr, error)) { lookup = previous }(lookup)
+	lookups := 0
+	lookup = func(context.Context, string) ([]net.IPAddr, error) {
+		lookups++
+		return []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}}, nil
+	}
+	defer func() { cached = dnscap.Cached }()
+	cached = func(string) netip.Addr { return netip.MustParseAddr("192.0.2.1") } // nobody answers there
+	conf := trusting(certificate)
+	conf.ServerName = "localhost"
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	started := time.Now()
+	connection, err := Dial(ctx, net.JoinHostPort("moved.example.test", strconv.Itoa(port)), conf, &quic.Config{HandshakeIdleTimeout: 8 * time.Second}, false)
+	if err != nil || lookups != 1 || time.Since(started) < dnscap.KeptDialWait {
+		t.Fatalf("lookups %d after %s: %v", lookups, time.Since(started), err)
+	}
+	_ = connection.CloseWithError(0, "")
+}
+
+// A kept address that answers is dialed without a lookup.
+func TestDialUsesAKeptAddressWithoutALookup(t *testing.T) {
+	certificate := serverCertificate(t)
+	port := listen(t, "udp4", net.IPv4(127, 0, 0, 1), certificate)
+	defer func(previous func(context.Context, string) ([]net.IPAddr, error)) { lookup = previous }(lookup)
+	lookup = func(context.Context, string) ([]net.IPAddr, error) {
+		t.Error("looked up although an address is kept")
+		return nil, &net.DNSError{Err: "dead", IsTimeout: true}
+	}
+	defer func() { cached = dnscap.Cached }()
+	cached = func(string) netip.Addr { return netip.MustParseAddr("127.0.0.1") }
+	conf := trusting(certificate)
+	conf.ServerName = "localhost"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connection, err := Dial(ctx, net.JoinHostPort("kept.example.test", strconv.Itoa(port)), conf, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.CloseWithError(0, "")
 }

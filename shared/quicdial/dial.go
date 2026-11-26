@@ -10,7 +10,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"net/netip"
 	"strconv"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/dnscap"
 	"github.com/quic-go/quic-go"
@@ -31,10 +33,86 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	if err != nil || port < 1 || port > 65535 {
 		return nil, errors.New("quic: invalid port in " + address)
 	}
-	remote, err := resolve(ctx, host, port)
-	if err != nil {
-		return nil, err
+	tlsConf = tlsConf.Clone()
+	if tlsConf.ServerName == "" {
+		tlsConf.ServerName = host
 	}
+	byName := func(ctx context.Context) (*quic.Conn, error) {
+		remote, err := resolve(ctx, host, port)
+		if err != nil {
+			return nil, err
+		}
+		connection, err := dialRemote(ctx, remote, tlsConf, conf, early)
+		if err == nil && tlsConf.ServerName == host && len(connection.ConnectionState().TLS.VerifiedChains) > 0 {
+			dnscap.Verified(host, connection.RemoteAddr())
+		}
+		return connection, err
+	}
+	kept := cached(host)
+	if !kept.IsValid() {
+		return byName(ctx)
+	}
+	keptAddress := net.UDPAddrFromAddrPort(netip.AddrPortFrom(kept, uint16(port)))
+	connection, err := race(ctx, func(ctx context.Context) (*quic.Conn, error) {
+		return dialRemote(ctx, keptAddress, tlsConf, conf, early)
+	}, byName)
+	if err == nil && connection.RemoteAddr().String() == keptAddress.String() {
+		dnscap.Refresh(host, func(ctx context.Context) {
+			if found, err := byName(ctx); err == nil {
+				_ = found.CloseWithError(0, "")
+			}
+		})
+	}
+	return connection, err
+}
+
+// cached is the address host last verified at; tests replace it (dnscap never keeps the loopback a test listens on).
+var cached = dnscap.Cached
+
+// race dials kept at once (Tailscale net/dnscache: the remembered address, no lookup), and by name too once kept has
+// failed or dnscap.KeptDialWait passed; the first connection wins and the other is closed. A slow but working kept
+// address keeps the caller's whole budget.
+func race(ctx context.Context, kept, byName func(context.Context) (*quic.Conn, error)) (*quic.Conn, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		connection *quic.Conn
+		err        error
+	}
+	results := make(chan result, 2)
+	start := func(dial func(context.Context) (*quic.Conn, error)) {
+		go func() { c, err := dial(ctx); results <- result{c, err} }()
+	}
+	start(kept)
+	wait := time.NewTimer(dnscap.KeptDialWait)
+	defer wait.Stop()
+	running, named, errs := 1, false, []error(nil)
+	for running > 0 {
+		select {
+		case <-wait.C:
+		case r := <-results:
+			running--
+			if r.err == nil {
+				go func(left int) { // the other dial, if any, is closed when it ends
+					for ; left > 0; left-- {
+						if other := <-results; other.err == nil {
+							_ = other.connection.CloseWithError(0, "")
+						}
+					}
+				}(running)
+				return r.connection, nil
+			}
+			errs = append(errs, r.err)
+		}
+		if !named && ctx.Err() == nil {
+			named, running = true, running+1
+			start(byName)
+		}
+	}
+	return nil, errors.Join(errs...)
+}
+
+func dialRemote(ctx context.Context, remote *net.UDPAddr, tlsConf *tls.Config, conf *quic.Config, early bool) (*quic.Conn, error) {
 	network, local := "udp6", &net.UDPAddr{IP: net.IPv6unspecified}
 	if remote.IP.To4() != nil {
 		network, local = "udp4", &net.UDPAddr{IP: net.IPv4zero}
@@ -42,10 +120,6 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	socket, err := net.ListenUDP(network, local)
 	if err != nil {
 		return nil, err
-	}
-	tlsConf = tlsConf.Clone()
-	if tlsConf.ServerName == "" {
-		tlsConf.ServerName = host
 	}
 	transport := &quic.Transport{Conn: socket}
 	var connection *quic.Conn
