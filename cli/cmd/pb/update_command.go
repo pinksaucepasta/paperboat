@@ -90,15 +90,37 @@ func actionUpdateCheck(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	response, err := client.Check(ctx)
+	latest, err := checkSignedRelease(ctx, client)
 	if err == nil {
-		available, err := signedUpdateAvailable(buildinfo.Version, response.Version)
+		available, err := signedUpdateAvailable(buildinfo.Version, latest)
 		if err != nil {
 			return fmt.Errorf("validate signed update version: %w", err)
 		}
-		return writeUpdateCheckResult(command, response.Version, available)
+		return writeUpdateCheckResult(command, latest, available)
 	}
 	return updateControlFailure("check with the Paperboat updater", err)
+}
+
+// checkSignedRelease asks the updater for the signed release. Without a reachable updater (an install that was never
+// paired, or was signed out, has none) it reads the same signed public TUF metadata itself: checking needs no sign-in
+// (prior art: `tailscale update` works logged out, ~/ref/tailscale/clientupdate/clientupdate.go).
+func checkSignedRelease(ctx context.Context, client *updated.Client) (string, error) {
+	response, err := client.Check(ctx)
+	if errors.Is(err, updated.ErrUnavailable) {
+		return updateDependenciesOf(ctx).releaseVersion(ctx)
+	}
+	return response.Version, err
+}
+
+// updaterNotInstalled reports that the updater's control socket does not exist, as on an install that was never paired;
+// a socket that exists but does not answer is an updater restarting, which an install must not go around.
+func updaterNotInstalled(ctx context.Context) bool {
+	socket, err := updateDependenciesOf(ctx).socket()
+	if err != nil {
+		return false
+	}
+	_, err = os.Lstat(socket)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func writeUpdateCheckResult(command *cobra.Command, latest string, available bool) error {
@@ -336,11 +358,11 @@ func askUpdateInstall(command *cobra.Command, version string) (bool, error) {
 // signed metadata read `pb update check` makes. It follows the rules of a downloaded candidate: without --force, JSON
 // or unattended runs only report the release, and a terminal asks first. The bundle is bound to the version checked here.
 func updatePendingEnrollmentInstall(command *cobra.Command, ctx context.Context, client *updated.Client, force bool) error {
-	latest, err := client.Check(ctx)
+	latest, err := checkSignedRelease(ctx, client)
 	if err != nil {
 		return updateControlFailure("check with the Paperboat updater", err)
 	}
-	available, err := signedUpdateAvailable(buildinfo.Version, latest.Version)
+	available, err := signedUpdateAvailable(buildinfo.Version, latest)
 	if err != nil {
 		return fmt.Errorf("validate signed update version: %w", err)
 	}
@@ -348,7 +370,7 @@ func updatePendingEnrollmentInstall(command *cobra.Command, ctx context.Context,
 		return writeDownloadedUpdate(command, updated.ControlResponse{})
 	}
 	if !force && (updateJSON(command) || !updateDependenciesOf(ctx).inputIsTerminal(command)) {
-		if err := writeUpdateCheckResult(command, latest.Version, true); err != nil {
+		if err := writeUpdateCheckResult(command, latest, true); err != nil {
 			return err
 		}
 		if !updateJSON(command) {
@@ -357,7 +379,7 @@ func updatePendingEnrollmentInstall(command *cobra.Command, ctx context.Context,
 		return nil
 	}
 	if !force {
-		approved, err := askUpdateInstall(command, latest.Version)
+		approved, err := askUpdateInstall(command, latest)
 		if err != nil {
 			return err
 		}
@@ -366,7 +388,7 @@ func updatePendingEnrollmentInstall(command *cobra.Command, ctx context.Context,
 			return nil
 		}
 	}
-	return installOfficialBundle(command, ctx, force, latest.Version)
+	return installOfficialBundle(command, ctx, force, latest)
 }
 
 func writeDownloadedUpdate(command *cobra.Command, response updated.ControlResponse) error {
@@ -420,7 +442,7 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 			// pending cannot take the updater's prepared update (it would replace the slot the enrollment commit verifies),
 			// so it installs the same signed bundle through the supplied-install transaction, which keeps the enrollment
 			// pending and re-points it at the new slot.
-			if errors.As(err, &controlErr) && controlErr.Code == "installation_pending" {
+			if errors.As(err, &controlErr) && controlErr.Code == "installation_pending" || errors.Is(err, updated.ErrUnavailable) && updaterNotInstalled(ctx) {
 				return updatePendingEnrollmentInstall(command, ctx, client, force)
 			}
 			return updateControlFailure("download signed update", err)

@@ -240,6 +240,21 @@ func exportOfficialBundle(ctx context.Context, proofDirectory, output string) (s
 	return index.Version, err
 }
 
+// fetchSignedReleaseVersion reads the version of the signed official release for this platform.
+func fetchSignedReleaseVersion(ctx context.Context) (string, error) {
+	repository, err := buildinfo.ReleaseRepository()
+	if err != nil {
+		return "", err
+	}
+	directory, err := os.MkdirTemp("", "paperboat-update-check-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(directory)
+	index, err := bootstrap.FetchVerifiedReleaseIndex(ctx, repository, directory, nil, time.Now())
+	return index.Version, err
+}
+
 // bundleMadeForOtherOS tells from the file magic of the executable inside a .pb-update bundle (which records no platform) that it was made
 // on another OS than `current`. A bundle it cannot read, or an executable of an unknown kind, is left to the signature checks.
 func bundleMadeForOtherOS(path, current string) (made string, wrong bool) {

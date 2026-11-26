@@ -455,3 +455,34 @@ func TestUpdateOnAnUnpairedInstallInstallsNothingWhenTheSignedBundleCannotBeExpo
 		t.Fatalf("an unverifiable bundle was installed: err=%v installs=%d", err, installed.calls)
 	}
 }
+
+// An install that was never paired (or was signed out) has no updater: checking reads the signed public release itself
+// and updating installs the signed bundle through the supplied-install transaction (account canary 2026-11-26).
+func TestUpdateCheckAndUpdateWorkWithoutAnUpdater(t *testing.T) {
+	oldVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
+	buildinfo.Version = "2026.09.01.1"
+	missing := filepath.Join(t.TempDir(), "updater.sock")
+	var installed pendingInstallRecord
+	ctx := withUpdateDependencies(pendingUpdateContext(t, &updateApprovalControlFixture{socket: missing}, &installed, false), func(deps *updateDependencies) {
+		deps.releaseVersion = func(context.Context) (string, error) { return updateApprovalCandidateVersion, nil }
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"update", "check", "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("check without an updater failed: %d %q %q", code, stdout.String(), stderr.String())
+	}
+	var envelope struct {
+		Data updateCheckResult `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil || envelope.Data.LatestVersion != updateApprovalCandidateVersion || !envelope.Data.UpdateAvailable {
+		t.Fatalf("check result %+v (%v)", envelope, err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(ctx, []string{"update", "--force"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("update without an updater failed: %d %q %q", code, stdout.String(), stderr.String())
+	}
+	if installed.calls != 1 || !installed.force || installed.bundle != installed.exportedTo {
+		t.Fatalf("supplied install = %+v", installed)
+	}
+}

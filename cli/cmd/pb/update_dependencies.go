@@ -18,6 +18,7 @@ type updateDependencies struct {
 	install         func(context.Context, string, installsource.Source, string, bool, string, string) (string, error)
 	openConnections func(context.Context) (liveconnections.Counts, error)
 	exportBundle    func(ctx context.Context, directory, output string) (version string, err error) // the signed official release as a .pb-update bundle
+	releaseVersion  func(context.Context) (string, error)                                           // the signed official release version, read without the updater
 }
 
 type updateDependenciesKey struct{}
@@ -31,6 +32,7 @@ func defaultUpdateDependencies() updateDependencies {
 		install:         hostruntimecmd.InstallUpdateSource,
 		openConnections: openConnectionsForUpdate,
 		exportBundle:    exportOfficialBundle,
+		releaseVersion:  fetchSignedReleaseVersion,
 	}
 }
 
