@@ -44,6 +44,16 @@ func cloneRelayRegions(regions []*tailcfg.DERPRegion) ([]*tailcfg.DERPRegion, er
 	return out, nil
 }
 
+// magicsockDERPMap is dm, or nil when it has no region. magicsock, like upstream (wgengine/magicsock/magicsock.go
+// updateNetInfo), skips netcheck only for a nil map: an empty one reads as "IPv4 cannot send", so every endpoint
+// update rebound the socket and reset every peer path, cutting relay-less direct paths.
+func magicsockDERPMap(dm *tailcfg.DERPMap) *tailcfg.DERPMap {
+	if dm == nil || len(dm.Regions) == 0 {
+		return nil
+	}
+	return dm
+}
+
 func derpMapOf(regions []*tailcfg.DERPRegion) *tailcfg.DERPMap {
 	dm := &tailcfg.DERPMap{Regions: make(map[tailcfg.DERPRegionID]*tailcfg.DERPRegion, len(regions))}
 	for _, region := range regions {
@@ -100,7 +110,7 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 		go report() // peers learn the new home from the next renewal (HomeRegion)
 	}
 	ms := b.sys.MagicSock.Get()
-	ms.SetDERPMap(dm)
+	ms.SetDERPMap(magicsockDERPMap(dm))
 	for _, id := range redefined {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), relayReconnectTimeout)

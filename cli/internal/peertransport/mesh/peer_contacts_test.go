@@ -117,6 +117,22 @@ func connectDirectlyWithoutARelay(t *testing.T, lateHost, noInboundEndpoints boo
 		t.Fatalf("path %q, want direct", path)
 	}
 	t.Logf("first echo with no relay after %v", time.Since(started))
+	if lateHost || noInboundEndpoints {
+		return
+	}
+	// An endpoint update after the path is up (ReSTUN for a new peer, a link change) must not cut it. With an
+	// empty relay map netcheck reported "IPv4 cannot send", and each update rebound the socket and reset every
+	// peer path; under load the reset landed after the host's path and its replies stopped for 14 s (CI).
+	for _, server := range []*Server{host, dialer} {
+		server.lb.sys.MagicSock.Get().ReSTUN("test")
+	}
+	for i := range 10 {
+		_ = connection.SetReadDeadline(time.Now().Add(time.Second))
+		if n, err := connection.Read(buffer); err != nil || string(buffer[:n]) != "direct" {
+			t.Fatalf("echo %d after an endpoint update: %q err %v", i, buffer[:n], err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // An engine knows its own endpoints shortly after Start, every time: magicsock found them before the status
