@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -158,6 +159,11 @@ func TestControlStatusWhilePendingCarriesJournalCandidate(t *testing.T) {
 	}
 	if response, err = s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"}); err != nil || !response.Activating || !response.Pending {
 		t.Fatalf("pending status during an activation: %+v %v", response, err)
+	}
+	// A check during the activation makes no release lookup (its failure-domain request to hostd's update gate waited
+	// behind the stability check and filled hostd's socket slots: rollback .12→.13); it answers activation pending.
+	if result, err := s.Check(context.Background()); !errors.Is(err, ErrActivationPending) || result.Version != j.CandidateVersion {
+		t.Fatalf("check during an activation: %+v %v", result, err)
 	}
 	// A deferred activation waiting for open terminals is not finishing: --approve --force must not be refused.
 	if err := writeUnixHandoff(root, &unixActivationHandoff{Schema: unixHandoffSchema, Previous: active, Candidate: j.CandidateVersion, ApprovalID: approval, ActiveTerminalBusy: true}); err != nil {

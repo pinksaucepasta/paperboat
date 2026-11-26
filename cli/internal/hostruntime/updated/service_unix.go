@@ -436,6 +436,12 @@ func (s *Service) Check(ctx context.Context) (workerupdate.Result, error) {
 		return workerupdate.Result{}, ErrInvalidConfig
 	}
 	if err := s.requireCommittedSource(); errors.Is(err, ErrInstallationPending) {
+		// No release lookup during an activation: it asks hostd's update gate for the failure domain, which waits
+		// behind the held stability check and keeps one of hostd's 8 socket slots for up to 31 minutes; a check
+		// every 30 s filled them and the stability gate's next connection failed EPIPE (rollback .12→.13).
+		if handoff, err := readUnixHandoff(s.config.StateRoot); err != nil || handoff != nil {
+			return workerupdate.Result{Version: handoffCandidate(handoff)}, errors.Join(ErrActivationPending, err)
+		}
 		return s.observeSignedRelease(ctx)
 	} else if err != nil {
 		return workerupdate.Result{}, err
@@ -593,4 +599,11 @@ func (s *Service) requireCommittedSource() error {
 		return err
 	}
 	return source.Validate()
+}
+
+func handoffCandidate(handoff *unixActivationHandoff) string {
+	if handoff == nil {
+		return ""
+	}
+	return handoff.Candidate
 }

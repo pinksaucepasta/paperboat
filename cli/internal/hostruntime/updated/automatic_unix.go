@@ -37,6 +37,12 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 			return autoupdate.Result{}, err
 		}
 		defer lock.Close()
+		// As downloadWithResolver: no release lookup while an activation's handoff exists (Service.Check says why).
+		if handoff, err := readUnixHandoff(s.config.StateRoot); err != nil {
+			return autoupdate.Result{}, err
+		} else if handoff != nil {
+			return autoupdate.Result{Version: s.currentManager().ActiveVersion()}, nil
+		}
 		result, err := resolveRelease(ctx, s.currentManager().ActiveVersion(), s.source.Resolve)
 		return autoupdate.Result{Version: result.Version}, err
 	}
