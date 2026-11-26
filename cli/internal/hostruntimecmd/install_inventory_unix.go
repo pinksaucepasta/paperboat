@@ -519,6 +519,9 @@ func runInventoryCommand(ctx context.Context, command *exec.Cmd, executable stri
 	command.Stderr = io.MultiWriter(os.Stderr, reason)
 	command.WaitDelay = privilegedPipeWaitDelay
 	err := command.Run()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil // exited 0; a service it started kept the pipe
+	}
 	if refused := sudoRefusal("Cleaning up other Paperboat versions (the install inventory)", err, reason.String()); refused != nil {
 		return refused
 	}

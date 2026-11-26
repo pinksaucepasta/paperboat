@@ -156,7 +156,10 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		command.Stdout, command.Stderr = os.Stderr, io.MultiWriter(os.Stderr, reason)
 		// The root child outlives a killed sudo and keeps the stderr pipe open; Run must still return at the bound.
 		command.WaitDelay = privilegedPipeWaitDelay
-		if err = command.Run(); err != nil {
+		if err = command.Run(); errors.Is(err, exec.ErrWaitDelay) {
+			err = nil // exited 0; a service it started kept the pipe
+		}
+		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				switch exitErr.ExitCode() {

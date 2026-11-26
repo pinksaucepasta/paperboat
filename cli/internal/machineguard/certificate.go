@@ -322,9 +322,13 @@ func prepareInstalledLocalCA(ctx context.Context, cfg Config) error {
 	// Bounded like the guard's own start: an unanswered OS approval prompt leaves trust pending.
 	trustCtx, cancel := context.WithTimeout(ctx, guardTrustTimeout)
 	defer cancel()
-	if err := g.prepareLocalCA(trustCtx); isTrustPending(err) {
+	err = g.prepareLocalCA(trustCtx)
+	if err != nil && ctx.Err() != nil { // the caller's own deadline or cancellation is a failure, never pending
+		err = fmt.Errorf("%v: %w", err, ctx.Err()) // %v drops ErrTrustPending
+	} else if isTrustPending(err) {
 		return err
-	} else if err != nil {
+	}
+	if err != nil {
 		return fmt.Errorf("prepare local browser trust; retry Paperboat installation: %w", err)
 	}
 	return nil

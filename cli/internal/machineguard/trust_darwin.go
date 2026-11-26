@@ -24,7 +24,11 @@ func installLocalTrust(ctx context.Context, cfg Config, certificatePEM []byte) e
 	return installDarwinLocalTrust(ctx, cfg, certificatePEM, func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		command := exec.CommandContext(ctx, name, args...)
 		command.WaitDelay = 5 * time.Second // a killed child's leftover output holders cannot stall the wait
-		return command.CombinedOutput()
+		output, err := command.CombinedOutput()
+		if errors.Is(err, exec.ErrWaitDelay) { // exited 0; only a leftover child held the output
+			err = nil
+		}
+		return output, err
 	})
 }
 
