@@ -75,7 +75,11 @@ func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, 
 		if err != nil {
 			return nil, errors.Join(ErrManagedSSHUnavailable, err)
 		}
-		if err := bindExecutingWindowsSSHGeneration(prepared, source, executing); err != nil {
+		layout, err := hostruntimeservice.WindowsUserLayout(ownerSID)
+		if err != nil {
+			return nil, errors.Join(ErrManagedSSHUnavailable, err)
+		}
+		if err := bindExecutingWindowsSSHGeneration(layout.ReleasesRoot, prepared, source, executing); err != nil {
 			return nil, err
 		}
 		descriptor = &prepared
@@ -227,12 +231,18 @@ func cleanupProductionManagedSSH(ctx context.Context, _ runtimeidentity.Registra
 	return err
 }
 
-// AutomaticUpdates is installation policy rather than executing-byte identity.
-// Every source identity field and the immutable executable path must match;
-// neither installation Source nor its old SSH port can select this generation.
-func bindExecutingWindowsSSHGeneration(d windowsopenssh.GenerationDescriptor, source installsource.Source, executable string) error {
-	if d.Validate() != nil || source.Validate() != nil || d.Source.SHA256 != source.SHA256 || d.Source.Length != source.Length || d.Source.Platform != source.Platform || d.Source.Architecture != source.Architecture || d.Source.Version != source.Version || d.Source.Distribution != source.Distribution || !strings.EqualFold(filepath.Clean(d.Executable), filepath.Clean(executable)) {
+// bindExecutingWindowsSSHGeneration accepts the SSH generation prepared for the bytes this worker runs, from one of
+// that artifact's two pinned paths under releasesRoot (versions\<version> or versions\custom-<sha>). The generation
+// keeps the path and update policy of the install that first prepared it (PrepareGeneration reuses it for the same
+// artifact), so `pb update --from` of the installed bytes runs this worker from the other path.
+func bindExecutingWindowsSSHGeneration(releasesRoot string, d windowsopenssh.GenerationDescriptor, source installsource.Source, executable string) error {
+	if d.Validate() != nil || !d.Source.SameArtifact(source) {
 		return ErrManagedSSHUnavailable
 	}
-	return d.Source.Verify(executable)
+	for _, key := range []string{d.Source.Version, "custom-" + d.Source.SHA256} {
+		if strings.EqualFold(filepath.Clean(executable), filepath.Join(releasesRoot, "versions", key, "pb.exe")) {
+			return d.Source.Verify(executable)
+		}
+	}
+	return ErrManagedSSHUnavailable
 }
