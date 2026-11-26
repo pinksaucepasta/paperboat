@@ -8,6 +8,12 @@ import terminal_lifecycle
 from terminal_lifecycle import Terminal, applications, windows_phases
 
 
+class Paste(unittest.TestCase):
+    def test_markers_are_sent_only_to_a_shell_that_enabled_bracketed_paste(self):
+        self.assertEqual(b'\x1b[200~ls\x1b[201~', terminal_lifecycle.pasted(b'$ \x1b[?2004h', 'ls'))
+        self.assertEqual(b'ls', terminal_lifecycle.pasted(b'bash-3.2$ ', 'ls'))
+
+
 @unittest.skipUnless(all(shutil.which(name) for name in ['bash', 'vim', 'less']),
                      'real interactive shell, Vim and less are required')
 class FullscreenApplications(unittest.TestCase):

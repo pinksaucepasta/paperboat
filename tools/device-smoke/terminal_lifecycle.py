@@ -43,6 +43,12 @@ def wait_windows_shell(terminal, timeout=180):
                 raise
 
 
+def pasted(output, text):
+    """The bytes a real terminal sends for a paste: marked only if the shell asked (bash 3.2 on macOS never does)."""
+    data = text.encode()
+    return b'\x1b[200~' + data + b'\x1b[201~' if b'\x1b[?2004h' in output else data
+
+
 class Terminal:
     def __init__(self, arguments, cwd=None, env=None):
         self.arguments = list(map(str, arguments))
@@ -310,7 +316,7 @@ def unix_phases(terminal, check, monitor, entry, cwd, status_bar):
         if check == 'typing':
             terminal.send(command + '\r')
         else:
-            terminal.send(b'\x1b[200~' + command.encode() + b'\x1b[201~\r')
+            terminal.send(pasted(terminal.output, command) + b'\r')
         terminal.expect('PB_PASTE_LENGTH_' + str(len(payload)))
     if check in ('main', 'apps', 'monitor', 'all'):
         applications(terminal, monitor if check in ('monitor', 'all') else None)
