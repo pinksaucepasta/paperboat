@@ -34,6 +34,10 @@ var (
 // DefaultUploadTimeout bounds how long a single paste is held for upload.
 const DefaultUploadTimeout = 10 * time.Minute
 
+// DefaultSetupTimeout bounds how long a paste waits for a pending file transfer setup. Setup takes a lease and a policy
+// check against the host, which can take 20 seconds right after connecting; each local request is bounded at 20 seconds.
+const DefaultSetupTimeout = time.Minute
+
 // DefaultPartialFlushDelay bounds how long bytes that could begin a paste
 // start marker (e.g. a bare ESC keypress) are withheld while waiting for the
 // rest of the marker. Without this flush, a lone ESC would not reach the
@@ -55,6 +59,7 @@ type Interceptor struct {
 	notify          io.Writer
 	failureReporter func(error) string
 	timeout         time.Duration
+	setupTimeout    time.Duration
 	flushDelay      time.Duration
 	watchDirs       []string
 	tempPatterns    []string
@@ -299,7 +304,13 @@ func (i *Interceptor) run() {
 					handleWriteErr(writeErr)
 					writeErr = nil
 				}
-				if ready.err != nil {
+				if ready.unavailable {
+					i.report(FileFailed)
+					i.warn("file transfer unavailable; pasting original path")
+					if ready.err != nil && i.failureReporter != nil {
+						_ = i.failureReporter(ready.err)
+					}
+				} else if ready.err != nil {
 					i.report(FileFailed)
 					i.reportUploadFailure(ready.err, ready.uploaded, ready.closeFailed)
 				} else if writeErr == nil {

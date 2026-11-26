@@ -399,7 +399,7 @@ func TestPolicyUpdateChangesUploaderForSubsequentPastes(t *testing.T) {
 	policy := NewPolicy(fixedUploader{"/vm/old.png"}, "ses_1", defaultLimits())
 	i := NewWithPolicy(&dest, policy, WithPartialFlushDelay(time.Hour))
 	writeInChunks(t, i, wrap(img), 8)
-	policy.Update(fixedUploader{"/vm/new.png"}, "ses_1", defaultLimits())
+	policy.Pending("ses_1", defaultLimits()).Ready(fixedUploader{"/vm/new.png"}, "ses_1", defaultLimits())
 	dest.Reset()
 	i = NewWithPolicy(&dest, policy, WithPartialFlushDelay(time.Hour))
 	writeInChunks(t, i, wrap(img), 8)

@@ -55,7 +55,7 @@ func (i *Interceptor) rewrite(body []byte) ([]byte, bool) {
 		i.warn("paste has %d files, over the limit of %d; sending as-is", nonEmpty, maxFiles)
 		return body, false
 	}
-	if policy.transfer != nil {
+	if policy.transfer != nil || policy.settled != nil {
 		paths := make([]string, 0, nonEmpty)
 		files := make([]*os.File, 0, nonEmpty)
 		for _, candidate := range candidates {
@@ -92,6 +92,18 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 		_ = closeFiles(files)
 	}()
 	originalBody := body
+	if policy.transfer == nil {
+		var ok bool
+		if policy, ok = i.awaitSetup(policy); !ok {
+			return
+		}
+		if policy.transfer == nil {
+			closeErr := closeFiles(files)
+			files = nil
+			i.complete(uploadCompletion{seq: seq, body: originalBody, err: closeErr, unavailable: true})
+			return
+		}
+	}
 	ctx := i.ctx
 	if i.timeout > 0 {
 		var cancel context.CancelFunc
@@ -143,6 +155,29 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 			body = originalBody
 		}
 	}
+	i.complete(uploadCompletion{seq: seq, body: body, err: err, uploaded: uploaded, closeFailed: closeFailed})
+}
+
+// awaitSetup holds a paste while file transfer setup is pending, through any attempt that replaces it, until an
+// uploader is there, the setup ends without one, or the setup bound passes. It reports false when the interceptor is
+// torn down first.
+func (i *Interceptor) awaitSetup(policy policySnapshot) (policySnapshot, bool) {
+	timer := time.NewTimer(i.setupTimeout)
+	defer timer.Stop()
+	for policy.transfer == nil && policy.settled != nil {
+		select {
+		case <-policy.settled:
+			policy = i.policy.snapshot()
+		case <-timer.C:
+			return i.policy.snapshot(), true
+		case <-i.ctx.Done():
+			return policySnapshot{}, false
+		}
+	}
+	return policy, true
+}
+
+func (i *Interceptor) complete(completion uploadCompletion) {
 	// Give bytes already accepted by Write a chance to reach the worker before
 	// publishing the replacement. This preserves terminal stream order when a
 	// paste upload completes between two small input writes.
@@ -158,7 +193,7 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 		}
 	}
 	select {
-	case i.completed <- uploadCompletion{seq: seq, body: body, err: err, uploaded: uploaded, closeFailed: closeFailed}:
+	case i.completed <- completion:
 	case <-i.ctx.Done():
 	}
 }

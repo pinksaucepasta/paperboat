@@ -531,6 +531,8 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	var transferRefresh terminalInboxWorker
 	defer func() { cancelConnection(); transferRefresh.stop() }()
 	pastePolicy := paste.NewPolicy(nil, info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
+	// A file dropped while transfer is being set up waits for it instead of pasting its local path.
+	firstSetup := pastePolicy.Pending(info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
 	// attached is the latest attach's descriptor: a redial re-attaches under its access session with the daemon's resume
 	// secret, before asking Paperboat for anything.
 	var attached atomic.Pointer[resolver.ConnectInfo]
@@ -574,10 +576,10 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	}
 	// refreshTransfers renews the file-transfer lease and inbox of an attached terminal. It has its own cancellable
 	// owner and cannot hold the attachment back.
-	refreshTransfers := func(freshInfo resolver.ConnectInfo, pending chan preparedTransfer) func(context.Context) error {
+	refreshTransfers := func(freshInfo resolver.ConnectInfo, pending chan preparedTransfer, setup paste.Setup) func(context.Context) error {
 		return func(refreshCtx context.Context) error {
+			defer setup.Settle()
 			stopInbox()
-			pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
 			if transferLease != nil {
 				observeTransferFailure(transferLease.Close())
 				transferLease = nil
@@ -603,12 +605,12 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				return prepared.err
 			}
 			transferLease = prepared.lease
-			pastePolicy.Update(prepared.client, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+			setup.Ready(prepared.client, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
 			startInbox(prepared.client.Client, freshInfo.Terminal.SessionID)
 			return nil
 		}
 	}
-	transferRefresh.start(ctx, refreshTransfers(info, pendingTransfer), observeTransferFailure)
+	transferRefresh.start(ctx, refreshTransfers(info, pendingTransfer, firstSetup), observeTransferFailure)
 	linked := func(freshConn tunnel.Conn) {
 		// The old link may still deliver while this one attaches; replayed output it already showed is dropped.
 		if link, ok := freshConn.(interface{ SkipDelivered(func() int) }); ok {
@@ -652,13 +654,14 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				resumeEnd(resumeErr)
 				if resumeErr == nil {
 					linked(resumed)
-					pastePolicy.Update(nil, previous.Terminal.SessionID, fileTransferLimits(previous.FileTransfer))
+					setup := pastePolicy.Pending(previous.Terminal.SessionID, fileTransferLimits(previous.FileTransfer))
 					transferRefresh.start(ctx, func(refreshCtx context.Context) error {
+						defer setup.Settle()
 						freshInfo, err := resolveFresh(refreshCtx)
 						if err != nil {
 							return err
 						}
-						return refreshTransfers(freshInfo, nil)(refreshCtx)
+						return refreshTransfers(freshInfo, nil, setup)(refreshCtx)
 					}, observeTransferFailure)
 					return resumed, nil
 				}
@@ -684,8 +687,8 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		attached.Store(&freshInfo)
 		// Terminal output is ready now. Transfer authorization and inbox setup have their own cancellable owner and
 		// cannot hold this attachment back.
-		pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
-		transferRefresh.start(ctx, refreshTransfers(freshInfo, nil), observeTransferFailure)
+		setup := pastePolicy.Pending(freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+		transferRefresh.start(ctx, refreshTransfers(freshInfo, nil, setup), observeTransferFailure)
 		return freshConn, nil
 	}, d.telemetry, nil, tunnel.TelemetryContext{MachineID: info.MachineID, EnvironmentID: info.Terminal.EnvironmentID}, tunnel.WithReconnectingOutput(
 		d.cfg.Connect.TerminalOutputQueueChunks,

@@ -14,6 +14,9 @@ type Policy struct {
 	transfer       BatchUploader
 	transferLimits transfer.Limits
 	sessionID      string
+	// settled is non-nil while file transfer is being set up, and is closed once that setup is ready or has failed.
+	settled    chan struct{}
+	generation uint64
 }
 
 type BatchUploader interface {
@@ -24,6 +27,7 @@ type uploadCompletion struct {
 	seq         uint64
 	body        []byte
 	err         error
+	unavailable bool // setup ended, or outlived its bound, without an uploader
 	uploaded    bool
 	closeFailed bool
 }
@@ -32,22 +36,63 @@ type policySnapshot struct {
 	transfer       BatchUploader
 	transferLimits transfer.Limits
 	sessionID      string
+	settled        <-chan struct{}
 }
 
 func NewPolicy(uploader BatchUploader, sessionID string, limits transfer.Limits) *Policy {
 	return &Policy{transfer: uploader, sessionID: sessionID, transferLimits: limits}
 }
 
-func (p *Policy) Update(uploader BatchUploader, sessionID string, limits transfer.Limits) {
+// Setup is one attempt to make file transfer ready. Only the newest attempt changes its Policy, so one that a
+// reconnect replaced can neither release a waiting paste nor install its uploader.
+type Setup struct {
+	policy     *Policy
+	generation uint64
+}
+
+// Pending drops the uploader while a new one is being set up: a file pasted meanwhile waits for Ready or Settle.
+func (p *Policy) Pending(sessionID string, limits transfer.Limits) Setup {
 	p.mu.Lock()
-	p.transfer, p.sessionID, p.transferLimits = uploader, sessionID, limits
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	p.transfer, p.sessionID, p.transferLimits = nil, sessionID, limits
+	if p.settled == nil {
+		p.settled = make(chan struct{})
+	}
+	p.generation++
+	return Setup{p, p.generation}
+}
+
+// Ready installs the uploader and releases the pastes waiting for it.
+func (s Setup) Ready(uploader BatchUploader, sessionID string, limits transfer.Limits) {
+	s.policy.mu.Lock()
+	defer s.policy.mu.Unlock()
+	if s.generation != s.policy.generation {
+		return
+	}
+	s.policy.transfer, s.policy.sessionID, s.policy.transferLimits = uploader, sessionID, limits
+	s.policy.settleLocked()
+}
+
+// Settle ends the attempt. Without an uploader by now, waiting pastes fall back to their original paths.
+func (s Setup) Settle() {
+	s.policy.mu.Lock()
+	defer s.policy.mu.Unlock()
+	if s.generation == s.policy.generation {
+		s.policy.settleLocked()
+	}
+}
+
+func (p *Policy) settleLocked() {
+	if p.settled != nil {
+		close(p.settled)
+		p.settled = nil
+	}
 }
 
 func (p *Policy) snapshot() policySnapshot {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return policySnapshot{p.transfer, p.transferLimits, p.sessionID}
+	return policySnapshot{p.transfer, p.transferLimits, p.sessionID, p.settled}
 }
 
 // Option configures an Interceptor.
@@ -128,6 +173,7 @@ func NewWithPolicy(dest io.Writer, policy *Policy, opts ...Option) *Interceptor 
 		dest:           dest,
 		notify:         io.Discard,
 		timeout:        DefaultUploadTimeout,
+		setupTimeout:   DefaultSetupTimeout,
 		flushDelay:     DefaultPartialFlushDelay,
 		queueChunkSize: defaultQueueChunkSize,
 		queueChunks:    defaultQueueChunks,
