@@ -15,7 +15,7 @@ SSH = '''#!/bin/bash
 echo "ssh $*" >> "$STUB_LOG"
 case "$*" in
   *"ss -ltnH"*) printf '%s\\n' "$STUB_UP"; exit 0 ;;
-  *docker*psql*) cat > "$STUB_SQL"; exit 0 ;;
+  *runuser*psql*) cat > "$STUB_SQL"; exit 0 ;;
 esac
 cat > /dev/null 2>&1 || true
 [ -z "${STUB_SSH_FAIL:-}" ]
@@ -201,7 +201,7 @@ class CleanupScopeTest(unittest.TestCase):
     def setUp(self):
         self.env = Env(self)
         self.targets = pathlib.Path(self.env.dir.name) / 'targets.json'
-        self.targets.write_text(json.dumps({'deployment_host': 'db', 'cleanup_accounts': ['user_x'],
+        self.targets.write_text(json.dumps({'database_host': 'db', 'cleanup_accounts': ['user_x'],
                                             'cleanup_protected': '(pbvm|^canary-)'}))
 
     def run_cleanup(self, *args):

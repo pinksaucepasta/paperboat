@@ -34,6 +34,8 @@
   "cleanup_accounts": [
     "user_example"
   ],
+  "console_host": "tester@console.example.test",
+  "database_host": "tester@database.example.test",
   "deployment_host": "tester@deployment.example.test",
   "staging_host": "tester@staging.example.test",
   "console_origin": "https://console.example.test",
