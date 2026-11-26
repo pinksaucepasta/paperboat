@@ -215,6 +215,9 @@ After the 2026-11-26 fixes pb pair takes ~11.5 s in a container (was ~19 s). Wha
 (Type=notify after the worker boots), remaining systemd reloads ~0.4 s, bind restart to return ~2 s.
 Also: nothing is printed between "Administrator approval is required..." and "ready" (now ~8 s);
 progress text is a product call. Evidence: paperboat-private fix-batch-1122/pair-timing.
+Next: (1) one shared keep-alive transport for the pre-sudo clients (api/http.go:34,
+enrollment/client.go:331, machinecontrol): each opens a new TCP+TLS connection (~0.25 s from
+linuxpool-4), ~1-1.5 s per pair; (2) trace a carrier and a hostd start to find their ~1.2 s each.
 
 ### Tunnel-only mode without a Paperboat machine (and an official container image)
 
