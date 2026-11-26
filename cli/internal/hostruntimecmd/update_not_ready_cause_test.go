@@ -42,4 +42,7 @@ func TestUpdateNotReadyWithUnfinishedRollbackIsNotReportedRestored(t *testing.T)
 			t.Fatalf("output lacks %q: %q", want, output.String())
 		}
 	}
+	if strings.Contains(output.String(), "was restored") {
+		t.Fatalf("an unfinished restore is called restored: %q", output.String())
+	}
 }

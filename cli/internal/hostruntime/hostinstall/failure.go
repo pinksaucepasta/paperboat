@@ -29,9 +29,9 @@ var ErrInsufficientSpace = errors.New("there is not enough free disk space to st
 // install commits inside install-supplied), so there is nothing to undo.
 var ErrNoPendingInstallation = errors.New("the installation already committed, so there is nothing to roll back")
 
-// ErrUpdateNotReady is an installation whose new version did not come up healthy before it was
-// committed; the previous version was restored.
-var ErrUpdateNotReady = errors.New("the new version did not become ready, so the previous version was restored")
+// ErrUpdateNotReady is an installation whose new version did not come up healthy before it was committed. It
+// does not say the previous version is back: a restore step may have failed too (RestoredNotReady).
+var ErrUpdateNotReady = errors.New("the new version did not become ready")
 
 // UpdateNotReadyError is ErrUpdateNotReady with the step that failed, as the privileged step reported it
 // ("pb: cause: ..."), so the caller can show it where the step's own output is not visible (--json, an SSH log).
@@ -40,10 +40,12 @@ type UpdateNotReadyError struct{ Step string }
 const failedStepMarker = "; failed step: "
 
 func (e *UpdateNotReadyError) Error() string {
+	// Only built from the privileged step's exit 79, which it uses only once every restore step finished.
+	restored := ErrUpdateNotReady.Error() + ", so the previous version was restored"
 	if e.Step == "" {
-		return ErrUpdateNotReady.Error()
+		return restored
 	}
-	return ErrUpdateNotReady.Error() + failedStepMarker + e.Step
+	return restored + failedStepMarker + e.Step
 }
 
 // NotReadyFromMessage reads the step back out of an Error() text that crossed a boundary which wrapped it
