@@ -89,6 +89,27 @@ func TestAPrivilegedStepWhoseChildHoldsStderrStillReturnsAtItsBound(t *testing.T
 	}
 }
 
+// A privileged step that exits 0 but leaves a started service holding stderr (launchctl/systemctl starting a
+// daemon) succeeded: WaitDelay's exec.ErrWaitDelay must not turn it into a failure.
+func TestAPrivilegedStepLeavingAChildOnStderrSucceeds(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	original := privilegedInstallCommand
+	t.Cleanup(func() { privilegedInstallCommand = original })
+	var operations []string
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		operations = append(operations, arguments[len(arguments)-1])
+		if arguments[len(arguments)-1] == "install-supplied" {
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "/bin/sleep 8 & exit 0")
+		}
+		return exec.CommandContext(ctx, "/bin/false")
+	}
+	_, err := InstallRunningBinary(t.Context(), executable, source, filepath.Join(home, "bin"), "")
+	// Success goes on to the steps after install-supplied; a failure goes straight to the inventory.
+	if len(operations) < 2 || operations[1] == "inventory" {
+		t.Fatalf("a clean exit with a child on stderr was a failure: operations %v (%v)", operations, err)
+	}
+}
+
 // A second pb install while one runs names the other install instead of a generic failure.
 func TestASecondInstallSaysAnotherInstallIsRunning(t *testing.T) {
 	executable, source, home := suppliedInstallFixture(t)
