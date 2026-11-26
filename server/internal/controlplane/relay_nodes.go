@@ -89,6 +89,11 @@ type relayNodeLeaseDocument struct {
 	// MeshPeers are the other managed relay nodes this one may link to (pin = their serving certificate's SPKI pin); none for
 	// a customer-owned relay, which never meshes with Paperboat's.
 	MeshPeers []nodemesh.Peer `json:"mesh_peers,omitempty"`
+	// Draining is the operator's drain of this node: the relay stops admitting, reports not ready and closes its
+	// connections at DrainDeadline (Unix seconds). The relay drains itself from the lease; the control plane never fences
+	// a drained relay, so its connections get the whole grace and a restart inside it comes back draining.
+	Draining      bool  `json:"draining,omitempty"`
+	DrainDeadline int64 `json:"drain_deadline,omitempty"`
 	// PoolHandover lists accounts whose relay pool no longer includes this node and when the relay closes their
 	// carriers (Unix seconds): the old relay serves them until clients have moved to the new ones. Nil leaves the
 	// relay's list as it is (the read failed); an empty list clears it.
@@ -183,10 +188,10 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 	defer tx.Rollback()
 	var epoch, state string
 	var gen int64
-	var leaseExpires sql.NullTime
+	var leaseExpires, drainDeadline sql.NullTime
 	// A node with any relay transport may start (overlap, not containment): a relay that serves fewer
 	// transports than a later one still starts.
-	err = tx.QueryRowContext(ctx, `SELECT n.node_generation,n.process_epoch,n.state,n.registry_expires_at FROM paperboat.control_tunnel_nodes n LEFT JOIN paperboat.managed_node_authority m ON m.node_id=n.id LEFT JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND n.roles @> ARRAY['relay']::text[] AND n.transports && ARRAY['derp_quic','derp_wss']::text[] AND n.region IS NOT NULL AND (m.node_id IS NULL OR (m.retired_at IS NULL AND r.enabled)) FOR UPDATE OF n`, in.NodeID).Scan(&gen, &epoch, &state, &leaseExpires)
+	err = tx.QueryRowContext(ctx, `SELECT n.node_generation,n.process_epoch,n.state,n.registry_expires_at,n.drain_deadline FROM paperboat.control_tunnel_nodes n LEFT JOIN paperboat.managed_node_authority m ON m.node_id=n.id LEFT JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND n.roles @> ARRAY['relay']::text[] AND n.transports && ARRAY['derp_quic','derp_wss']::text[] AND n.region IS NOT NULL AND (m.node_id IS NULL OR (m.retired_at IS NULL AND r.enabled)) FOR UPDATE OF n`, in.NodeID).Scan(&gen, &epoch, &state, &leaseExpires, &drainDeadline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, invalidUsage("relay_nodes.go:90")
 	}
@@ -202,7 +207,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		if !expires.After(s.clock()) {
 			// An interrupted startup never published readiness. Its persisted
 			// pending epoch can safely resume without granting a second process.
-			if state != "registered" && state != "offline" {
+			if state != "registered" && state != "offline" && state != "draining" {
 				return out, invalidUsage("relay_nodes.go:108")
 			}
 			now := s.clock().UTC()
@@ -222,11 +227,14 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		}
 		gen = max(gen, in.ExpectedGeneration)
 		expires := now.Add(relayRegistryLease)
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state='registered',ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=NULL,updated_at=$3,version=version+1,observation=coalesce(observation,'{}'::jsonb)||$6::jsonb WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1, fragment)
+		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state=CASE WHEN state='draining' THEN 'draining' ELSE 'registered' END,ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=CASE WHEN state='draining' THEN coalesce(drain_deadline,$3) END,updated_at=$3,version=version+1,observation=coalesce(observation,'{}'::jsonb)||$6::jsonb WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1, fragment)
 		if err != nil {
 			return out, err
 		}
 		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}}
+	}
+	if state == "draining" {
+		out.Draining, out.DrainDeadline = true, relayDrainDeadline(drainDeadline, s.clock())
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
 	if err != nil {
@@ -393,7 +401,8 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	defer tx.Rollback()
 	var expires time.Time
 	var state string
-	err = tx.QueryRowContext(ctx, `SELECT registry_expires_at,state FROM paperboat.control_tunnel_nodes WHERE id=$1 AND node_generation=$2 AND process_epoch=$3 AND roles @> ARRAY['relay']::text[] FOR UPDATE`, in.NodeID, in.Generation, in.ProcessEpoch).Scan(&expires, &state)
+	var drainDeadline sql.NullTime
+	err = tx.QueryRowContext(ctx, `SELECT registry_expires_at,state,drain_deadline FROM paperboat.control_tunnel_nodes WHERE id=$1 AND node_generation=$2 AND process_epoch=$3 AND roles @> ARRAY['relay']::text[] FOR UPDATE`, in.NodeID, in.Generation, in.ProcessEpoch).Scan(&expires, &state, &drainDeadline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, set, required, invalidUsage("relay_nodes.go:160")
 	}
@@ -407,9 +416,8 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	if state == "retired" || (state == "offline" && !in.Draining && expires.After(now)) {
 		return out, set, required, invalidUsage("relay_nodes.go:166")
 	}
-	if state == "draining" && !in.Draining {
-		return out, set, required, invalidUsage("relay_nodes.go:169")
-	}
+	// An operator-drained node's heartbeat is accepted whether or not the relay has applied the drain yet: the lease
+	// below tells it to drain. Refusing it killed the relay at once and fenced every restart (a 409 loop until undrain).
 	// The mesh counters ride in the node's stored observation (operatorinfra.Node.Forward reads them); a relay that sends none clears them.
 	// The serving pin stays unless the relay reports another: the update below only replaces the mesh counters.
 	observation, err := relayStoredObservation(in.Mesh, in.ServingSPKISHA256)
@@ -430,11 +438,14 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	if operatorDraining {
 		state = "draining"
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state=$4,ready=$5,capacity_used=$6,capacity_observed_at=$7,last_heartbeat_at=$7,registry_expires_at=$8,drain_deadline=CASE WHEN $4='draining' THEN coalesce(drain_deadline,$7) ELSE NULL END,observation=(coalesce(observation,'{}'::jsonb)-'mesh')||$9::jsonb,updated_at=$7 WHERE id=$1 AND node_generation=$2 AND process_epoch=$3`, in.NodeID, in.Generation, in.ProcessEpoch, state, in.Ready && !in.Draining, in.CapacityUsed, now, expires, observation)
+	_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state=$4,ready=$5,capacity_used=$6,capacity_observed_at=$7,last_heartbeat_at=$7,registry_expires_at=$8,drain_deadline=CASE WHEN $4='draining' THEN coalesce(drain_deadline,$7) ELSE NULL END,observation=(coalesce(observation,'{}'::jsonb)-'mesh')||$9::jsonb,updated_at=$7 WHERE id=$1 AND node_generation=$2 AND process_epoch=$3`, in.NodeID, in.Generation, in.ProcessEpoch, state, in.Ready && !in.Draining && !operatorDraining, in.CapacityUsed, now, expires, observation)
 	if err != nil {
 		return out, set, required, err
 	}
 	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}}
+	if operatorDraining {
+		out.Draining, out.DrainDeadline = true, relayDrainDeadline(drainDeadline, now)
+	}
 	set, required, err = relayObservedSubjects(ctx, tx, in)
 	if err != nil {
 		return relayNodeLeaseDocument{}, set, required, err
@@ -530,9 +541,18 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 	writeEdgeSnapshot(w, r, out)
 }
 
-// relayNodeMayStart admits a relay process start for a node that is not retired or draining.
+// relayDrainDeadline is the operator drain's deadline in Unix seconds (now when the row has none).
+func relayDrainDeadline(deadline sql.NullTime, now time.Time) int64 {
+	if deadline.Valid {
+		return deadline.Time.Unix()
+	}
+	return now.Unix()
+}
+
+// relayNodeMayStart admits a relay process start for a node that is not retired. A draining node starts too: the
+// lease carries the drain, so the process comes back not ready and finishes the drain instead of looping on a refusal.
 func relayNodeMayStart(state string) bool {
-	return state != "retired" && state != "draining"
+	return state != "retired"
 }
 
 // customerOwnedNode says the node is a customer's own self-hosted edge or relay (an account or team installation). Paperboat's

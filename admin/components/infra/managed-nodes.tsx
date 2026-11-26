@@ -65,14 +65,20 @@ function NodeActions({ node, admin }: { node: Node; admin: boolean }) {
   return <RowMenu label={node.id} actions={actions} data-node-actions={node.id} />
 }
 
-/** Mesh links, with the failed forwards (unreachable + holder_miss) beside them, muted while there are none. */
+/**
+ * Mesh links, then the packets for a destination not connected to this relay (holder_miss: an offline peer, or one
+ * homed on no relay of the mesh; normal on a single relay, so muted), then the forwards a mesh link refused because its
+ * queue was full (unreachable: a real failure).
+ */
 function MeshCell({ forward }: { forward: Node["forward"] }) {
   if (!forward) return "-"
-  const failed = (forward.unreachable ?? 0) + (forward.holder_miss ?? 0)
+  const missed = forward.holder_miss ?? 0
+  const failed = forward.unreachable ?? 0
   return (
     <span className="inline-flex items-baseline gap-1.5">
       <Mono>{forward.links ?? 0}</Mono>
-      <span className={failed === 0 ? "text-muted-foreground" : "text-destructive"}><Mono>{failed} failed</Mono></span>
+      <span className="text-muted-foreground"><Mono>{missed} not connected here</Mono></span>
+      {failed > 0 && <span className="text-destructive"><Mono>{failed} failed</Mono></span>}
     </span>
   )
 }

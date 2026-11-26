@@ -35,6 +35,10 @@ import (
 var ErrControl = errors.New("relay control authority unavailable or expired")
 var ErrFenced = errors.New("relay node authority rejected")
 
+// ErrUndrained ends a process the operator drained once the drain is lifted: a drained server never admits again, so
+// the relay restarts to serve. It is a fence (Run stops on it).
+var ErrUndrained = fmt.Errorf("%w: operator drain lifted, restarting to serve", ErrFenced)
+
 // ErrUpdateRequired means the server answered 426, this release is below the minimum supported version. The relay
 // keeps serving and asks again every updateRequiredRetry; the server's answer says why.
 var ErrUpdateRequired = errors.New("this Paperboat relay release is below the minimum supported version: press Update for this node in the console (self-hosted) or admin (Paperboat-managed), or run the pbh install command on the host again")
@@ -93,6 +97,11 @@ type Lease struct {
 	// certificate), decoded by meshPeers. Absent means no mesh. A list that fails to decode or validate keeps the last
 	// good one; it never fences the relay. Raw so that a malformed list cannot fail the whole lease.
 	MeshPeers json.RawMessage `json:"mesh_peers,omitempty"`
+	// Draining is the operator's drain of this node: the relay stops admitting and closes its connections at
+	// DrainDeadline (Unix seconds; 0 is now). The drain cannot be undone in a running process, so a lease that no
+	// longer carries it after one did ends the process (ErrUndrained) and the restart serves again.
+	Draining      bool  `json:"draining,omitempty"`
+	DrainDeadline int64 `json:"drain_deadline,omitempty"`
 }
 
 // PoolHandover is one account moving off this relay: its carriers close at CloseAt (Unix seconds).
@@ -131,6 +140,8 @@ type Client struct {
 	demandAt     time.Time // start of the window the next observation reports account demand for
 	sampler      *nodemetrics.Sampler
 	meshAt       time.Time // when a lease last carried a mesh directory that was applied
+	// operatorDrain is set once a lease carried the operator's drain and the server applied it.
+	operatorDrain bool
 }
 
 // subjectsDigest is the hex SHA-256 of the sorted "account\x00endpoint\n" membership lines (the
@@ -413,6 +424,19 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	// A revocation only restricts: one for an endpoint this relay does not hold fences its future
 	// grants, a repeated one is a no-op (Server.Revoke keeps the highest), so neither drains the relay.
 	// A malformed entry is a broken authority, not a transient failure: it fences before any is applied.
+	if out.Draining {
+		deadline := time.Now()
+		if out.DrainDeadline > 0 {
+			deadline = time.Unix(out.DrainDeadline, 0)
+		}
+		if !c.operatorDrain {
+			slog.Warn("relay drained by the operator", "deadline", deadline.UTC().Format(time.RFC3339))
+		}
+		server.Drain(deadline)
+		c.operatorDrain = true
+	} else if c.operatorDrain {
+		return ErrUndrained
+	}
 	for _, rev := range out.Revocations {
 		if !derpquic.ValidRevocation(rev.AccountID, rev.EndpointID, rev.MinGeneration) {
 			return ErrFenced
