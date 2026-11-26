@@ -293,3 +293,7 @@ ac1095ce while both go.mod files pin 2d32e5f0.
   `$device_type` with their events; retention needs new explicit events (privacy decision first).
 - **TUI:** `huh` forms only if a real multi-field form appears (e.g. `pb env set` name + hidden value); a real Windows
   console check of the narrow-terminal hint (headless runs are fixed at 120 columns).
+
+### From the final launch batch (26 Nov)
+
+- Mac first open right after a daemon restart: handshake_lease takes 0.9–1.4 s and no other dial holds the token, so the cause is still unknown. Next step: trace inside acquireHandshake and the warm channel, and check that the step timer measures what it says. Other costs: application_authenticate ~0.7 s, 3 stream_authorize/admission calls in series ~0.5 s, resolve ~0.4 s. Evidence: fixwr/first-open-steps.md §7.
