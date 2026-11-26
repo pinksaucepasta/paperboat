@@ -156,3 +156,22 @@ func TestPairStepLinesComeInOrderBeforeTheNamedReadyLine(t *testing.T) {
 		}
 	}
 }
+
+type sliceCauseError struct{ items []string }
+
+func (e sliceCauseError) Error() string { return "leftovers" }
+
+type stageCauseError struct{ cause error }
+
+func (e stageCauseError) Error() string { return "stage failed" }
+func (e stageCauseError) Unwrap() error { return e.cause }
+
+// dadape 11-26: a comparable struct type holding an unhashable error (the purge stage around a leftover list)
+// panicked in runtimeCausesOnly and hid the commit's real failure.
+func TestRuntimeCausesOnlyAcceptsUnhashableErrors(t *testing.T) {
+	sentinel := errors.New("sentinel")
+	err := errors.Join(stageCauseError{cause: sliceCauseError{items: []string{"x"}}}, sentinel)
+	if runtimeCausesOnly(err, sentinel) {
+		t.Fatal("an unrelated leftover error counted as the sentinel")
+	}
+}

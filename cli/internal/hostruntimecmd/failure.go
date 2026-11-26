@@ -102,7 +102,7 @@ func runtimeCausesOnly(err error, allowed ...error) bool {
 				return false
 			}
 		}
-		if value.Type().Comparable() {
+		if value.Comparable() {
 			if seen[current] {
 				return false
 			}
@@ -113,7 +113,7 @@ func runtimeCausesOnly(err error, allowed ...error) bool {
 		// static sentinels which wrap another domain sentinel. Sibling causes
 		// are still checked independently; arbitrary Is hooks are never used.
 		sentinel := false
-		if value.Type().Comparable() {
+		if value.Comparable() {
 			for _, candidate := range allowed {
 				if current == candidate {
 					sentinel = true
@@ -203,7 +203,7 @@ func unreportedRuntimeFailure(err error) error {
 				return nil, false
 			}
 		}
-		if value.Type().Comparable() {
+		if value.Comparable() {
 			if seen[current] {
 				return nil, false
 			}
