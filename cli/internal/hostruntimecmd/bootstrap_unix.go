@@ -267,7 +267,6 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	readinessStarted := time.Now().UTC()
 	fmt.Fprintln(stderr, "Paperboat must run before login and while this account is logged out.")
-	fmt.Fprintln(stderr, "Paperboat will keep this machine awake by default, including on battery and with the lid closed; this can increase battery use and heat.")
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(stderr, "Administrator approval is required to install its durable system service.")
 	}
