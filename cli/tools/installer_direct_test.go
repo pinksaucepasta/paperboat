@@ -42,6 +42,10 @@ func macRelease(t *testing.T) *fakeRelease {
 	return newFakeRelease(t, "Darwin", "arm64", "pb-darwin-arm64", fixturePB)
 }
 
+func linuxRelease(t *testing.T) *fakeRelease {
+	return newFakeRelease(t, "Linux", "x86_64", "pb-linux-amd64", fixturePB)
+}
+
 func TestInstallerRunsOnlyTheVerifiedProduct(t *testing.T) {
 	skipOnWindows(t)
 	for _, scenario := range []string{"valid", "no-join", "wrong-hash", "install-failure", "reset-failure"} {

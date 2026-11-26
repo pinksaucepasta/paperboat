@@ -74,7 +74,7 @@ func TestInstallerInstallsAMissingSshKeygenThroughThePackageManager(t *testing.T
 		{"zypper as root", "0", "zypper", "", "zypper --non-interactive install openssh\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			r := macRelease(t)
+			r := linuxRelease(t)
 			r.path = limitedTools(t, r, c.uid)
 			addPackageManager(t, r.path, c.manager)
 			if c.helper != "" {
@@ -106,7 +106,7 @@ func TestInstallerStopsWhenSshKeygenCannotBeInstalled(t *testing.T) {
 		"not root, no sudo or doas": {"1000", "apt-get"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			r := macRelease(t)
+			r := linuxRelease(t)
 			r.path = limitedTools(t, r, c.uid)
 			if c.manager != "" {
 				addPackageManager(t, r.path, c.manager)
@@ -120,7 +120,7 @@ func TestInstallerStopsWhenSshKeygenCannotBeInstalled(t *testing.T) {
 				t.Fatal("pb ran without a verified release")
 			}
 			for _, url := range r.downloads(t) {
-				if strings.HasSuffix(url, "/pb-darwin-arm64") {
+				if strings.HasSuffix(url, "/pb-linux-amd64") {
 					t.Fatal("the product was downloaded although the signature could not be verified")
 				}
 			}
@@ -131,10 +131,24 @@ func TestInstallerStopsWhenSshKeygenCannotBeInstalled(t *testing.T) {
 // Like Tailscale's installer (scripts/installer.sh 399-407): no download tool is an error that says what to install.
 func TestInstallerAsksForCurlWhenItIsMissing(t *testing.T) {
 	skipOnWindows(t)
-	r := macRelease(t)
+	r := linuxRelease(t)
 	r.path = limitedTools(t, r, "0", "curl")
 	output, err := r.run(t, []string{"--no-setup"})
 	if err == nil || !strings.Contains(output, "The installer needs curl to download files.") || !strings.Contains(output, "Please install curl to proceed.") {
 		t.Fatalf("missing curl was not reported: %v %s", err, output)
+	}
+}
+
+// macOS installs per user: as root the installer refuses before downloading anything.
+func TestInstallerRefusesRootOnMacOSBeforeDownloading(t *testing.T) {
+	skipOnWindows(t)
+	r := macRelease(t)
+	r.path = limitedTools(t, r, "0")
+	output, err := r.run(t, []string{"--no-setup"})
+	if err == nil || !strings.Contains(output, "On macOS, Paperboat installs for your own user, not root.") || strings.Contains(output, "rerun this installer") {
+		t.Fatalf("want only the root refusal: %v %s", err, output)
+	}
+	if downloads := r.downloads(t); len(downloads) != 0 {
+		t.Fatalf("downloaded before refusing: %v", downloads)
 	}
 }
