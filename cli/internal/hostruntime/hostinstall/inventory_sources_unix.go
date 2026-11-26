@@ -43,14 +43,11 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 	}
 	paths := platformPaths(uid)
 	sources := InventorySources{Retained: map[string]time.Time{}, Archives: map[string]bool{}}
-	for _, record := range []string{paths.journal, filepath.Join(paths.updateState, "native-install.json")} {
-		if _, err := os.Lstat(record); err == nil {
-			sources.Pending = record
-			break
-		} else if !installNotExistOnly(err) {
-			return sources, err
-		}
+	pending, err := pendingInstallRecord(paths)
+	if err != nil {
+		return sources, err
 	}
+	sources.Pending = pending
 	digest, activated, err := fileDigest(paths.worker)
 	if installNotExistOnly(err) {
 		return sources, nil
@@ -105,4 +102,19 @@ func fileDigest(path string) (string, time.Time, error) {
 		return "", time.Time{}, err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), info.ModTime(), nil
+}
+
+// pendingInstallRecord names the first record of an unfinished transaction. The service lifecycle journal counts:
+// a failed cutover removes the install journal before the lifecycle restore runs, and an unfinished restore still
+// needs the previous version's files.
+func pendingInstallRecord(paths installPaths) (string, error) {
+	lifecycleJournal := filepath.Join(paths.root, "service-lifecycle", "service-lifecycle.json")
+	for _, record := range []string{paths.journal, filepath.Join(paths.updateState, "native-install.json"), lifecycleJournal} {
+		if _, err := os.Lstat(record); err == nil {
+			return record, nil
+		} else if !installNotExistOnly(err) {
+			return "", err
+		}
+	}
+	return "", nil
 }
