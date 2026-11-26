@@ -207,6 +207,12 @@ WHERE d.deleted_at IS NULL
   AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND NOT (d.certificate_state IN ('renewing','failed') AND d.certificate_retry_at > $1::timestamptz)
+  -- A first certificate is issued only once every live edge holding the route serves its current generation, so
+  -- it reaches both edges of the pair and domain.create (what ` + "`" + `domain add --wait` + "`" + ` polls) ends when either answers.
+  -- Filtered here, not skipped by the worker, so waiting domains never fill the batch.
+  AND (d.certificate_reference IS NOT NULL OR coalesce((SELECT bool_and(er.revision=r.generation
+    AND paperboat.endpoint_route_ready(er.id,$1::timestamptz,true))
+    FROM tunnel_routes r JOIN endpoint_routes er ON er.tunnel_route_id=r.id WHERE r.id=d.route_id),false))
   AND (
     d.certificate_state IN ('issuing','renewing','failed')
     OR d.certificate_expires_at <= $1::timestamptz
@@ -571,7 +577,10 @@ SELECT ready.edge_node_id, ready.edge_process_epoch, ready.assignment_generation
 FROM tunnel_route_ready_edges_v1 AS ready
 JOIN tunnel_domains AS d
   ON d.route_id = ready.route_id AND d.tunnel_id = ready.tunnel_id AND d.account_id = ready.account_id
+JOIN control_tunnel_nodes AS n ON n.id = ready.edge_node_id AND n.process_epoch = ready.edge_process_epoch
 WHERE d.id = $1
+  AND n.ready AND n.state = 'ready' AND n.drain_deadline IS NULL AND n.roles @> ARRAY['edge']::text[]
+  AND n.last_heartbeat_at > now() - interval '15 seconds' AND n.registry_expires_at > now()
 ORDER BY ready.edge_node_id, ready.edge_process_epoch, ready.assignment_generation
 `
 
@@ -583,6 +592,7 @@ type ListReadyTunnelCertificateEdgesV1Row struct {
 
 // The edges serving a domain's route on either path: connector assignments and the endpoint engine's
 // assignments (tunnel_route_ready_edges_v1). A domain on the engine has no connector session.
+// Live edges only: a first certificate is all-or-nothing, so a draining, stale or restarted edge must not fail it.
 func (q *Queries) ListReadyTunnelCertificateEdgesV1(ctx context.Context, domainID string) ([]ListReadyTunnelCertificateEdgesV1Row, error) {
 	rows, err := q.db.Query(ctx, listReadyTunnelCertificateEdgesV1, domainID)
 	if err != nil {

@@ -510,7 +510,73 @@ VALUES ($1,$2,$3,decode(repeat('43',32),'hex'),'tunnel.create','tunnel',$4,'conn
 	if err := exact(targets[0].EdgeNodeID, "epoch_not_serving"); !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("domain found for an edge process that does not serve it: %v", err)
 	}
-	f.exec(t, `UPDATE tunnel_domains SET certificate_state='issuing' WHERE id=$1`, domain)
+	// Back to a domain that has never had a certificate (a reference makes it a renewal, which is never gated).
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='issuing',certificate_reference=NULL,certificate_expires_at=NULL WHERE id=$1`, domain)
+	// A new domain's first certificate (and its domain.create, what `domain add --wait` polls) waits until every
+	// live edge of the pair serves the route; it is filtered out of the due batch meanwhile, so waiting domains
+	// never fill it. A first attempt that failed stays gated too.
+	firstDue := func() bool {
+		t.Helper()
+		rows, err := f.database.Queries().ListDueTunnelCertificateDomainsV1(f.ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: time.Now().UTC(), RowLimit: 10000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			if row.ID == domain {
+				return true
+			}
+		}
+		return false
+	}
+	if !firstDue() {
+		t.Fatal("new domain with both edges serving its route is not due")
+	}
+	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=false WHERE edge_node_id=$1`, f.backupNode)
+	if firstDue() {
+		t.Fatal("new domain with one of two edges serving its route is due")
+	}
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='failed',certificate_retry_at=now()-interval '1 minute' WHERE id=$1`, domain)
+	if firstDue() {
+		t.Fatal("new domain whose first attempt failed is due with one of two edges serving")
+	}
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='issuing',certificate_retry_at=NULL WHERE id=$1`, domain)
+	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE edge_node_id=$1`, f.backupNode)
+	// A passthrough domain (no certificate) is added once every live edge serves the route and has fetched a route
+	// snapshot begun after the binding was written; it completed at insert before (`domain add --wait` ended at once).
+	passthrough, passthroughOperation := "dom_pass_"+f.prefix, "op_pass_"+f.prefix
+	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact',$1,$5,'none','not_applicable','ready','clear',$6)`, passthrough, f.account, tunnel, route, "pass-"+f.prefix+".example.test", "wsd_"+ws)
+	f.exec(t, `INSERT INTO operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at)
+VALUES ($1,$2,$3,decode(repeat('44',32),'hex'),'domain.create','domain_binding',$4,'connecting','running',60,'changed',$5,now(),now())`, passthroughOperation, f.account, "idem_"+passthroughOperation, passthrough, "cor_"+passthroughOperation)
+	passthroughState := func() string {
+		t.Helper()
+		if err := tunnelv1.RefreshPendingStateOperations(f.ctx, f.database.Pool(), time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		var state string
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT state FROM operations WHERE id=$1`, passthroughOperation).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET tunnel_endpoints_epoch=process_epoch,tunnel_snapshot_at=now()-interval '1 minute',last_heartbeat_at=now() WHERE id IN ($1,$2)`, f.node, f.backupNode)
+	if state := passthroughState(); state != "running" {
+		t.Fatalf("passthrough domain.create before the edges fetched its binding = %s, want running", state)
+	}
+	// One edge fetched the binding, the other has not: still running although both serve the route.
+	f.exec(t, `UPDATE control_tunnel_nodes SET tunnel_snapshot_at=now()+interval '2 seconds' WHERE id=$1`, f.node)
+	if state := passthroughState(); state != "running" {
+		t.Fatalf("passthrough domain.create with one of two edges holding its binding = %s, want running", state)
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET tunnel_snapshot_at=now()+interval '2 seconds' WHERE id IN ($1,$2)`, f.node, f.backupNode)
+	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=false WHERE edge_node_id=$1`, f.backupNode)
+	if state := passthroughState(); state != "running" {
+		t.Fatalf("passthrough domain.create with one of two edges serving = %s, want running", state)
+	}
+	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE edge_node_id=$1`, f.backupNode)
+	if state := passthroughState(); state != "succeeded" {
+		t.Fatalf("passthrough domain.create with both edges serving it = %s, want succeeded", state)
+	}
+	f.exec(t, `DELETE FROM tunnel_domains WHERE id=$1`, passthrough)
 	// `pb tunnel route add --wait` on an engine tunnel ends: the route operation settles once the
 	// engine's edges serve the route's current generation (it waited on connector assignments only).
 	routeOperation := "op_route_" + f.prefix

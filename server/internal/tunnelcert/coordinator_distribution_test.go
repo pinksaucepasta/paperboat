@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -331,9 +330,10 @@ func TestCoordinatorProjectionRecoveryRejectsUnreadyAndPropagatesFence(t *testin
 	}
 }
 
-// One edge that does not answer must not stop the certificate reaching the edges that do: the certificate is
-// active on the ready edge, the straggler is left staged, and it catches up through the next pass (the worker
-// finds an active certificate with a missing edge) without reissuing anything.
+// A durable domain's first certificate is all or nothing: its commit ends `pb tunnel domain add --wait`, so one
+// edge that does not answer fails the issuance (both copies retired) instead of leaving that edge without it.
+// A renewal stays partial: one edge that does not answer must not stop the renewed certificate reaching the edges
+// that do (a dead edge would otherwise let it expire); the straggler is left staged and catches up on the next pass.
 func TestCoordinatorActivatesReadyEdgesAroundAStraggler(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	issuer := &testIssuer{bundle: testBundle(t, []string{"app.example.test"}, now, 60*24*time.Hour)}
@@ -344,12 +344,26 @@ func TestCoordinatorActivatesReadyEdgesAroundAStraggler(t *testing.T) {
 	coordinator.config.Distributor = ledger
 	domain := testDomain("app.example.test", StrategyDelegatedDNS01)
 	domain.RouteID = "route_001"
+	if _, err := coordinator.Ensure(context.Background(), domain); err == nil {
+		t.Fatal("first issuance with one straggler edge succeeded, want it failed until every edge has it")
+	}
+	if current, found, _ := store.Current(context.Background(), domain.ID); found && current.State == StateActive {
+		t.Fatalf("first issuance with one straggler edge activated %+v", current)
+	}
+	ledger.stragglerNode = ""
+	initial, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil || initial.Certificate.State != StateActive {
+		t.Fatalf("first issuance with every edge ready = %+v, %v", initial.Certificate, err)
+	}
+	ledger.stragglerNode = "edge_b"
+	domain.CertificateReference = initial.Certificate.Reference
+	domain.RenewalDue = true
 	first, err := coordinator.Ensure(context.Background(), domain)
 	if err != nil {
-		t.Fatalf("issuance with one straggler edge = %v, want it activated on the ready edge", err)
+		t.Fatalf("renewal with one straggler edge = %v, want it activated on the ready edge", err)
 	}
-	if first.Certificate.State != StateActive {
-		t.Fatalf("certificate = %+v, want active", first.Certificate)
+	if first.Certificate.State != StateActive || first.Certificate.Reference == initial.Certificate.Reference {
+		t.Fatalf("certificate = %+v, want a renewed active one", first.Certificate)
 	}
 	certificateID := first.Certificate.Reference[len("tcert_"):]
 	byNode := map[string]string{}
@@ -359,14 +373,11 @@ func TestCoordinatorActivatesReadyEdgesAroundAStraggler(t *testing.T) {
 	if byNode["edge_a"] != "active" || byNode["edge_b"] != "staged" {
 		t.Fatalf("edge states = %v, want edge_a active and edge_b still staged", byNode)
 	}
-	for _, event := range ledger.events() {
-		if strings.HasPrefix(event, "retire:") {
-			t.Fatalf("the straggler's staged copy was rolled back: %v", ledger.events())
-		}
-	}
 	// The straggler recovers: the next pass completes it and never reissues.
+	issued := len(issuer.seen)
 	ledger.stragglerNode = ""
 	domain.CertificateReference = first.Certificate.Reference
+	domain.RenewalDue = false
 	if _, err := coordinator.Ensure(context.Background(), domain); err != nil {
 		t.Fatal(err)
 	}
@@ -374,8 +385,8 @@ func TestCoordinatorActivatesReadyEdgesAroundAStraggler(t *testing.T) {
 		t.Fatalf("straggler after catching up = %q, want active", got)
 	}
 	current, found, err := store.Current(context.Background(), domain.ID)
-	if err != nil || !found || current.CertificateGeneration != first.Certificate.CertificateGeneration || len(issuer.seen) != 1 {
-		t.Fatalf("catch-up reissued: current=%+v found=%v err=%v issued=%d", current, found, err, len(issuer.seen))
+	if err != nil || !found || current.CertificateGeneration != first.Certificate.CertificateGeneration || len(issuer.seen) != issued {
+		t.Fatalf("catch-up reissued: current=%+v found=%v err=%v issued=%d", current, found, err, len(issuer.seen)-issued)
 	}
 }
 

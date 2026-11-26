@@ -246,6 +246,7 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,'web','http','managed','m.example.test','http','127.0.0.1:3000',$3,$3)`, "rte_wsd_"+suffix, tunnel, owner)
 	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,workspace_domain_id,certificate_state) VALUES($1,$2,$3,$4,$5,'exact','x','t',$6,'issuing')`,
 		"dom_wsd_"+suffix, owner, tunnel, "rte_wsd_"+suffix, "app."+hostname, view.ID)
+	testutil.ServeTunnelRoute(t, database.SQL(), owner, "mch_wsd_"+suffix, tunnel, "rte_wsd_"+suffix) // a new domain is due only once its route is served
 	var inUse *InUseError
 	if err := service.Remove(personal, owner, view.ID); !errors.As(err, &inUse) || len(inUse.Uses) != 1 || inUse.Uses[0].Name != "web" || inUse.Uses[0].Hostname != "app."+hostname {
 		t.Fatalf("removing a used domain = %v %+v", err, inUse)

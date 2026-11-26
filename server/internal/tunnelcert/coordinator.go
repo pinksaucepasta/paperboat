@@ -1066,8 +1066,10 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	// staged, and the straggler catches up through reconcileActiveDistribution (the worker finds the active
 	// certificate with a missing edge) or fetches it on its first handshake. Only no ready edge fails. A preview
 	// generation is all or nothing: an edge on the old generation next to one on the new would answer differently
-	// (and a revoke of the new one drops the old), so one failing edge retires every staged copy.
-	requireAll := domain.Target().KindValue() == TargetPreviewLease
+	// (and a revoke of the new one drops the old), so one failing edge retires every staged copy. A durable domain's
+	// first certificate is all or nothing too: its commit ends `domain add --wait`, and an edge without the
+	// certificate would fail that visitor's first request. Renewals stay partial so one dead edge cannot expire it.
+	requireAll := domain.Target().KindValue() == TargetPreviewLease || domain.CertificateReference == ""
 	staged, activated, waitErr, activateErr := c.activateReady(ctx, staged, requireAll)
 	if activated == 0 || requireAll && activated < len(staged) {
 		cause, code := activateErr, "edge_activate_failed"

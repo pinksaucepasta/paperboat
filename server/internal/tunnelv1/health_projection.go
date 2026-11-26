@@ -70,19 +70,45 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  phase=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'failed' ELSE 'ready' END,progress=100,retrying=false,next_retry_at=NULL,
  error_code=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'tunnel_expired' ELSE NULL END,completed_at=$3,updated_at=$3
  FROM pending t WHERE o.id=t.id`, accountID, tunnelIDs, now, "tunnel."+stateOperationName(DesiredActive), "tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted), OriginHealthMaxAge.Seconds())
+	if err != nil {
+		return err
+	}
+	// A passthrough domain (no certificate) is added once every live edge holding its route serves the route and
+	// has fetched a route snapshot begun after the binding was written, so either edge of the pair answers it.
+	// shortcut: a passthrough add deleted before it completes stays running (no caller waits on it after delete).
+	_, err = executor.Exec(ctx, `UPDATE operations o SET state='succeeded',phase='ready',progress=100,outcome='changed',
+ result_reference=d.id,retrying=false,next_retry_at=NULL,error_code=NULL,completed_at=$3,updated_at=$3
+ FROM tunnel_domains d JOIN tunnel_routes r ON r.id=d.route_id
+ WHERE o.account_id=$1 AND o.resource_id=d.id AND o.resource_kind='domain_binding' AND o.operation_type='domain.create' AND o.state IN ('pending','running')
+ AND d.account_id=$1 AND d.tunnel_id=ANY($2::text[]) AND d.certificate_strategy='none' AND d.deleted_at IS NULL
+ AND coalesce((SELECT bool_and(er.revision=r.generation AND paperboat.endpoint_route_ready(er.id,$3,true))
+  FROM endpoint_routes er WHERE er.tunnel_route_id=r.id),false)
+ AND d.conflict_state='clear' AND paperboat.workspace_domain_verified(d.workspace_domain_id)
+ AND NOT EXISTS (SELECT 1 FROM control_tunnel_nodes n JOIN endpoint_edge_assignments x ON x.edge_node_id=n.id AND x.edge_process_epoch=n.process_epoch
+  JOIN endpoint_routes er ON er.id=x.route_id AND er.tunnel_route_id=r.id WHERE x.desired='active'
+  AND n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
+  AND n.tunnel_endpoints_epoch=n.process_epoch AND n.drain_deadline IS NULL AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
+  AND (n.tunnel_snapshot_at IS NULL OR n.tunnel_snapshot_at<o.updated_at+interval '1 second'))`, accountID, tunnelIDs, now)
 	return err
 }
 
-// RefreshPendingStateOperations settles the pause and deletion operations still waiting for the
+// RefreshPendingStateOperations settles the pause, deletion and passthrough domain operations still waiting for the
 // edges to drop the route. An edge calls it after each route snapshot fetch: that fetch is what
 // completes them, and nothing else would project the tunnel before the next scheduled refresh.
 func RefreshPendingStateOperations(ctx context.Context, q interface {
 	healthExecutor
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, now time.Time) error {
-	rows, err := q.Query(ctx, `SELECT account_id, resource_id FROM operations WHERE state IN ('pending','running') AND resource_kind='tunnel'
- AND operation_type IN ($1,$2) AND resource_id IS NOT NULL ORDER BY updated_at LIMIT 100`,
-		"tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted))
+	// Passthrough domain adds also complete on that fetch (RefreshHealth); they are projected through their tunnel.
+	rows, err := q.Query(ctx, `SELECT account_id, tunnel FROM (SELECT account_id, resource_id AS tunnel, updated_at FROM operations
+ WHERE state IN ('pending','running') AND resource_kind='tunnel' AND operation_type IN ($1,$2) AND resource_id IS NOT NULL
+ UNION ALL SELECT o.account_id, d.tunnel_id, o.updated_at FROM operations o JOIN tunnel_domains d ON d.id=o.resource_id AND d.account_id=o.account_id
+ WHERE o.state IN ('pending','running') AND o.resource_kind='domain_binding' AND o.operation_type='domain.create' AND d.certificate_strategy='none' AND d.deleted_at IS NULL
+ -- Recent ones only: an add whose tunnel or route went away never completes, and as the oldest rows it would
+ -- otherwise fill this batch and starve every later pause and delete. Scheduled projection still covers older ones.
+ AND o.updated_at>$3::timestamptz-interval '15 minutes'
+ ) pending ORDER BY updated_at LIMIT 100`,
+		"tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted), now)
 	if err != nil {
 		return err
 	}

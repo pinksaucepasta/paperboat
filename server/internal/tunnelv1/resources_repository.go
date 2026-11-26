@@ -910,7 +910,8 @@ func (r *SQLRepository) CreateResourceDomain(ctx context.Context, input DomainRe
 			return translate(err)
 		}
 		if domain.CertificateStrategy == "none" {
-			op, err = completeResourceOperation(ctx, q, op.ID, domain.ID, "ready", "changed", input.Now)
+			// Passthrough has no certificate step: RefreshHealth completes it once every edge serves the binding.
+			op, err = advanceResourceOperation(ctx, q, op.ID, domain.ID, "connecting", 60, input.Now)
 		} else {
 			op, err = advanceResourceOperation(ctx, q, op.ID, domain.ID, "issuing_certificate", 60, input.Now)
 		}

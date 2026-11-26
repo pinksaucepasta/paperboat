@@ -38,6 +38,8 @@ INSERT INTO paperboat.tunnel_routes
 VALUES ($1,$2,'web','http','exact',$3,'http','127.0.0.1:3000',$4,$4,$5,$5)`, route, tunnel, hostname, account, now); err != nil {
 		t.Fatal(err)
 	}
+	// A new domain is due only once every live edge serves its route.
+	testutil.ServeTunnelRoute(t, f.database.SQL(), account, testutil.PublicationMachine(t, f.database.SQL(), account), tunnel, route)
 	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test"); err != nil {
 		t.Fatal(err)
@@ -141,7 +143,7 @@ func TestOneFailingCertificateDomainDoesNotBlockTheRestOnPostgres(t *testing.T) 
 	now := f.now
 	label := strings.ReplaceAll(f.suffix, "_", "-")
 	tunnel, route, edge, epoch := "tun_fanout_"+f.suffix, "rte_fanout_"+f.suffix, "edge_fanout_"+f.suffix, "epoch_fanout_"+f.suffix
-	connector, session := "con_fanout_"+f.suffix, "ses_fanout_"+f.suffix
+	connector, session := "con_fanout_"+f.suffix, testutil.CarrierSessionID("fanout:"+f.suffix)
 	blocked, next := "dom_block_"+f.suffix, "dom_next_"+f.suffix
 	blockedHost, nextHost := "block-"+label+".example.test", "next-"+label+".example.test"
 	endpointID := testutil.EndpointID("certificate-fanout:" + f.suffix)
@@ -167,6 +169,14 @@ VALUES($1,'default','v1',$2,'ready',true,$3,1,ARRAY['edge']::text[],'test','doma
 	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, account, host)
 	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,$3,'http',$1)`, route, tunnel, blockedHost)
 	exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,$4,$5,true,$6)`, route, tunnel, edge, epoch, session, now)
+	// on a live carrier of the agent: a new domain is due only once every live holder edge serves its route.
+	carrierRoute := "crt_fanout_" + f.suffix
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_routes WHERE id=$1`, carrierRoute)
+	})
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) SELECT environment_id,environment_id,user_id,'active' FROM paperboat.user_machines WHERE id=$1 ON CONFLICT DO NOTHING`, host)
+	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) SELECT $1,environment_id,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080 FROM paperboat.user_machines WHERE id=$2`, carrierRoute, host)
+	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active,ready) SELECT $1,m.id,m.user_id,m.installation_generation,1,'process_fanout',1,$2,$3,m.public_identity_key,1,$4,$4,'{}',$5::timestamptz+interval '1 hour',true,true FROM paperboat.user_machines m WHERE m.id=$6`, carrierRoute, edge, epoch, session, now, host)
 	workspaceDomains := map[string]string{}
 	for _, domain := range []struct{ id, hostname string }{{blocked, blockedHost}, {next, nextHost}} {
 		ws := strings.ReplaceAll(uuid.NewString(), "-", "")
