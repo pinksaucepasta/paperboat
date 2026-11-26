@@ -386,10 +386,10 @@ func (s *Service) run(ctx context.Context, ready func() error) (resultErr error)
 
 // Download prepares the signed candidate without launching it or stopping services.
 func (s *Service) Download(ctx context.Context) (workerupdate.PreparedCandidate, error) {
-	return s.downloadWithResolver(ctx, s.source.ResolveManual)
+	return s.downloadWithResolver(ctx, s.source.ResolveManual, true)
 }
 
-func (s *Service) downloadWithResolver(ctx context.Context, resolve workerupdate.Resolver) (workerupdate.PreparedCandidate, error) {
+func (s *Service) downloadWithResolver(ctx context.Context, resolve workerupdate.Resolver, manual bool) (workerupdate.PreparedCandidate, error) {
 	if s == nil || s.currentManager() == nil {
 		return workerupdate.PreparedCandidate{}, ErrInvalidConfig
 	}
@@ -410,6 +410,9 @@ func (s *Service) downloadWithResolver(ctx context.Context, resolve workerupdate
 	release, found, err := resolve(ctx)
 	if err != nil || !found {
 		return workerupdate.PreparedCandidate{}, err
+	}
+	if manual {
+		return s.currentManager().PrepareManual(ctx, release)
 	}
 	return s.currentManager().Prepare(ctx, release)
 }

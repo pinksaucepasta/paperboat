@@ -416,7 +416,7 @@ func TestControlPendingInstallationBecomesCommittedWithoutRestart(t *testing.T) 
 	resolved := errors.New("eligible release resolver reached")
 	_, err = service.downloadWithResolver(ctx, func(context.Context) (workerupdate.Release, bool, error) {
 		return workerupdate.Release{}, false, resolved
-	})
+	}, true)
 	if !errors.Is(err, resolved) {
 		t.Fatal("committed source stayed fenced", err)
 	}

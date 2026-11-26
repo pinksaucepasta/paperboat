@@ -224,3 +224,28 @@ func TestTRK28DeferralAndPausedPlanFreezeAutomaticSelection(t *testing.T) {
 		t.Fatalf("paused signed plan did not freeze selection: eligible=%t err=%v", eligible, err)
 	}
 }
+
+// Device rehearsal .12→.13: after a rollback, `pb update --force` failed on every retry (Prepare: ErrQuarantined) while
+// status and doctor said "run `pb update` to retry". An explicit update may retry the quarantined release; the
+// automatic path still may not.
+func TestRolledBackReleaseCanBeRetriedOnlyByAnExplicitUpdate(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.health.err = errors.New("edge health failed")
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); err == nil {
+		t.Fatal("failed activation unexpectedly succeeded")
+	}
+	if _, err := fixture.manager.Prepare(context.Background(), fixture.candidate); !errors.Is(err, ErrQuarantined) {
+		t.Fatalf("automatic prepare of the rolled-back release: %v", err)
+	}
+	fixture.health.err = nil
+	candidate, err := fixture.manager.PrepareManual(context.Background(), fixture.candidate)
+	if err != nil || candidate.ID == "" {
+		t.Fatalf("explicit retry of the rolled-back release: %+v %v", candidate, err)
+	}
+	if err := fixture.manager.Approve(context.Background(), candidate.ID); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := fixture.manager.Activate(context.Background(), fixture.candidate); err != nil || !result.Updated || fixture.manager.ActiveVersion() != fixture.candidate.Version {
+		t.Fatalf("explicit retry did not activate: %+v %v", result, err)
+	}
+}

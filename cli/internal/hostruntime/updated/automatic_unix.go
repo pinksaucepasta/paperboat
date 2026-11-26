@@ -54,7 +54,7 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	now := time.Now()
 	// Download ahead of the window, retaining normal cohort eligibility. The
 	// same exact verified candidate is reused by preparation and activation.
-	candidate, err := s.downloadWithResolver(ctx, s.source.Resolve)
+	candidate, err := s.downloadWithResolver(ctx, s.source.Resolve, false)
 	if errors.Is(err, ErrActivationPending) {
 		return autoupdate.Result{Version: s.currentManager().ActiveVersion()}, nil
 	}

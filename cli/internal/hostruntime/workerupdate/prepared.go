@@ -77,6 +77,16 @@ func candidateFromJournal(j updateflow.Journal) PreparedCandidate {
 // Prepare downloads and verifies an artifact but never launches it or disturbs
 // the running installation. Restart retains this candidate without installing it.
 func (m *Manager) Prepare(ctx context.Context, release Release) (PreparedCandidate, error) {
+	return m.prepare(ctx, release, false)
+}
+
+// PrepareManual is Prepare for an explicit `pb update`: it may retry a release whose activation was rolled back.
+// The quarantine only stops automatic retries; status and doctor tell the user to run `pb update` to retry.
+func (m *Manager) PrepareManual(ctx context.Context, release Release) (PreparedCandidate, error) {
+	return m.prepare(ctx, release, true)
+}
+
+func (m *Manager) prepare(ctx context.Context, release Release, manual bool) (PreparedCandidate, error) {
 	if err := ctx.Err(); err != nil {
 		return PreparedCandidate{}, err
 	}
@@ -107,7 +117,7 @@ func (m *Manager) Prepare(ctx context.Context, release Release) (PreparedCandida
 	}
 	if quarantine, e := m.quarantinedLocked(); e != nil {
 		return PreparedCandidate{}, e
-	} else if quarantine == release.Version {
+	} else if quarantine == release.Version && !manual {
 		return PreparedCandidate{}, ErrQuarantined
 	}
 	previous, err := updateflow.Load(m.config.StatePath)
