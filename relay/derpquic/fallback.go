@@ -413,9 +413,9 @@ func (c *FallbackCarrier) LocalAddr() (netip.AddrPort, error) {
 // Connected reports whether the carrier in use is connected.
 func (c *FallbackCarrier) Connected() bool {
 	c.mu.RLock()
-	a, closed := c.active, c.closed
+	a, closed, fatal := c.active, c.closed, c.fatal
 	c.mu.RUnlock()
-	return !closed && a != nil && a.Connected()
+	return !closed && fatal == nil && a != nil && a.Connected()
 }
 
 func (c *FallbackCarrier) Ping(ctx context.Context) error {

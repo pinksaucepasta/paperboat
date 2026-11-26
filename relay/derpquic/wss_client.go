@@ -241,7 +241,11 @@ func (cc *wssClientConn) frame(kind byte, b []byte) error {
 	cc.writeMu.Lock()
 	defer cc.writeMu.Unlock()
 	_ = cc.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return classifyWSS(writeFrame(cc.conn, kind, b))
+	err := writeFrame(cc.conn, kind, b)
+	if err != nil {
+		cc.cancel() // a failed or partial frame ends the stream; Connected must say so now
+	}
+	return classifyWSS(err)
 }
 func (c *WSSClient) Send(k key.NodePublic, b []byte) error {
 	if len(b) == 0 || len(b) > MaxPacket {
