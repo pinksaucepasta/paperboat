@@ -218,7 +218,7 @@ func TestUpdateApprovalFlowStagesAndInstallsOnlyTheReviewedCandidate(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(stdout, "is staged") {
+		if !strings.Contains(stdout, "is installed, finishing its health check") {
 			t.Fatalf("installation response was not rendered: %q", stdout)
 		}
 		requireUpdateRequests(t, fixture,
@@ -233,7 +233,7 @@ func TestUpdateApprovalFlowStagesAndInstallsOnlyTheReviewedCandidate(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(stdout, "is staged") {
+		if !strings.Contains(stdout, "is installed, finishing its health check") {
 			t.Fatalf("approved installation response was not rendered: %q", stdout)
 		}
 		requireUpdateRequests(t, fixture, expectedUpdateRequest("install", updateApprovalCandidateID))

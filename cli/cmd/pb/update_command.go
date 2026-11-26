@@ -33,6 +33,8 @@ type updateResult struct {
 	CLIUpdated        bool   `json:"cli_updated"`
 	RuntimeUpdated    bool   `json:"runtime_updated"`
 	ActivationPending bool   `json:"activation_pending,omitempty"`
+	// HealthDeadline: when the pending activation's health check ends, if the updater knows it.
+	HealthDeadline time.Time `json:"health_deadline,omitempty"`
 }
 
 func updateCommand() *cobra.Command {
@@ -138,6 +140,7 @@ type updateStatusResult struct {
 	RuntimeState      string                             `json:"runtime_state,omitempty"`
 	ActivationPending bool                               `json:"activation_pending"`
 	ActivationFailure string                             `json:"activation_failure,omitempty"`
+	HealthDeadline    time.Time                          `json:"health_deadline,omitempty"`
 	// ActivationFinishing: the update is installed and the last step (hostd commit, manuals) is being retried.
 	ActivationFinishing bool                            `json:"activation_finishing,omitempty"`
 	LastCheck           time.Time                       `json:"last_check,omitempty"`
@@ -172,7 +175,7 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
-	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
+	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, HealthDeadline: response.Transaction.HealthDeadline, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
 	result.LatestVersion = response.Observation.Version
 	if result.ActivationFailure == "" && (response.Transaction.Failure == updateflow.FailureCommit || response.Transaction.Failure == updateflow.FailureRevoked) {
 		result.ActivationFailure = string(response.Transaction.Failure)
@@ -266,7 +269,7 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 	} else if result.ActivationFinishing {
 		fmt.Fprintln(command.OutOrStdout(), "Activation: installed, finishing the last step (retrying)")
 	} else if result.ActivationPending {
-		fmt.Fprintln(command.OutOrStdout(), "Activation: pending")
+		fmt.Fprintln(command.OutOrStdout(), "Activation: "+activationFinishingText(result.HealthDeadline, time.Now()))
 	} else if result.ActivationFailure == string(updateflow.FailureRevoked) {
 		fmt.Fprintf(command.OutOrStdout(), "Activation: failed (%s). The installed version is no longer allowed. Run `pb update` to install the current release, or `pb uninstall` to remove Paperboat.\n", result.ActivationFailure)
 	} else if result.ActivationFailure != "" {
@@ -460,7 +463,21 @@ func refuseSignedUpdateWhileConnectionsOpen(ctx context.Context, goos string, fo
 func updateCommandResult(previousVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateResult {
 	completed := response.Updated && !response.Pending
 	runtimeUpdated := completed && snapshot != nil && daemonSnapshotAvailable(*snapshot) && snapshot.DaemonVersion == response.Version
-	return updateResult{PreviousVersion: previousVersion, Version: response.Version, CLIUpdated: completed, RuntimeUpdated: runtimeUpdated, ActivationPending: response.Pending}
+	return updateResult{PreviousVersion: previousVersion, Version: response.Version, CLIUpdated: completed, RuntimeUpdated: runtimeUpdated, ActivationPending: response.Pending, HealthDeadline: response.Transaction.HealthDeadline}
+}
+
+// activationFinishingText says what a pending activation is doing and roughly when it ends. Without a
+// recorded deadline the signed stability window bounds it (releasepolicy StabilityWindowSeconds, 600).
+func activationFinishingText(deadline, now time.Time) string {
+	const text = "installed, finishing its health check"
+	if deadline.IsZero() {
+		return text + " (up to 10 minutes)"
+	}
+	left := deadline.Sub(now)
+	if left <= time.Minute {
+		return text + " (about a minute left)"
+	}
+	return fmt.Sprintf("%s (about %d minutes left)", text, int((left+time.Minute-1)/time.Minute))
 }
 
 // updateWithProgress keeps the control protocol single-response and bounded,
@@ -522,7 +539,7 @@ func writeUpdateResult(command *cobra.Command, result updateResult, version stri
 		return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": result})
 	}
 	if result.ActivationPending {
-		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is staged. Activation is in progress; run `pb update status` to confirm completion.\n", version)
+		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is %s. Run `pb update status` to confirm completion.\n", version, activationFinishingText(result.HealthDeadline, time.Now()))
 		return nil
 	}
 	if !result.CLIUpdated && !result.RuntimeUpdated {

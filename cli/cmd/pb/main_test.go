@@ -280,7 +280,7 @@ func TestUpdateReturnsStagedResultSoCanonicalCallerCanExit(t *testing.T) {
 	if err := writeUpdateResult(command, result, response.Version); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "staged") || !strings.Contains(output.String(), "Activation is in progress") || !strings.Contains(output.String(), "pb update status") {
+	if !strings.Contains(output.String(), "is installed, finishing its health check") || !strings.Contains(output.String(), "pb update status") {
 		t.Fatalf("output = %q", output.String())
 	}
 }
@@ -322,7 +322,7 @@ func TestUpdateStatusPendingTransactionReportsTargetWithoutOfferingAnotherUpdate
 	if err := writeUpdateStatusResult(command, result); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Activation: pending") || strings.Contains(output.String(), "Run `pb update`") {
+	if !strings.Contains(output.String(), "Activation: installed, finishing its health check (up to 10 minutes)") || strings.Contains(output.String(), "Run `pb update`") {
 		t.Fatalf("pending status = %q", output.String())
 	}
 }
@@ -342,7 +342,7 @@ func TestUpdateStatusPreservesWindowsActivationState(t *testing.T) {
 	if err := writeUpdateStatusResult(command, result); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Activation: pending") {
+	if !strings.Contains(output.String(), "Activation: installed, finishing its health check (up to 10 minutes)") {
 		t.Fatalf("output = %q", output.String())
 	}
 	result.ActivationPending = false
@@ -892,5 +892,24 @@ func TestUpdateBundleNamesAnUnpublishedPlatform(t *testing.T) {
 	}
 	if other := errors.New("x"); bundleExportError(other) != other {
 		t.Fatal("other export errors must pass through unchanged")
+	}
+}
+
+// Canary update 11-26: during the 10-minute stability window `pb update` and `pb update status` said only
+// "pending"; they now say the update is finishing its health check and roughly how long is left.
+func TestActivationFinishingTextSaysTimeLeft(t *testing.T) {
+	now := time.Date(2026, 11, 26, 8, 44, 0, 0, time.UTC)
+	for _, c := range []struct {
+		deadline time.Time
+		want     string
+	}{
+		{time.Time{}, "(up to 10 minutes)"},
+		{now.Add(6*time.Minute + 10*time.Second), "(about 7 minutes left)"},
+		{now.Add(30 * time.Second), "(about a minute left)"},
+		{now.Add(-time.Minute), "(about a minute left)"},
+	} {
+		if got := activationFinishingText(c.deadline, now); !strings.HasPrefix(got, "installed, finishing its health check ") || !strings.HasSuffix(got, c.want) {
+			t.Fatalf("deadline %v: %q", c.deadline, got)
+		}
 	}
 }
