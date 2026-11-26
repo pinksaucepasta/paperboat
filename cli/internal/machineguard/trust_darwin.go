@@ -80,10 +80,10 @@ func ensureDarwinSystemTrust(ctx context.Context, pemPath string, consoleUID int
 	if !ok {
 		return trustPending(ctx, darwinTrustHeadless(pemPath))
 	}
-	fmt.Fprintf(os.Stderr, "Approve the Paperboat certificate prompt on this Mac's screen to enable browser URLs (waiting up to %s).\n", guardTrustTimeout)
+	fmt.Fprintf(os.Stderr, "To enable browser URLs, enter your Mac's admin password in the Paperboat certificate dialog on this Mac's screen (waiting up to %s).\n", guardTrustTimeout)
 	if output, err := run(ctx, name, args...); err != nil {
 		if ctx.Err() != nil {
-			err = fmt.Errorf("nobody approved the prompt on the Mac's screen in time; sign in at the Mac and retry `pb install`: %w", err)
+			err = fmt.Errorf("nobody entered the admin password in the certificate dialog on the Mac's screen in time; sign in at the Mac and retry `pb install`: %w", err)
 		}
 		return trustPending(ctx, fmt.Errorf("install Paperboat HTTPS root in the macOS System keychain: %w: %s", err, bytes.TrimSpace(output)))
 	}
