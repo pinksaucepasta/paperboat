@@ -124,7 +124,7 @@ func checkSignedRelease(ctx context.Context, client *updated.Client) (string, er
 		return updateDependenciesOf(ctx).releaseVersion(ctx)
 	}
 	if err != nil && updaterRestarting(ctx, err) {
-		return "", commandRejection{reason: commandRejectUpdaterRestarting, cause: err}
+		return "", commandRejection{reason: commandRejectUpdaterRestarting}
 	}
 	return response.Version, err
 }
