@@ -67,7 +67,7 @@ func (f *warmFixture) tunnel(t *testing.T) (*PeerTerminalTunnel, clientauthority
 	return peer, identity
 }
 
-var warmOnline = []api.UserMachine{{MachineID: "machine_connected", Online: true, InstallationGeneration: 1, State: "active"}}
+var warmOnline = []api.UserMachine{{ID: "machine_connected", Online: true, InstallationGeneration: 1, State: "active"}}
 
 // First opens built the engine themselves (~2 s, first-open-steps.md §12): WarmMachines resolved the identity and
 // dropped it. It now builds the runtime. A refused build leaves none, later warms back off instead of registering
@@ -98,7 +98,7 @@ func TestWarmMachinesBuildsTheNativeRuntimeAndAFailedBuildLeavesNone(t *testing.
 	if err := peer.WarmMachines(t.Context(), warmOnline); err == nil || f.builds.Load() != 3 || peer.warmDelay != 2*warmRetryFirst {
 		t.Fatalf("warm after backoff: err=%v builds=%d delay=%v, want a retry and a doubled delay", err, f.builds.Load(), peer.warmDelay)
 	}
-	if err := peer.WarmMachines(t.Context(), []api.UserMachine{{MachineID: "machine_connected"}}); err != nil || f.builds.Load() != 3 {
+	if err := peer.WarmMachines(t.Context(), []api.UserMachine{{ID: "machine_connected"}}); err != nil || f.builds.Load() != 3 {
 		t.Fatalf("no reachable machine: err=%v builds=%d, want nothing started", err, f.builds.Load())
 	}
 }
