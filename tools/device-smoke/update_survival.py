@@ -29,7 +29,7 @@ from pairing_lifecycle import command_result, invoke
 from preview_lifecycle import stoppable_origin
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 from session_cleanup import cleanup
-from terminal_lifecycle import Terminal, wait_windows_shell
+from terminal_lifecycle import ATTACHED, Terminal, wait_windows_shell
 from update_continuity import SHELL_PID, windows_pid
 import windows_target
 import winhost
@@ -157,7 +157,7 @@ def main():
                 terminal_args = ['connect', args.target, '--name', session_name, '--status-bar', 'off']
                 held = Terminal(winhost.terminal_argv(PB, terminal_args), env=winhost.terminal_env(PB))
                 if not windows:
-                    held.expect(b'\x1b[?2004h')
+                    held.expect(ATTACHED)
                     held.expect(held.marker('READY', 'stty -echo; '))
                 else:  # no bracketed paste under cmd.exe: wait for a printed marker, not for a quiet pty (typed bytes before attach are swallowed)
                     wait_windows_shell(held)

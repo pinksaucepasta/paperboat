@@ -36,7 +36,7 @@ type controlThenFailWriter struct {
 
 func (w *controlThenFailWriter) Write(p []byte) (int, error) {
 	w.count++
-	if w.count == 3 {
+	if w.count == 2 {
 		return 0, errors.New("terminal output lost")
 	}
 	return w.writes.Write(p)
@@ -101,37 +101,32 @@ func TestRunRestoresRawTerminalState(t *testing.T) {
 	}
 }
 
-func TestRunEnablesBracketedPasteAfterCleanupAndRestoresIt(t *testing.T) {
-	ptmx, tty, err := pty.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ptmx.Close()
-	defer tty.Close()
-	oldIn, oldOut := os.Stdin, os.Stdout
-	outR, outW, _ := os.Pipe()
-	os.Stdin, os.Stdout = tty, outW
-	defer func() { os.Stdin, os.Stdout = oldIn, oldOut; _ = outR.Close(); _ = outW.Close() }()
-	c := &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{}), code: 0}
-	close(c.wait)
-	if code, err := Run(context.Background(), c, &sink{}, WithBracketedPaste()); err != nil || code != 0 {
-		t.Fatalf("Run = %d, %v", code, err)
-	}
-	_ = outW.Close()
-	output, err := io.ReadAll(outR)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := terminalCleanupSequence + bracketedPasteEnableSequence + terminalCleanupSequence
-	if got := string(output); got != want {
-		t.Fatalf("terminal control output = %q, want %q", got, want)
-	}
-	if c.writes.Len() != 0 {
-		t.Fatalf("terminal control bytes reached remote connection: %q", c.writes.Bytes())
+// The local terminal's bracketed paste follows the remote program: pb adds no ESC[?2004h of its own, passes the
+// remote one through and turns it off on the way out.
+func TestRunBracketedPasteFollowsRemote(t *testing.T) {
+	for _, remote := range []string{"bash-3.2$ ", "\x1b[?2004h$ "} {
+		ptmx, tty, err := pty.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		oldIn := os.Stdin
+		os.Stdin = tty
+		var output bytes.Buffer
+		c := &testConn{Reader: bytes.NewBufferString(remote), wait: make(chan struct{})}
+		close(c.wait)
+		code, err := Run(context.Background(), c, &sink{}, WithOutput(&output))
+		os.Stdin = oldIn
+		_, _ = ptmx.Close(), tty.Close()
+		if err != nil || code != 0 {
+			t.Fatalf("Run = %d, %v", code, err)
+		}
+		if got, want := output.String(), terminalCleanupSequence+remote+terminalCleanupSequence; got != want {
+			t.Fatalf("terminal output = %q, want %q", got, want)
+		}
 	}
 }
 
-func TestRunBracketedPasteRestoresOnCancellation(t *testing.T) {
+func TestRunCleansUpTerminalOnCancellation(t *testing.T) {
 	ptmx, tty, err := pty.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +140,7 @@ func TestRunBracketedPasteRestoresOnCancellation(t *testing.T) {
 	c := &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{})}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	if code, err := Run(ctx, c, &sink{}, WithBracketedPaste()); err != nil || code != 130 {
+	if code, err := Run(ctx, c, &sink{}); err != nil || code != 130 {
 		t.Fatalf("Run = %d, %v", code, err)
 	}
 	_ = outW.Close()
@@ -153,13 +148,13 @@ func TestRunBracketedPasteRestoresOnCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := terminalCleanupSequence + bracketedPasteEnableSequence + terminalCleanupSequence
+	want := terminalCleanupSequence + terminalCleanupSequence
 	if got := string(output); got != want {
 		t.Fatalf("terminal control output = %q, want %q", got, want)
 	}
 }
 
-func TestRunBracketedPasteRestoresOnInputFailure(t *testing.T) {
+func TestRunCleansUpTerminalOnInputFailure(t *testing.T) {
 	ptmx, tty, err := pty.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +169,7 @@ func TestRunBracketedPasteRestoresOnInputFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{})}
-	code, runErr := Run(context.Background(), c, failingSink{}, WithBracketedPaste())
+	code, runErr := Run(context.Background(), c, failingSink{})
 	if code != 1 || runErr == nil || !strings.Contains(runErr.Error(), "send terminal input") {
 		t.Fatalf("Run = %d, %v", code, runErr)
 	}
@@ -183,13 +178,13 @@ func TestRunBracketedPasteRestoresOnInputFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := terminalCleanupSequence + bracketedPasteEnableSequence + terminalCleanupSequence
+	want := terminalCleanupSequence + terminalCleanupSequence
 	if got := string(output); got != want {
 		t.Fatalf("terminal control output = %q, want %q", got, want)
 	}
 }
 
-func TestRunBracketedPasteRestoresOnOutputFailure(t *testing.T) {
+func TestRunCleansUpTerminalOnOutputFailure(t *testing.T) {
 	ptmx, tty, err := pty.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -201,11 +196,11 @@ func TestRunBracketedPasteRestoresOnOutputFailure(t *testing.T) {
 	defer func() { os.Stdin = oldIn }()
 	output := &controlThenFailWriter{}
 	c := &testConn{Reader: bytes.NewBufferString("agent output"), wait: make(chan struct{})}
-	code, runErr := Run(context.Background(), c, &sink{}, WithOutput(output), WithBracketedPaste())
+	code, runErr := Run(context.Background(), c, &sink{}, WithOutput(output))
 	if code != 1 || runErr == nil || !strings.Contains(runErr.Error(), "write terminal output") {
 		t.Fatalf("Run = %d, %v", code, runErr)
 	}
-	want := terminalCleanupSequence + bracketedPasteEnableSequence + terminalCleanupSequence
+	want := terminalCleanupSequence + terminalCleanupSequence
 	if got := output.writes.String(); got != want {
 		t.Fatalf("terminal control output = %q, want %q", got, want)
 	}
@@ -242,7 +237,7 @@ func TestRunWithStatusBarReservesRemoteRowWithoutRemoteStatusBytes(t *testing.T)
 		chunks:   [][]byte{[]byte("\x1b["), []byte("?1049hfull-screen\x1b[?1049l")},
 		readDone: make(chan struct{}),
 	}
-	code, err := Run(context.Background(), conn, &sink{}, WithOutput(bar), WithRemoteSize(bar.RemoteSize), WithBracketedPaste())
+	code, err := Run(context.Background(), conn, &sink{}, WithOutput(bar), WithRemoteSize(bar.RemoteSize))
 	if err != nil || code != 0 {
 		t.Fatalf("Run = %d, %v", code, err)
 	}

@@ -12,7 +12,7 @@ import time
 import uuid
 
 from session_cleanup import cleanup
-from terminal_lifecycle import Terminal
+from terminal_lifecycle import ATTACHED, Terminal
 import winhost
 
 KEYS = [
@@ -58,7 +58,7 @@ def main():
     terminal = Terminal(winhost.terminal_argv(pb, ['connect', args.target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(pb))
     failures = []
     try:
-        terminal.expect(b'\x1b[?2004h', timeout=60)
+        terminal.expect(ATTACHED, timeout=60)
         terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=60)
         terminal.send('stty raw -echo; cat -v\r')
         drain(terminal, 1.5)

@@ -14,7 +14,7 @@ import re
 import time
 import uuid
 
-from terminal_lifecycle import Terminal
+from terminal_lifecycle import ATTACHED, Terminal
 
 from session_cleanup import cleanup
 import windows_target
@@ -35,7 +35,7 @@ def new(name, target):
             terminal.send(windows_target.typed_marker(token) + '\r')
             terminal.expect(token, timeout=60)
         else:
-            terminal.expect(b'\x1b[?2004h', timeout=60)
+            terminal.expect(ATTACHED, timeout=60)
             terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=30)
         return 0, ''
     except RuntimeError:

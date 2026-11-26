@@ -773,7 +773,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 
 	runOptions := []session.RunOption{
 		session.WithOutputBufferBytes(d.cfg.Connect.TerminalOutputBufferBytes),
-		session.WithBracketedPaste(),
 	}
 	if useStatusBar {
 		bar.SetViewportChanged(func(cols, rows uint16) {

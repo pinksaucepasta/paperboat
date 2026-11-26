@@ -2381,7 +2381,7 @@ class RemainingFamilyPlumbing(unittest.TestCase):
                     patch.object(windows_target, 'is_windows', lambda binary, target: windows):
                 self.assertTrue(doctor_lifecycle.terminal_works('target'))
         limit_windows, doctor_windows, limit_unix, doctor_unix = made
-        self.assertEqual([b'\x1b[?2004h', 'PB_UNIX_MARKER'], limit_unix.expected)
+        self.assertEqual([session_limit.ATTACHED, 'PB_UNIX_MARKER'], limit_unix.expected)
         self.assertEqual([b'\x04'], doctor_unix.sent)
         self.assertEqual(1, len(limit_windows.expected))
         self.assertTrue(limit_windows.sent[0].startswith('powershell -NoProfile -Command'))

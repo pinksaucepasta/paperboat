@@ -276,12 +276,14 @@ priority. Terminals narrower than 20 columns receive the full viewport without a
 
 ## File drag and drop
 
-Interactive `pb` attaches enable the standard terminal bracketed-paste mode. A
-framed paste containing only absolute local file paths is staged and rewritten
-to remote paths. Supported path forms include `file://` URIs, quoted paths, and
-POSIX shell-escaped paths such as the escaped-space format emitted by WezTerm.
-Every other input, including unframed drag-and-drop text, is forwarded exactly
-as received; this prevents ordinary typed paths from triggering an upload.
+Bracketed paste is on only while the remote program asks for it (`pb` passes its
+DECSET 2004 through, as ssh does), so a program without it, such as macOS bash 3.2
+or `cmd.exe`, receives pasted text and dropped paths as typed. A framed paste
+containing only absolute local file paths is staged and rewritten to remote paths.
+Supported path forms include `file://` URIs, quoted paths, and POSIX shell-escaped
+paths such as the escaped-space format emitted by WezTerm. Every other input,
+including unframed drag-and-drop text, is forwarded exactly as received; this
+prevents ordinary typed paths from triggering an upload.
 
 Files are hashed once through the validated local descriptor, rewound, and streamed through
 the resumable `/v1/file-transfers` API. Mixed and empty files are supported without MIME

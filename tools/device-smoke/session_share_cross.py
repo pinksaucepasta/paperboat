@@ -14,7 +14,7 @@ import time
 import uuid
 
 sys.path.insert(0, __import__('pathlib').Path(__file__).resolve().parent.as_posix())
-from terminal_lifecycle import Terminal  # noqa: E402
+from terminal_lifecycle import ATTACHED, Terminal  # noqa: E402
 import winhost  # noqa: E402
 
 PB = '~/.local/bin/pb'
@@ -81,7 +81,7 @@ def main():
     try:
         stage('owner terminal start')
         owner = terminal(args.owner_host, 'connect', args.owner_target, '--name', name, '--status-bar', 'off')
-        owner.expect(b'\x1b[?2004h', timeout=90)
+        owner.expect(ATTACHED, timeout=90)
         owner.expect(owner.marker('READY', 'stty -echo; '))
         stage('owner ready')
         old = uuid.uuid4().hex

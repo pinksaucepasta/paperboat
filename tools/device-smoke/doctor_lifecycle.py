@@ -29,7 +29,7 @@ def exec_works(target):
 
 def terminal_works(target):
     """A real PTY session starts, answers and ends cleanly (the same path a user takes)."""
-    from terminal_lifecycle import Terminal
+    from terminal_lifecycle import ATTACHED, Terminal
     from session_cleanup import cleanup
     name = 'smoke-doctor-' + str(int(time.time()))
     terminal = Terminal(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
@@ -40,7 +40,7 @@ def terminal_works(target):
             terminal.expect(token, timeout=60)
             terminal.send('exit\r')
         else:
-            terminal.expect(b'\x1b[?2004h', timeout=60)
+            terminal.expect(ATTACHED, timeout=60)
             terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=30)
             terminal.send(b'\x04')
         return terminal.wait_exit(15) == 0

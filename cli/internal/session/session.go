@@ -22,8 +22,9 @@ import (
 
 const terminalOutputBufferBytes = 128 * 1024
 
+// pb never turns bracketed paste (2004) on itself: the remote program's DECSET passes through to the local terminal
+// and cleanup turns it off, as in mosh (src/terminal/terminaldisplay.cc:278). Forced on, macOS bash 3.2 got the markers.
 const terminalCleanupSequence = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1049l\x1b[?25h"
-const bracketedPasteEnableSequence = "\x1b[?2004h"
 
 type RunOption func(*runOptions)
 
@@ -32,7 +33,6 @@ type runOptions struct {
 	output            io.Writer
 	remoteSize        func() (uint16, uint16)
 	readOnly          func() bool
-	bracketedPaste    bool
 }
 
 // WithReadOnly keeps input and resize local. Ctrl-C detaches without signaling the shell.
@@ -87,13 +87,6 @@ func WithRemoteSize(size func() (uint16, uint16)) RunOption {
 	return func(options *runOptions) { options.remoteSize = size }
 }
 
-// WithBracketedPaste enables xterm's standard bracketed-paste mode while the
-// local terminal is attached. This lets the caller safely distinguish paste
-// input from ordinary typing. It is only meaningful for interactive terminals.
-func WithBracketedPaste() RunOption {
-	return func(options *runOptions) { options.bracketedPaste = true }
-}
-
 // Run wires the local terminal to conn. stdinSink is the writer local input is
 // copied into — typically the paste interceptor wrapping conn. Run blocks until
 // the remote session ends (or ctx is cancelled) and returns the remote exit
@@ -120,9 +113,6 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		resetTerminalEmulator := func() { _, _ = options.output.Write([]byte(terminalCleanupSequence)) }
 		resetTerminalEmulator()
 		defer resetTerminalEmulator()
-		if options.bracketedPaste {
-			_, _ = options.output.Write([]byte(bracketedPasteEnableSequence))
-		}
 	}
 
 	// Propagate the initial size and subsequent resizes.

@@ -25,6 +25,11 @@ import windows_target
 import winhost
 
 
+# pb's own mode reset, written the moment a session attaches. pb never turns bracketed paste on: ESC[?2004h comes only
+# from the program on the machine, and macOS bash 3.2 and cmd.exe send none.
+ATTACHED = b'\x1b[?2004l'
+
+
 def wait_windows_shell(terminal, timeout=180):
     """A held terminal on a Windows target is ready only when its shell answers.
 
@@ -156,6 +161,10 @@ class Terminal:
                 self.output.extend(chunk)
                 quiet_since = time.monotonic()
 
+    def bracketed(self):
+        """Whether the program on the terminal has bracketed paste on now: a real terminal brackets a paste only then."""
+        return self.output.rfind(b'\x1b[?2004h') > self.output.rfind(ATTACHED)
+
     def wait_raw(self, timeout=60):
         """Wait until the program on the pty (ssh -tt) has put it in raw mode. Input sent earlier meets the pty's own line
         discipline: it is echoed here and its CR becomes LF, which a Windows shell does not take as Enter."""
@@ -260,7 +269,7 @@ STATUS_BAR_DRAWN = b'\x1b[24;1H' if winhost.device() else b'\x1b[1;23r'
 
 def unix_phases(terminal, check, monitor, entry, cwd, status_bar):
     """Every phase against a Unix target (sh, stty, vim, less, htop); returns the phases that ran."""
-    terminal.expect(b'\x1b[?2004h')
+    terminal.expect(ATTACHED)
     if status_bar == 'on':
         terminal.expect(STATUS_BAR_DRAWN)
     terminal.expect(terminal.marker('READY', 'stty -echo; '))
@@ -310,7 +319,11 @@ def unix_phases(terminal, check, monitor, entry, cwd, status_bar):
         if check == 'typing':
             terminal.send(command + '\r')
         else:
-            terminal.send(b'\x1b[200~' + command.encode() + b'\x1b[201~\r')
+            terminal.settle()  # the prompt, and the mode it sets, follow the last marker
+            body = command.encode()
+            if terminal.bracketed():  # macOS bash 3.2 never asks for it
+                body = b'\x1b[200~' + body + b'\x1b[201~'
+            terminal.send(body + b'\r')
         terminal.expect('PB_PASTE_LENGTH_' + str(len(payload)))
     if check in ('main', 'apps', 'monitor', 'all'):
         applications(terminal, monitor if check in ('monitor', 'all') else None)
