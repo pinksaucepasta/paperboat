@@ -66,6 +66,29 @@ func TestAPrivilegedStepPastItsBoundSaysStillFinishing(t *testing.T) {
 	}
 }
 
+// apple 2026-11-26: sudo was killed at the bound but its root child (stuck on a macOS trust prompt) still held
+// the stderr pipe, so Run never returned and pb hung with no message. WaitDelay ends the wait.
+func TestAPrivilegedStepWhoseChildHoldsStderrStillReturnsAtItsBound(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	originalCommand, originalBound := privilegedInstallCommand, suppliedInstallBound
+	t.Cleanup(func() { privilegedInstallCommand, suppliedInstallBound = originalCommand, originalBound })
+	suppliedInstallBound = 100 * time.Millisecond
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		if arguments[len(arguments)-1] == "install-supplied" {
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "/bin/sleep 20 & wait") // the grandchild outlives the kill
+		}
+		return exec.CommandContext(ctx, "/bin/false")
+	}
+	start := time.Now()
+	_, err := InstallRunningBinary(t.Context(), executable, source, filepath.Join(home, "bin"), "")
+	if elapsed := time.Since(start); elapsed > privilegedPipeWaitDelay+5*time.Second {
+		t.Fatalf("install waited %v on a pipe the killed step's child still held", elapsed)
+	}
+	if message := runtimeFailureMessage(err); !strings.Contains(message, "still finishing in the background") {
+		t.Fatalf("a step past its bound said %q (%v)", message, err)
+	}
+}
+
 // A second pb install while one runs names the other install instead of a generic failure.
 func TestASecondInstallSaysAnotherInstallIsRunning(t *testing.T) {
 	executable, source, home := suppliedInstallFixture(t)

@@ -154,6 +154,8 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		// held just "exit status 1" (macOS in-place upgrade, L337).
 		reason := &tailBuffer{limit: 2048}
 		command.Stdout, command.Stderr = os.Stderr, io.MultiWriter(os.Stderr, reason)
+		// The root child outlives a killed sudo and keeps the stderr pipe open; Run must still return at the bound.
+		command.WaitDelay = privilegedPipeWaitDelay
 		if err = command.Run(); err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
