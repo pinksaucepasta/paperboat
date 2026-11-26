@@ -159,6 +159,13 @@ func TestControlStatusWhilePendingCarriesJournalCandidate(t *testing.T) {
 	if response, err = s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"}); err != nil || !response.Activating || !response.Pending {
 		t.Fatalf("pending status during an activation: %+v %v", response, err)
 	}
+	// A deferred activation waiting for open terminals is not finishing: --approve --force must not be refused.
+	if err := writeUnixHandoff(root, &unixActivationHandoff{Schema: unixHandoffSchema, Previous: active, Candidate: j.CandidateVersion, ApprovalID: approval, ActiveTerminalBusy: true}); err != nil {
+		t.Fatal(err)
+	}
+	if response, err = s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"}); err != nil || response.Activating {
+		t.Fatalf("pending status with a terminal-busy handoff: %+v %v", response, err)
+	}
 	if err := os.Remove(unixHandoffPath(root)); err != nil {
 		t.Fatal(err)
 	}

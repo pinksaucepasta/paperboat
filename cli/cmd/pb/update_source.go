@@ -255,8 +255,16 @@ func activationDetail(response updated.ControlResponse) string {
 	if response.Transaction.CandidateVersion != "" {
 		update += " to " + response.Transaction.CandidateVersion
 	}
-	return update + " is " + activationFinishingText(response.Transaction.HealthDeadline, time.Now()) + "; run `pb update status`"
+	state := response.Transaction
+	// Without a deadline the signed window bounds the activation; one started longer ago than that is stuck.
+	if state.HealthDeadline.IsZero() && !state.UpdatedAt.IsZero() && time.Since(state.UpdatedAt) > activationWindow {
+		return update + " has not finished its health check after 10 minutes; run `pb doctor`, and `pb update status` to see whether it recovered"
+	}
+	return update + " is " + activationFinishingText(state.HealthDeadline, time.Now()) + "; run `pb update status`"
 }
+
+// activationWindow is the signed stability window (releasepolicy StabilityWindowSeconds) that bounds an activation.
+const activationWindow = 10 * time.Minute
 
 // updaterActivation reads the updater's status within a few seconds: status answers without the control lock an
 // activation holds, where a check or install waits behind it.

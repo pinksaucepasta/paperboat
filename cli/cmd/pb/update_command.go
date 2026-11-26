@@ -237,7 +237,7 @@ func updateStatusCommandResult(cliVersion string, response updated.ControlRespon
 	// installed release is the latest known, and their failure is dropped unless a check after the install failed too.
 	if older, err := signedUpdateAvailable(result.LatestVersion, installed); err == nil && older {
 		result.LatestVersion = installed
-		if !result.LastCheck.After(response.Transaction.UpdatedAt) {
+		if response.Transaction.UpdatedAt.IsZero() || !result.LastCheck.After(response.Transaction.UpdatedAt) {
 			result.LastFailure = ""
 		}
 	}

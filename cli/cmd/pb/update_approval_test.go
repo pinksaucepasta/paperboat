@@ -586,4 +586,21 @@ func TestUpdateStatusAfterCommitDropsChecksFromBeforeTheInstall(t *testing.T) {
 	if result = updateStatusCommandResult("2026.11.26.11", response, nil); result.LastFailure != "check_failed" {
 		t.Fatalf("a failed check after the install was hidden: %+v", result)
 	}
+	// No transaction time (empty or unreadable journal): the older observation is still stale.
+	response.Transaction.UpdatedAt = time.Time{}
+	if result = updateStatusCommandResult("2026.11.26.11", response, nil); result.LastFailure != "" || result.LatestVersion != "2026.11.26.11" {
+		t.Fatalf("status without a transaction time kept the stale failure: %+v", result)
+	}
+}
+
+// A handoff left behind past the signed window has no "minutes left": the busy text says how to recover instead.
+func TestUpdateBusyTextForAStuckActivationSaysHowToRecover(t *testing.T) {
+	response := updated.ControlResponse{Activating: true, Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.26.11", UpdatedAt: time.Now().Add(-11 * time.Minute)}}
+	if text := activationDetail(response); !strings.Contains(text, "has not finished its health check after 10 minutes") || !strings.Contains(text, "pb doctor") {
+		t.Fatalf("stuck activation text = %q", text)
+	}
+	response.Transaction.UpdatedAt = time.Now()
+	if text := activationDetail(response); !strings.Contains(text, "(up to 10 minutes)") {
+		t.Fatalf("fresh activation text = %q", text)
+	}
 }

@@ -349,7 +349,8 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 			return ErrRecoveryState
 		}
 		response.Pending = handoff != nil
-		response.Activating = response.Pending
+		// A deferred activation waiting for open terminals is not finishing: `pb update --approve --force` overrides it.
+		response.Activating = handoff != nil && !handoff.ActiveTerminalBusy
 	}
 	if state.Stage == updateflow.StageAwaitingApproval {
 		candidate, candidateErr := s.currentManager().PreparedCandidate()
@@ -382,7 +383,7 @@ func (s *Service) markActivating(response *ControlResponse) {
 	if s.config.StateRoot == "" {
 		return
 	}
-	if handoff, _ := readUnixHandoff(s.config.StateRoot); handoff != nil {
+	if handoff, _ := readUnixHandoff(s.config.StateRoot); handoff != nil && !handoff.ActiveTerminalBusy {
 		response.Activating = true
 		if response.Transaction.CandidateVersion == "" {
 			response.Transaction.CandidateVersion = handoff.Candidate
