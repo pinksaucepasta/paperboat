@@ -78,15 +78,15 @@ def main():
     if run('service', 'stop')[0]:
         raise RuntimeError('could not stop the daemon service for the failure case')
     try:
+        # Contract (cli/cmd/pb/doctor_command.go, wait_command.go:240-245): with the daemon stopped, doctor either
+        # restarts it in the same run (Linux, macOS: healthy, no Recovery line) or reports it with a recovery action.
         broken = doctor()
         failing = [c for c in broken['checks'] if c['status'] != 'pass']
-        if broken['overall'] == 'healthy' or not failing:
-            raise RuntimeError('doctor stayed healthy with the daemon stopped')
-        if not all(c.get('recovery') or c.get('summary') for c in failing):
+        if broken['overall'] != 'healthy' and (not failing or not all(c.get('recovery') or c.get('summary') for c in failing)):
             raise RuntimeError('a failing check gave no explanation')
         code, out, err = run('doctor')
-        if 'Recovery:' not in out + err:
-            raise RuntimeError('human doctor output shows no recovery action')
+        if 'Paperboat doctor: healthy' not in out and 'Recovery:' not in out + err:
+            raise RuntimeError('doctor neither recovered the daemon nor printed a recovery action')
     finally:
         run('doctor', '--repair')
     wait_for(lambda: doctor()['overall'] == 'healthy', 90, 'doctor --repair recovery')
