@@ -53,3 +53,18 @@ func TestPairStepStopsSpinningAtTheFirstHelperByte(t *testing.T) {
 		t.Fatalf("helper output not after a plain line, or frames resumed: %q", got)
 	}
 }
+
+func TestPairStepPendingEnvironmentEndsWithABangNotAFailure(t *testing.T) {
+	var out bytes.Buffer
+	step := newPairStepFor(&out, "Setting up encrypted environment...", true)
+	step.spin()
+	step.endPending(true)
+	if got := out.String(); !strings.HasSuffix(got, "\r\x1b[2K! Setting up encrypted environment...\n") || strings.Contains(got, "✗") {
+		t.Fatalf("pending step = %q", got)
+	}
+	out.Reset()
+	newPairStepFor(&out, "Setting up encrypted environment...", true).endPending(false)
+	if got := out.String(); got != "\r\x1b[2K✓ Setting up encrypted environment...\n" {
+		t.Fatalf("ready step = %q", got)
+	}
+}

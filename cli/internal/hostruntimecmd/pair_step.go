@@ -69,6 +69,15 @@ func (s *pairStep) end(ok bool) {
 	s.finish(mark)
 }
 
+// endPending ends with "!" when the step is left pending (its message follows), else with ✓.
+func (s *pairStep) endPending(pending bool) {
+	if pending {
+		s.finish("! ")
+		return
+	}
+	s.finish("✓ ")
+}
+
 // plain stops the frames and leaves the plain line, so a prompt or other output can follow; spin
 // and end do nothing afterwards.
 func (s *pairStep) plain() { s.finish("") }

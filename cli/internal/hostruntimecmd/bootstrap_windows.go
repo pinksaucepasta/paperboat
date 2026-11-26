@@ -340,7 +340,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	environment := newPairStep(stderr, "Setting up encrypted environment...")
 	environment.spin()
 	environmentErr := hostruntime.PreparePairEnvironment(ctx, *stateRoot, material.ControlURL, httptransport.Default())
-	environment.end(environmentErr == nil)
+	environment.endPending(environmentErr != nil) // pending ENV is not a pairing failure
 	if err := bootstrap.ClearResume(*stateRoot); err != nil {
 		return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 	}
