@@ -408,11 +408,10 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				info.Terminal.Cols, info.Terminal.Rows = remoteSize()
 				info.Terminal.InputOwner = inputOwner
 			}
-			// File transfer is prepared beside the dial and never holds the prompt: its lease costs three server round trips
-			// and its policy check one to the host.
-			pendingTransfer = startTransfer(info)
-			if conn, err = d.tunnel.Dial(ctx, info); err != nil {
-				dropTransfer(pendingTransfer)
+			// File transfer is prepared once the terminal is attached and never holds the prompt: its lease costs three
+			// server round trips and its policy check dials the host, which would take the peer's handshake turn first.
+			if conn, err = d.tunnel.Dial(ctx, info); err == nil {
+				pendingTransfer = startTransfer(info)
 			}
 		}
 		if err == nil {
