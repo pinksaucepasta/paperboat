@@ -257,12 +257,16 @@ func runNSSCommand(parent context.Context, args ...string) ([]byte, error) {
 	timeout := 5 * time.Second
 	if len(args) > 0 && args[0] != "-L" {
 		// A write killed midway leaves hot journals that read-only certutil cannot roll back ("bad database"
-		// for good, in the user's own browser store): once started, a caller's deadline never cancels it. The
-		// caller's budget still bounds the step: no write starts after it ran out.
+		// for good, in the user's own browser store): once started, a caller's cancellation never kills it. The
+		// caller's deadline still bounds the step: no write starts after it, and none runs past it.
 		if err := parent.Err(); err != nil {
 			return nil, err
 		}
-		parent, timeout = context.WithoutCancel(parent), 30*time.Second
+		timeout = 30 * time.Second
+		if deadline, ok := parent.Deadline(); ok && time.Until(deadline) < timeout {
+			timeout = time.Until(deadline)
+		}
+		parent = context.WithoutCancel(parent)
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()

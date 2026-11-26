@@ -25,7 +25,6 @@ import (
 )
 
 type Coordinator struct {
-	trust             browserTrust
 	cfg               CoordinatorConfig
 	rpcServer         *daemonrpc.Server
 	rpcListener       net.Listener

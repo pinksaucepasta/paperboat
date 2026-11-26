@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineservices"
@@ -349,6 +350,9 @@ func browserRouteForHostDomain(routes map[string]splitdns.BrowserRoute, host, do
 	return splitdns.BrowserRoute{}, false
 }
 
+// browserTrustBudget bounds the whole browser-trust step (every certutil write in the user's stores).
+const browserTrustBudget = 30 * time.Second
+
 func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guardedNameClient, hostname, machineID string, port int) (returned tls.Certificate, resultErr error) {
 	defer func() { resultErr = coordinatorOperationFailure("browser_certificate", resultErr) }()
 	if c.cfg.IssueCertificate != nil {
@@ -385,7 +389,11 @@ func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guarde
 	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: hostname}); err != nil {
 		return tls.Certificate{}, err
 	}
-	if err = c.trust.install(bundle.RootCAPEM); err != nil {
+	// The trust step has its own budget: a certutil write is never cancelled midway, so the caller's deadline
+	// must not decide it. Stop() may wait for it on c.mu for up to this long, under systemd's 60 s stop timeout.
+	trustCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), browserTrustBudget)
+	defer cancel()
+	if err = machineguard.InstallUserTrust(trustCtx, bundle.RootCAPEM); err != nil {
 		return tls.Certificate{}, fmt.Errorf("install browser certificate trust: %w", err)
 	}
 	return cert, nil

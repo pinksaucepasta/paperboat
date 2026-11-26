@@ -316,6 +316,11 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 	} else {
 		c.browserPending = false
 	}
+	// The browser step above may have spent the reconcile's budget on browser trust; native access never pays for
+	// that, so the policy and aliases get a fresh budget of their own.
+	ctx, cancelRest := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.ReconcileTimeout)
+	defer cancelRest()
+	defer context.AfterFunc(c.ctx, cancelRest)()
 	// One policy transaction for every listener acquired above (one WFP Apply for N peers on Windows; Windows test machine
 	// with ~20 peers timed out applying one per acquire). Until it lands the new addresses stay denied.
 	if err := nameClient.ApplyPolicy(ctx); err != nil {
