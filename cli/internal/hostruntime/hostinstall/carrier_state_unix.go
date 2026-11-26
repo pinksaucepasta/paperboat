@@ -432,7 +432,12 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(c
 		return err
 	}
 	paths := platformPaths(uid)
-	lock, err := updated.LockUnixNativeInstall(ctx, paths.updateState)
+	// A periodic pass skips while an update holds the lock (the next tick retries): waiting hit the pass bound every
+	// 2 minutes through an activation's stability window and logged service_failed deadline_exceeded (smoke 11-26).
+	lock, err := updated.TryLockUnixNativeInstall(paths.updateState)
+	if errors.Is(err, updated.ErrActivationPending) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
