@@ -236,13 +236,17 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 // key generation moved during registration) leaves only peer networking down: the carrier keeps
 // serving exec, terminals and previews through the edge and retries peer networking. Exiting instead
 // stopped every fresh pair on a large account (2026-10-22).
+// A rejected machine credential (401: the machine was removed or revoked) is the same: the carrier
+// stays up with no peer listener until `pb pair` replaces the credential, like tailscaled's
+// NeedsLogin (~/ref/tailscale/ipn/ipnlocal/local.go). Exiting killed the network service mid-update
+// and made its rollback fail too (2026-11-26).
 func transientNativePeerStart(err error) bool {
 	if errors.Is(err, errNativePeerPending) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	var response *clientapi.APIError
 	if errors.As(err, &response) {
-		return response.Status == 408 || response.Status == 429 || response.Status >= 500 ||
+		return response.Status == 401 || response.Status == 408 || response.Status == 429 || response.Status >= 500 ||
 			response.Status == 409 && (response.Code == "peer_network_too_large" || response.Code == "peer_network_conflict")
 	}
 	var refused *peeridentityenrollment.StatusError

@@ -29,6 +29,7 @@ func TestRefusedPeerNetworkKeepsTheCarrierRunning(t *testing.T) {
 		{&clientapi.APIError{Status: 503, Code: "peer_network_unavailable"}, true},
 		{&clientapi.APIError{Status: 409, Code: "operation_conflict"}, false},
 		{&clientapi.APIError{Status: 403, Code: "peer_network_denied"}, false},
+		{fmt.Errorf("restore: %w", &clientapi.APIError{Status: 401, Code: "unauthenticated"}), true},
 		{errors.Join(ErrProductionInvalid, errors.New("invalid certificate")), false},
 	} {
 		if got := transientNativePeerStart(test.err); got != test.want {
