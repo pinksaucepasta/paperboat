@@ -321,6 +321,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 				result.Code, result.StateChanged, result.Retryable = "update_platform_unpublished", false, false
 				result.Recovery = "Install a supplied build with `pb update --from <file>`."
 			}
+			if typed.reason == commandRejectReleaseQuarantined {
+				result.Code, result.StateChanged, result.Retryable = "release_quarantined", false, true
+				result.Recovery = "Run `pb update` to retry it."
+			}
 			if typed.reason == commandRejectUpdateBusy {
 				result.Code, result.StateChanged, result.Retryable = "update_busy", false, true
 				result.Recovery = "Wait for active work or another update to finish, then retry."

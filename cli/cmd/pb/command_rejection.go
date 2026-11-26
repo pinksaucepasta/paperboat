@@ -22,6 +22,7 @@ const (
 	commandRejectNoninteractiveHome
 	commandRejectCustomUpdate
 	commandRejectUpdateBusy
+	commandRejectReleaseQuarantined
 	commandRejectUpdateVerification
 	commandRejectLegacyCarrierRunning
 	commandRejectActivationPending
@@ -172,6 +173,8 @@ func (e commandRejection) Error() string {
 		return "--from and --approve cannot be used together: --from installs the file or URL you give it, --approve installs the update `pb update` already downloaded. Use one of them. Nothing was changed."
 	case commandRejectUpdatePlatform:
 		return "The official Paperboat release has no build for this platform (" + e.detail + ") yet, so there is no official update to save or install. Nothing was changed. Install a supplied build with `pb update --from <file>`."
+	case commandRejectReleaseQuarantined:
+		return "This release rolled back earlier; run `pb update` to retry it."
 	case commandRejectUpdateBusy:
 		if e.detail != "" {
 			return "Paperboat is busy: " + e.detail + ". The installed version is unchanged."

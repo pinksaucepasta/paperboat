@@ -457,3 +457,9 @@ func TestControlHandlerDropsASilentConnection(t *testing.T) {
 		t.Fatal("the handler still waits for a request after the read timeout")
 	}
 }
+
+func TestControlErrorCodeReportsQuarantinedRelease(t *testing.T) {
+	if code := controlErrorCode(errors.Join(errors.New("install"), workerupdate.ErrQuarantined)); code != "release_quarantined" {
+		t.Fatalf("code = %q", code)
+	}
+}

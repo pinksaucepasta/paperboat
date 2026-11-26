@@ -157,6 +157,8 @@ func controlErrorCode(err error) string {
 		return "installation_pending"
 	case errors.Is(err, ErrCustomInstallation):
 		return "custom_installation"
+	case errors.Is(err, workerupdate.ErrQuarantined):
+		return "release_quarantined"
 	case errors.Is(err, ErrActivationPending):
 		return "activation_pending"
 	case errors.Is(err, ErrApprovalRequired), errors.Is(err, workerupdate.ErrApprovalRequired):

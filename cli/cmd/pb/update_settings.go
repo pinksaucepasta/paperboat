@@ -169,6 +169,8 @@ func updateControlFailure(operation string, err error) error {
 			return commandRejection{reason: commandRejectUpdateUnpaired}
 		case "custom_installation":
 			return commandRejection{reason: commandRejectCustomUpdate}
+		case "release_quarantined":
+			return commandRejection{reason: commandRejectReleaseQuarantined, cause: err}
 		case "activation_pending":
 			return commandRejection{reason: commandRejectUpdateBusy, cause: err}
 		}

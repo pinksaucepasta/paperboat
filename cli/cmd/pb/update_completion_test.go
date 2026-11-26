@@ -247,3 +247,10 @@ func TestInstallStepFailureJSONCarriesItsFailedStep(t *testing.T) {
 		t.Fatalf("json = %+v", result)
 	}
 }
+
+func TestUpdateControlFailureExplainsQuarantinedRelease(t *testing.T) {
+	err := updateControlFailure("install approved update", &updated.ControlError{Code: "release_quarantined"})
+	if err == nil || err.Error() != "This release rolled back earlier; run `pb update` to retry it." {
+		t.Fatalf("quarantined release error = %v", err)
+	}
+}
