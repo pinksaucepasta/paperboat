@@ -379,8 +379,12 @@ def run_check(check, argv, args, device):
         on_state = None
         if argv[0] == 'preview_protocols.py':  # built before the check starts: its gate waits only 180 s
             probe = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='pb-protocol-probe-'))) / 'client'
-            subprocess.run(['go', 'build', '-o', str(probe), str(HERE / 'preview_protocol_client.go')], cwd=HERE.parent.parent,
-                           check=True, capture_output=True, timeout=900, env=dict(os.environ, GOMAXPROCS='2', GOFLAGS='-p=2'))
+            if (HERE / 'preview-protocol-client').is_file():  # built elsewhere for hosts that must not compile
+                probe.write_bytes((HERE / 'preview-protocol-client').read_bytes())
+                probe.chmod(0o700)
+            else:
+                subprocess.run(['go', 'build', '-o', str(probe), str(HERE / 'preview_protocol_client.go')], cwd=HERE.parent.parent,
+                               check=True, capture_output=True, timeout=900, env=dict(os.environ, GOMAXPROCS='2', GOFLAGS='-p=2'))
             on_state = protocol_gate(probe)
         if argv[0] == 'preview_lifecycle.py':
             on_state = browser_gate

@@ -1263,7 +1263,9 @@ test_preview_protocols() {
   local probe_root probe device id tag phase url marker output parent status success command t0
   probe_root=$(mktemp -d)
   probe="$probe_root/protocol-client"
-  if ! (cd "$HERE/../.." && GOMAXPROCS=2 GOFLAGS=-p=2 go build -o "$probe" "$HERE/preview_protocol_client.go") >"$probe_root/build.log" 2>&1; then
+  # preview-protocol-client beside this script: built elsewhere for hosts that must not compile
+  if ! { cp "$HERE/preview-protocol-client" "$probe" 2>/dev/null ||
+      (cd "$HERE/../.." && GOMAXPROCS=2 GOFLAGS=-p=2 go build -o "$probe" "$HERE/preview_protocol_client.go"); } >"$probe_root/build.log" 2>&1; then
     for device in "${TLIST[@]}"; do record_command_failure "preview-protocols:$device" 0 "$(cat "$probe_root/build.log")"; done
     rm -rf "$probe_root"
     return
