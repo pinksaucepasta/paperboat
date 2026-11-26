@@ -129,8 +129,8 @@ func TestNamedReadyMessageUsesTheServerName(t *testing.T) {
 // The bootstraps are single long functions, so the order is checked in their source.
 func TestPairStepLinesComeInOrderBeforeTheNamedReadyLine(t *testing.T) {
 	for file, steps := range map[string][]string{
-		"bootstrap_unix.go":    {`"Administrator approval is required`, `"Starting the machine services..."`, `"Connecting to Paperboat..."`, `"Setting up encrypted environment..."`, `namedReadyMessage(paired, material.Alias)`},
-		"bootstrap_windows.go": {`"Starting the machine services..."`, `"Setting up encrypted environment..."`, `namedReadyMessage(pairedReadyMessage, material.Alias)`},
+		"bootstrap_unix.go":    {`"Administrator approval is required`, `"Starting the machine services..."`, `"Connecting to Paperboat..."`, `namedReadyMessage(paired, material.Alias)`, `"Setting up encrypted environment..."`, `reportPairEnvironment(stdout, environmentErr, paired)`},
+		"bootstrap_windows.go": {`"Starting the machine services..."`, `"Setting up encrypted environment..."`, `namedReadyMessage(pairedReadyMessage, material.Alias)`, `reportPairEnvironment(stdout, environmentErr, ready)`},
 	} {
 		source, err := os.ReadFile(file)
 		if err != nil {
