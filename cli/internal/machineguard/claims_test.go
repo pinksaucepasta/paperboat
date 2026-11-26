@@ -82,3 +82,46 @@ func TestEmptyMachineSetReleasesNothing(t *testing.T) {
 		t.Fatal("a claim was released by an empty set")
 	}
 }
+
+// smoke 1126 local access wp1: a re-paired machine (new record, same server address) got another address while
+// the removed record's claim was held, so pb machine list showed an address nothing listened on.
+func TestRepairedMachineTakesTheAddressOfItsReleasedRecord(t *testing.T) {
+	book, now := newClaimBook(), time.Now()
+	slot := netip.MustParseAddr("127.100.0.32")
+	old, _ := book.assign(claimKey{UID: "1001", Account: "acct", Machine: "m_old"}, slot, now)
+	if err := book.releaseAbsent("1001", "acct", map[string]bool{"m_new": true}, now); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := book.assign(claimKey{UID: "1001", Account: "acct", Machine: "m_new"}, slot, now.Add(time.Minute))
+	if err != nil || fresh != old {
+		t.Fatalf("re-paired machine got %q (err %v), want %q", fresh, err, old)
+	}
+	if _, ok := book.Claims[claimKey{UID: "1001", Account: "acct", Machine: "m_old"}.String()]; ok {
+		t.Fatal("the removed record still holds a claim")
+	}
+	_ = book.releaseAbsent("1001", "acct", map[string]bool{"x": true}, now.Add(2*time.Minute))
+	other, _ := book.assign(claimKey{UID: "1001", Account: "acct2", Machine: "m"}, slot, now.Add(3*time.Minute))
+	if other == old {
+		t.Fatal("another account took a held address inside the hold")
+	}
+}
+
+// A re-pair at the user's claim cap replaces the held claim instead of failing.
+func TestRepairAtTheClaimCapReplacesTheHeldClaim(t *testing.T) {
+	book, now := newClaimBook(), time.Now()
+	present := map[string]bool{}
+	for i := 0; i < maxUserClaims; i++ {
+		m := "m" + strconv.Itoa(i)
+		present[m] = true
+		if _, err := book.assign(claimKey{UID: "1001", Account: "acct", Machine: m}, netip.MustParseAddr("127.100.1."+strconv.Itoa(i%250+1)), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	delete(present, "m0")
+	_ = book.releaseAbsent("1001", "acct", present, now)
+	held := book.Claims[claimKey{UID: "1001", Account: "acct", Machine: "m0"}.String()].IP
+	got, err := book.assign(claimKey{UID: "1001", Account: "acct", Machine: "m_new"}, netip.MustParseAddr(held), now)
+	if err != nil || got != held {
+		t.Fatalf("re-pair at cap: got %q err %v, want %q", got, err, held)
+	}
+}
