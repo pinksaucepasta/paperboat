@@ -209,7 +209,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	cancelStep()
 	if err != nil && stepEnded {
 		// The root child outlives its sudo and holds its own locks until it exits; it is not a failure yet.
-		return "", runtimeFailure(fmt.Sprintf("the Paperboat install is still finishing in the background after %s; run `pb status` to see when it is done, then run `pb install` again if it is not", suppliedInstallBound), err)
+		return "", StillFinishingFailure(fmt.Sprintf("The Paperboat install is still finishing in the background after %s. Run `pb status` to see when it is done; run `pb install` again only if it reports no installation.", suppliedInstallBound), err)
 	}
 	if bounded {
 		parent := ctx

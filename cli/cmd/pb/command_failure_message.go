@@ -193,6 +193,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	case updateCompletionFailure:
 		return owned.Error()
 	case *hostruntimecmd.CommandFailure:
+		if owned.StillFinishing() {
+			return owned.Error()
+		}
 		if message := owned.Error(); message != "" {
 			return "Paperboat could not finish: " + message + ". Check the current state before retrying; run `pb doctor` if this continues."
 		}

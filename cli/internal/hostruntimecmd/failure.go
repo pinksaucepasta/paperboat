@@ -20,7 +20,20 @@ type CommandFailure struct {
 	causes  []error
 	// step is the failed step a privileged child reported on its stderr, for callers that do not show that stderr (--json).
 	step string
+	// background: the work has not failed, it is still finishing after pb stopped waiting for it.
+	background bool
 }
+
+// StillFinishingFailure ends a command that stopped waiting for work still running in the background: not a
+// failure, so it is shown as written, without "could not finish" (the command still exits non-zero).
+func StillFinishingFailure(message string, causes ...error) error {
+	failure := runtimeFailure(message, causes...).(*CommandFailure)
+	failure.background = true
+	return failure
+}
+
+// StillFinishing reports whether the work is still finishing in the background.
+func (e *CommandFailure) StillFinishing() bool { return e.background }
 
 // FailedStep is the step that failed, when a privileged child named it.
 func (e *CommandFailure) FailedStep() string {
