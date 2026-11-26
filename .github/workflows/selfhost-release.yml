@@ -1,9 +1,14 @@
 name: Self-host installer
 
 # Publishes the `pbh` self-host packages for an existing release tag as a signed GitHub release `selfhost-<tag>` (never
-# marked Latest: that is the CLI's). The fixed helper/deploy/install.sh finds the newest one. Manual, and only after
-# "Service containers" has published the relay and edge images for the same tag.
+# marked Latest: that is the CLI's). The fixed helper/deploy/install.sh finds the newest one. Called by release.yml after
+# "Service containers" has published the relay and edge images for the same tag; manual dispatch is for reruns.
 on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       release_tag:
@@ -13,8 +18,9 @@ on:
 
 run-name: Self-host installer ${{ inputs.release_tag }}
 
+# A called run already holds release.yml's group (the same group here would deadlock); a manual rerun takes it.
 concurrency:
-  group: paperboat-release-${{ github.repository }}
+  group: ${{ github.workflow == 'Self-host installer' && format('paperboat-release-{0}', github.repository) || format('selfhost-called-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions:

@@ -1061,3 +1061,27 @@ jobs:
         shell: bash
         run: |
           printf 'Release **%s** published five qualified products, a signed SHA256SUMS and signed TUF metadata; Latest advanced after origin verification.\n' "$RELEASE_VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+  # Every release also ships its service images and the signed self-host packages, no manual step
+  # (prior art: ~/ref/headscale/.github/workflows/release.yml publishes ghcr images in the tag's goreleaser run).
+  service-containers:
+    # !cancelled(): a dispatched rerun skips the qualification jobs, which would otherwise skip this one.
+    if: ${{ !cancelled() && needs.release-publication.result == 'success' }}
+    needs: release-publication
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/server-container.yml
+    with:
+      release_tag: ${{ inputs.release_tag || github.ref_name }}
+    secrets: inherit
+
+  selfhost-release:
+    if: ${{ !cancelled() && needs.service-containers.result == 'success' }}
+    needs: service-containers
+    permissions:
+      contents: write
+    uses: ./.github/workflows/selfhost-release.yml
+    with:
+      release_tag: ${{ inputs.release_tag || github.ref_name }}
+    secrets: inherit

@@ -1,7 +1,12 @@
 name: Service containers
 
-# Publication is an explicit operator action until release qualification is complete.
+# Called by release.yml after every published release; manual dispatch is for reruns.
 on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       release_tag:
@@ -76,3 +81,25 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+
+  public:
+    name: Relay and edge images pull without credentials
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      # No docker login in this job: self-hosters and Paperboat nodes pull anonymously.
+      - shell: bash
+        run: |
+          set -uo pipefail
+          failed=0
+          for service in relay edge; do
+            image="ghcr.io/$GITHUB_REPOSITORY/$service:$RELEASE_TAG"
+            if ! docker buildx imagetools inspect "$image" >/dev/null; then
+              echo "::error::$image cannot be pulled without credentials. Set the GHCR package visibility of $service to public (GitHub > Packages > $service > Package settings > Change visibility), then rerun this workflow."
+              failed=1
+            fi
+          done
+          exit "$failed"

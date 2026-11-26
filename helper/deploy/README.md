@@ -98,8 +98,13 @@ data, explicitly run `pbh uninstall --remove-data --confirm-remove-data`. Remove
 the node in Network to revoke its registry entry. Docker and unrelated containers
 are retained.
 
-Release owners set `PAPERBOAT_SELFHOST_ADDRESS_URL` to the configured HTTPS
-`/selfhost/address` endpoint before packaging. The helper binary embeds that
+Every release tag publishes the server, relay and edge images and then the signed
+`selfhost-<tag>` release (release.yml calls server-container.yml and selfhost-release.yml;
+dispatch either by hand only to rerun). The relay and edge GHCR packages must be public:
+the image job fails when an anonymous pull does not work.
+`selfhost-release.yml` sets `PAPERBOAT_SELFHOST_ADDRESS_URL` to the API server's
+`/selfhost/address` (`PAPERBOAT_DEFAULT_SERVER_URL`; the release host is behind a CDN and
+cannot see the caller's address) before packaging. The helper binary embeds that
 initial endpoint, so the installer preserves automatic public-address detection
 without a domain literal in source. Runtime configuration can override it.
 Build one required artifact with

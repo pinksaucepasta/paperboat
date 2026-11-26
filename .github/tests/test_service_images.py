@@ -28,6 +28,32 @@ class ServiceImageContractTest(unittest.TestCase):
         self.assertIn('test "$(git rev-parse HEAD)" = "$source_sha"', source["run"])
         self.assertIn('printf \'sha=%s\\n\' "$source_sha" >> "$GITHUB_OUTPUT"', source["run"])
 
+    def test_every_release_publishes_images_then_selfhost_packages(self):
+        release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        images = release["jobs"]["service-containers"]
+        selfhost = release["jobs"]["selfhost-release"]
+        self.assertEqual(images["uses"], "./.github/workflows/server-container.yml")
+        self.assertEqual(images["needs"], "release-publication")
+        self.assertEqual(images["permissions"]["packages"], "write")
+        self.assertEqual(selfhost["uses"], "./.github/workflows/selfhost-release.yml")
+        self.assertEqual(selfhost["needs"], "service-containers")
+        self.assertEqual(selfhost["permissions"]["contents"], "write")
+        for job in (images, selfhost):
+            self.assertEqual(job["secrets"], "inherit")
+        for name in ("server-container.yml", "selfhost-release.yml"):
+            called = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+            self.assertIn("workflow_call", called[True])
+            self.assertIn("workflow_dispatch", called[True])
+        # A called run inherits release.yml's group; sharing it would deadlock.
+        group = yaml.safe_load((ROOT / ".github/workflows/selfhost-release.yml").read_text())["concurrency"]["group"]
+        self.assertIn("github.workflow == 'Self-host installer'", group)
+        self.assertIn("github.run_id", group)
+        container = yaml.safe_load((ROOT / ".github/workflows/server-container.yml").read_text())
+        public = container["jobs"]["public"]
+        self.assertEqual(public["needs"], "publish")
+        self.assertFalse(any("login" in step.get("uses", "") for step in public["steps"]))
+        self.assertIn("visibility", public["steps"][0]["run"])
+
 
 if __name__ == "__main__":
     unittest.main()
