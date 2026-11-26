@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -62,7 +63,7 @@ func (f *warmFixture) tunnel(t *testing.T) (*PeerTerminalTunnel, clientauthority
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
 	})}
 	lifetime, cancel := context.WithCancel(context.Background())
-	peer := &PeerTerminalTunnel{config: PeerTerminalConfig{Issuer: issuer, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, HTTPClient: httpClient, Now: time.Now}, authorities: clientauthority.NewCache(), lifetime: lifetime, cancelLifetime: cancel}
+	peer := &PeerTerminalTunnel{config: PeerTerminalConfig{Issuer: issuer, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, HTTPClient: httpClient, TLS: &tls.Config{MinVersion: tls.VersionTLS13}, Now: time.Now}, authorities: clientauthority.NewCache(), lifetime: lifetime, cancelLifetime: cancel}
 	t.Cleanup(func() { _ = peer.Close() })
 	return peer, identity
 }
@@ -109,8 +110,10 @@ func TestCloseDuringABlockedWarmBuildReturnsAtOnce(t *testing.T) {
 	peer, _ := f.tunnel(t)
 	warmed := make(chan error, 1)
 	go func() { warmed <- peer.WarmMachines(context.Background(), warmOnline) }()
-	for f.inFlight.Load() == 0 {
-		time.Sleep(time.Millisecond)
+	for deadline := time.Now().Add(10 * time.Second); f.inFlight.Load() == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the warm build never reached its registration")
+		}
 	}
 	started := time.Now()
 	if err := peer.Close(); err != nil {
