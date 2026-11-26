@@ -117,7 +117,7 @@ func activateWindowsPreparedNative(ctx context.Context, b *windowsSCMActivationB
 		if err != nil {
 			return err
 		}
-		selected := installsource.Source{Version: receipt.Version, Platform: "windows", Architecture: receipt.Architecture, SHA256: receipt.Runtime.SHA256, Length: receipt.Runtime.Length, Distribution: installsource.Official, AutomaticUpdates: receipt.PreviousSource.AutomaticUpdates}
+		selected := installsource.Source{Version: receipt.Version, Platform: "windows", Architecture: receipt.Architecture, SHA256: receipt.Runtime.SHA256, Length: receipt.Runtime.Length, Distribution: installsource.Official, AutomaticUpdates: preparedAutomaticUpdates(*receipt.PreviousSource)}
 		hooks := hostinstall.PreparedUpdateHooks{DrainTimeout: receipt.Release.DrainTimeout, AuthorizeRestore: authorize}
 		hooks.Prepare = func(ctx context.Context) error {
 			if err := verifyWindowsPreparedRelease(ctx, b.config, *receipt, retainedNativeProof); err != nil {
@@ -222,4 +222,10 @@ func clearWindowsPreparedReceipt(ctx context.Context, config WindowsConfig, j wi
 	}
 	// The native installation owns active Source; no version pointer is written.
 	return nil
+}
+
+// preparedAutomaticUpdates keeps the owner's choice on a signed installation; a custom build has automatic updates
+// off by rule, so moving to a signed release turns them on (hostinstall/update_bundle.go ReplaceBundleSource).
+func preparedAutomaticUpdates(previous installsource.Source) bool {
+	return previous.AutomaticUpdates || previous.Distribution != installsource.Official
 }

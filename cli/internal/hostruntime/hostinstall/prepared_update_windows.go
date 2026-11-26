@@ -55,7 +55,9 @@ func ActivatePreparedWindowsUpdate(ctx context.Context, ownerSID, executable str
 	if previous.OwnerSID != ownerSID || previous.EnrollmentPending || !previous.Committed {
 		return ErrInvalidRequest
 	}
-	source.AutomaticUpdates = previous.Source.AutomaticUpdates
+	if previous.Source.Distribution == installsource.Official {
+		source.AutomaticUpdates = previous.Source.AutomaticUpdates
+	}
 	if previous.Source == source {
 		if err := source.Verify(layout.Binary); err != nil {
 			return err
