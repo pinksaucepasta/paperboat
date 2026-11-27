@@ -48,11 +48,37 @@ func TestReconnectStormRuntimeObservationsTakeNoPredicateLocksOnPostgres(t *test
 SELECT 'storm_m_'||$3||'_'||g, $1, $2||'_'||g, 'storm-'||g||'-'||right($3,6), 'linux','amd64','/w','offline','occupied',false FROM generate_series(1,$4::int) g`, user, env, s, machines); err != nil {
 		t.Fatal(err)
 	}
-	countSIRead := func() int {
+	// siRead is the predicate locks of this store's connections by owning transaction. newSIRead counts those of
+	// transactions that owned none in known. A total would not do: a btree page split copies a page lock to the new
+	// page for the same owner, so the storm's own index inserts grow the locks of a transaction counted before it
+	// ("300 runtime observations kept 1 predicate locks", though none was serializable).
+	siRead := func() map[string]int {
 		t.Helper()
-		var n int
-		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.mode = 'SIReadLock' AND a.application_name = $1`, application).Scan(&n); err != nil {
+		rows, err := store.SQL().QueryContext(ctx, `SELECT l.virtualtransaction, count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.mode = 'SIReadLock' AND a.application_name = $1 GROUP BY 1`, application)
+		if err != nil {
 			t.Fatal(err)
+		}
+		defer rows.Close()
+		owners := map[string]int{}
+		for rows.Next() {
+			var owner string
+			var locks int
+			if err := rows.Scan(&owner, &locks); err != nil {
+				t.Fatal(err)
+			}
+			owners[owner] = locks
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return owners
+	}
+	newSIRead := func(known map[string]int) (n int) {
+		t.Helper()
+		for owner, locks := range siRead() {
+			if _, ok := known[owner]; !ok {
+				n += locks
+			}
 		}
 		return n
 	}
@@ -66,17 +92,27 @@ SELECT 'storm_m_'||$3||'_'||g, $1, $2||'_'||g, 'storm-'||g||'-'||right($3,6), 'l
 	if _, err := held.ExecContext(ctx, `SELECT 1`); err != nil {
 		t.Fatal(err)
 	}
-	// Positive control: the count sees this store's own predicate locks, so a zero below means none were taken.
-	if _, err := held.ExecContext(ctx, `SET LOCAL enable_seqscan TO off`); err != nil {
+	// Positive control: a serializable transaction of this store that commits now is counted as new, so a zero
+	// below means the storm left none.
+	beforeControl := siRead()
+	control, err := store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := held.QueryRowContext(ctx, `SELECT online FROM paperboat.user_machines WHERE id = $1`, "storm_m_"+s+"_1").Scan(new(bool)); err != nil {
+	defer control.Rollback()
+	if _, err := control.ExecContext(ctx, `SET LOCAL enable_seqscan TO off`); err != nil {
 		t.Fatal(err)
 	}
-	if countSIRead() == 0 {
+	if err := control.QueryRowContext(ctx, `SELECT online FROM paperboat.user_machines WHERE id = $1`, "storm_m_"+s+"_3").Scan(new(bool)); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if newSIRead(beforeControl) == 0 {
 		t.Fatal("a serializable read took no predicate lock the count can see: the check would pass vacuously")
 	}
-	before := countSIRead()
+	before := siRead()
 	// Serializable work of another client, committed while the storm runs, is not this store's and must not count.
 	other, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
 	if err != nil {
@@ -139,8 +175,8 @@ SELECT 'storm_m_'||$3||'_'||g, $1, $2||'_'||g, 'storm-'||g||'-'||right($3,6), 'l
 	}
 
 	storm(1, false) // offline to online: every write and trigger runs
-	if grown := countSIRead() - before; grown != 0 {
-		t.Fatalf("%d runtime observations kept %d predicate locks (want 0)", machines, grown)
+	if kept := newSIRead(before); kept != 0 {
+		t.Fatalf("%d runtime observations kept %d predicate locks (want 0)", machines, kept)
 	}
 	var online int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machines WHERE user_id = $1 AND online`, user).Scan(&online); err != nil || online != machines {
