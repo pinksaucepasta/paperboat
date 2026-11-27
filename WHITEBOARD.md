@@ -54,6 +54,9 @@ User rule: before launch, fix what a user would notice or feel; the rest waits h
 - **Windows diagnostics left by every command:** every `pb` command, even a refused one, leaves `%LOCALAPPDATA%\Paperboat\state\diagnostics` (telemetry-shutdown NDJSON and `writer.lock`) behind on Windows.
 - **`pb pair --server https://app.pprbt.dev` without a token writes state:** the console host proxies `/v1` to the API, so the console check passes; pair then writes `%LOCALAPPDATA%\Paperboat\runtime\machine-identity.json` before refusing for the missing token, while reporting `state_changed:false`.
 - **Official `pb install` over an enrolled dev/custom install fails at "TUF target descriptor":** `cli/internal/hostruntime/hostinstall/supplied_unix.go:149-160` reuses the previous install's `Artifact` on the bound path, and a dev predecessor's descriptor is empty, so `VerifyArtifactTarget` refuses it (seen 27 Nov on staging; also in 2026.11.26.21; fresh and official-over-official installs are fine). Fix: take `Artifact` from `InstallationTarget` for official sources; until then the message should say to uninstall, then install.
+- **Installer fallback when GitHub releases/latest is down (28 Nov):** `github.com/pinksaucepasta/paperboat/releases/latest`
+  answered 504 for a while around 00:00 IST while the API and `releases/latest/download/` worked. An unpinned install
+  (`cli/tools/install.sh`, `install.ps1`) resolves the version through that page, so it would fail meanwhile. After launch.
 
 ## Before launch: decide
 
