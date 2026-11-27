@@ -341,3 +341,9 @@ ac1095ce while both go.mod files pin 2d32e5f0.
   moves/min (private_routes 16, machine_services 12, peer_network 8, inventory 5) and ≈35–38 wait answers/min per host
   process. Publish those two topics only to machines that can use the route or service (migrations 217/448, ~10× fewer
   answers); 800 ms coalescing alone saves ~1.4×, so it was not done.
+- **Relay update failover (2026-11-27):** updating the only relay of a region drops relayed connections for 5–50 s
+  (no relay handover: the old relay stops before the new one is ready). Not a launch blocker: launch has EU and US
+  regions. Once a US node exists, check that relayed pairs fail over to the other region during a relay update.
+- **Pre-launch live checks to turn into E2E rows (2026-11-27):** new Windows computer reaching peers outbound; GitHub
+  disconnect and reconnect; drain and resume of one relay (staging only); `pb doctor` with an offline peer; parallel
+  fleet install and pairing; web terminal keys typed in the first second; Windows service remove and reinstall.
