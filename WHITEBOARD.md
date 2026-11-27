@@ -38,6 +38,7 @@ User rule: before launch, fix what a user would notice or feel; the rest waits h
 - **release.yml:** `always()` ignores cancellation in two jobs.
 - **Test hygiene:** a deploy test may still expect the removed postgres service (fix now only if CI fails); some device-smoke scripts still SSH to the old deployment-host setting; the paste tests append env overrides after the user's environment, so TERM/INPUTRC/ZDOTDIR can affect the bash/zsh subtests.
 - **`pb pair` on HTTP 429:** the CLI does not honor Retry-After or retry, and says "invalid machine bootstrap" (`local_io`) instead of rate limited (`cli/internal/hostruntime/bootstrap/bootstrap.go`).
+- **Self-host first platform wildcard is slow with a straggler edge:** `Coordinator.Ensure` makes every first certificate all-or-nothing (`requireAll`, `server/internal/tunnelcert/coordinator.go`, `domain.CertificateReference == ""`), and that also covers a platform wildcard's first issue, whose targets are every ready edge. One slow edge on a fresh install delays it through retries; it succeeds once every edge is ready. Fix: scope that branch to durable routes (`TargetDurableRoute`, no leaf).
 
 ## Before launch: decide
 
