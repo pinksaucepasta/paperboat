@@ -31,6 +31,7 @@ func TestPaidTeamCreationRequiresAuthoritativePayment(t *testing.T) {
 	t.Cleanup(func() {
 		for _, q := range []string{
 			`DELETE FROM paperboat.stripe_events WHERE subscription_id=$1`,
+			`DELETE FROM paperboat.billing_workspace_usage_periods WHERE workspace_id IN(SELECT id FROM paperboat.billing_workspaces WHERE provider_subscription_id=$1)`,
 			`DELETE FROM paperboat.billing_workspaces WHERE provider_subscription_id=$1`,
 		} {
 			store.SQL().ExecContext(context.Background(), q, subscription)

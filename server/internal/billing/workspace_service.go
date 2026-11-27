@@ -550,7 +550,7 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 	if err != nil {
 		return false, err
 	}
-	processed := false
+	processed, openPaidWindow := false, ""
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var workspaceID string
 		if err := tx.QueryRow(ctx, `SELECT id FROM billing_workspaces WHERE provider_customer_id=$1 OR provider_subscription_id=$2 FOR UPDATE`, initial.CustomerID, subscriptionID).Scan(&workspaceID); err != nil {
@@ -670,6 +670,9 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 				return err
 			}
 		}
+		if current.Status == "active" || current.Status == "trialing" {
+			openPaidWindow = workspaceID
+		}
 		if team.Valid {
 			if err = syncAddonTx(ctx, tx, workspaceID, current, newSubscription); err != nil {
 				return err
@@ -698,6 +701,17 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 		processed = true
 		return nil
 	})
+	// A payment that restores the paid plan (after a lapsed grace, B2) opens the paid allowance window now: the
+	// relay and edge gates read the usage rows only, so a Free row left open would keep the account at the Free
+	// allowance and relay speed until it ended. It runs on every paid snapshot, not only a state change (the row
+	// may already say active), in its own transaction after the subscription state committed: usage-row trouble
+	// never blocks a paid webhook, and the next bandwidth check of the workspace retries it.
+	if err == nil && processed && openPaidWindow != "" {
+		_ = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			_, checkErr := s.CheckWorkspaceBandwidthTx(ctx, tx, openPaidWindow, time.Now())
+			return checkErr
+		})
+	}
 	return processed, err
 }
 

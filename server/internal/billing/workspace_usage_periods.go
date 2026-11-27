@@ -130,11 +130,37 @@ FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 
 	if count > 1 {
 		return out, ErrBillingPolicyUnconfigured
 	}
-	if count == 1 && policy.paid && !out.paid && out.start.Before(policy.paidFrom) && out.end.After(policy.paidFrom) {
-		if _, err = tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET period_end=$3 WHERE workspace_id=$1 AND period_start=$2`, id, out.start, policy.paidFrom); err != nil {
+	// A Free row covering a moment the workspace is paid ends where the paid entitlement starts: at the paid period's
+	// start, or at this moment when the Free row began inside the paid period (a payment after the renewal grace
+	// lapsed, B2). The paid window then opens at once with the paid allowance and relay speed, instead of after the
+	// Free row ends. Only the latest row is split: a Free row a later row follows is history (the hours before a
+	// payment that the webhook already split, see reconcileSubscriptionWith), and a late report for it stays Free.
+	if count == 1 && policy.paid && !out.paid {
+		var later bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start>=$2)`, id, out.end).Scan(&later); err != nil {
 			return out, err
 		}
-		count = 0
+		split := policy.paidFrom
+		if !out.start.Before(split) {
+			split = at.Truncate(time.Microsecond) // the column's precision: a nanosecond-later split is no split
+		}
+		switch {
+		case later:
+		case out.start.Before(split):
+			if _, err = tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET period_end=$3 WHERE workspace_id=$1 AND period_start=$2`, id, out.start, split); err != nil {
+				return out, err
+			}
+			count = 0
+		default:
+			// The Free row began this very instant: replaced while nothing was recorded in it, kept otherwise.
+			tag, err := tx.Exec(ctx, `DELETE FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start=$2 AND NOT paid AND consumed_bytes=0 AND observed_bytes=0`, id, out.start)
+			if err != nil {
+				return out, err
+			}
+			if tag.RowsAffected() == 1 {
+				count = 0
+			}
+		}
 	}
 	if count == 1 {
 		return out, nil

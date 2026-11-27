@@ -33,6 +33,7 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 		c := context.Background()
 		store.SQL().ExecContext(c, `DELETE FROM paperboat.stripe_events WHERE subscription_id=$1`, "sub_"+team)
 		store.SQL().ExecContext(c, `DELETE FROM paperboat.billing_workspace_operations WHERE workspace_id=$1`, "team:"+team)
+		store.SQL().ExecContext(c, `DELETE FROM paperboat.billing_workspace_usage_periods WHERE workspace_id=$1`, "team:"+team)
 		store.SQL().ExecContext(c, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, team)
 		store.SQL().ExecContext(c, `DELETE FROM paperboat.billing_products WHERE code=$1`, code)
 	})

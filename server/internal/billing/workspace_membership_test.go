@@ -154,6 +154,7 @@ func TestWorkspaceMembershipRecoveryAcrossTeamsAndOwnerChange(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspace_operations WHERE workspace_id IN($1,$2)`, "team:"+teamA, "team:"+teamB)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspace_usage_periods WHERE workspace_id IN($1,$2)`, "team:"+teamA, "team:"+teamB)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspaces WHERE id IN($1,$2,$3)`, "team:"+teamA, "team:"+teamB, "personal:"+shared)
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_products WHERE code=$1`, "team-plan-"+x)
 		for _, u := range []string{ownerA, ownerB, shared} {
