@@ -216,6 +216,11 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
+	// An updater finishing an installed update reports an empty candidate (no id, no version): there is nothing to
+	// review or approve, and printing it read "Downloaded Paperboat  (/, 0 bytes) ... pb update --approve " (smoke 11-27).
+	if response.Candidate != nil && response.Candidate.ID == "" {
+		response.Candidate = nil
+	}
 	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Activating, HealthDeadline: response.Transaction.HealthDeadline, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
 	result.LatestVersion = response.Observation.Version
 	if state := response.Transaction; result.ActivationFailure != "" && state.FailedVersion != "" {
