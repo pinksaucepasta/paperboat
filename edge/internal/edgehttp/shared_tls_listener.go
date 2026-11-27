@@ -220,7 +220,8 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, forwarded bool) {
 		}()
 		return
 	}
-	if !authorizedHTTPS && !infrastructureHTTPS && !https && !forwarded && l.forwardVisitor(hooks, conn, replay, host) {
+	// A name served here only by a cached decision has no carrier here: its carrier moved to a peer, which serves it.
+	if (!authorizedHTTPS || adm.decisionOnly) && !infrastructureHTTPS && !https && !forwarded && l.forwardVisitor(hooks, conn, replay, host) {
 		owned = false
 		return
 	}

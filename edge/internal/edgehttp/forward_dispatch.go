@@ -108,7 +108,11 @@ type hostAdmission struct {
 	https               bool
 	infrastructureHTTPS bool
 	authorizedHTTPS     bool
-	selected            *connectorprotocol.IngressDecision // the TLS passthrough decision, when that is the path
+	// decisionOnly marks a name authorized only by a cached ingress decision for this node: no carrier here admits it,
+	// and it is neither withheld nor its owner offline. The decision outlives a carrier that left until the server's
+	// next snapshot (and is renewed locally while out of sync), so dispatch forwards such a name to a peer that holds it.
+	decisionOnly bool
+	selected     *connectorprotocol.IngressDecision // the TLS passthrough decision, when that is the path
 }
 
 // resolveHost decides how host is served from the current authority; false means it is denied (the connection is
@@ -132,7 +136,8 @@ func (l *SharedTLSListener) resolveHost(host string) (hostAdmission, bool) {
 	// Customer aliases need ingress authority even when the route matcher names
 	// a different host. Configuration membership cannot grant TLS ownership;
 	// only live server-admitted runtime/private carriers supply that exception.
-	authorizedHTTPS := l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)
+	admitted := l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)
+	authorizedHTTPS := admitted
 	for _, decision := range decisions {
 		if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
 			if decision.Validate(time.Now().UTC()) != nil {
@@ -141,11 +146,19 @@ func (l *SharedTLSListener) resolveHost(host string) (hostAdmission, bool) {
 			authorizedHTTPS = true
 		}
 	}
+	decisionOnly := authorizedHTTPS && !admitted
 	// A route an operator took down still gets TLS: the HTTP layer answers it with the takedown page
 	// (451 or 403) rather than a dead connection.
 	if !authorizedHTTPS && https {
 		if taken, ok := l.authority.(interface{ Withheld(string) bool }); ok && taken.Withheld(host) {
 			authorizedHTTPS = true
+		}
+	}
+	if decisionOnly {
+		if taken, ok := l.authority.(interface{ Withheld(string) bool }); ok && taken.Withheld(host) {
+			decisionOnly = false
+		} else if offline, ok := l.authority.(interface{ OwnerOffline(string) bool }); ok && offline.OwnerOffline(host) {
+			decisionOnly = false
 		}
 	}
 	// A preview whose owner machine is asleep gets TLS for its "machine offline" page. Its carrier is gone, so the
@@ -188,7 +201,7 @@ func (l *SharedTLSListener) resolveHost(host string) (hostAdmission, bool) {
 		current := d
 		selected = &current
 	}
-	return hostAdmission{decisions: decisions, https: https, infrastructureHTTPS: infrastructureHTTPS, authorizedHTTPS: authorizedHTTPS, selected: selected}, true
+	return hostAdmission{decisions: decisions, https: https, infrastructureHTTPS: infrastructureHTTPS, authorizedHTTPS: authorizedHTTPS, decisionOnly: decisionOnly, selected: selected}, true
 }
 
 // ServerName is the SNI of a visitor's ClientHello, by the listener's own inspection. It reads memory only, so it
@@ -206,6 +219,11 @@ func (l *SharedTLSListener) Admit(host string) error {
 	}
 	adm, ok := l.resolveHost(host)
 	if !ok || !(adm.selected != nil || adm.authorizedHTTPS || adm.infrastructureHTTPS) {
+		return errNotServed
+	}
+	// A cached decision without a carrier here: refuse, so the forwarder tries the peer that holds the carrier now
+	// (a forwarded visitor is never forwarded again, and would get this node's 503).
+	if adm.decisionOnly && !adm.https && !adm.infrastructureHTTPS {
 		return errNotServed
 	}
 	return nil
