@@ -125,7 +125,31 @@ edge during the row.
 | `SMOKE_STAGING_EDGES` | `pb-stg-edge:18446:stg_managed_edge` (container, public HTTPS port, node id; comma separated; list every running edge). A fourth field, an IPv4 address of the staging host, is for an edge whose port is closed from outside it: the row forwards the port over ssh, so that edge is checked from the staging host only |
 
 Needed beforehand: the staging server, edge and fixture on the build under test (`deploy/staging.py status`, `check`, `edge IMAGE`).
-F21-37 (idle public TCP and TLS-passthrough streams) has no row: staging has no public TCP or TLS routes (`public_routes: []`).
+
+## Staging edge idle limit (F21-37)
+
+`fixture_checks.py staging-edge-idle` (`smoke.sh` row `staging-edge-idle`, `staging_edge_idle.py`) runs on **staging only**.
+With the routes' own idle limit at 90 s and the edges' at 120 s it holds one quiet and one busy (a byte every 10 s) stream on a
+public TCP route, a TLS-passthrough route and a private route (`pb access` on the second fixture) to an origin it starts on the
+first. Quiet streams must close 115-130 s after their last byte with a clean EOF (not a reset, not at 90 s), busy ones must be
+alive at 200 s, and an HTTPS tunnel on the same edge must answer 200 every 30 s. It takes about 5 minutes and deletes what it
+made; the public streams run from the controller straight to the edge's HTTPS and public TCP ports.
+
+The row never restarts an edge. Every ready staging edge needs the limit (each route is on every edge, and `pb access` takes
+whichever the server lists first), so set it before the row and remove it afterwards, from a checkout at current `origin/main`
+(`edge-b` only when that edge runs; `STAGING_EDGE_HOST_WEB=0` while another service holds the staging host's 443 and 80):
+
+```sh
+STAGING_PUBLIC_TCP_IDLE_SECONDS=120 python3 deploy/staging.py edge IMAGE     # and: edge-b IMAGE
+SMOKE_STAGING_EDGES=pb-stg-edge:18446:stg_managed_edge,pb-stg-edge-b:18456:stg_managed_edge_b \
+  python3 tools/device-smoke/fixture_checks.py staging-edge-idle
+python3 deploy/staging.py edge IMAGE                                          # restore; and: edge-b IMAGE
+```
+
+Without the limit the row refuses (a FAIL that names the commands). It also refuses to run from a checkout that lacks any
+`origin/main` commit touching `tools/device-smoke` or `deploy/staging.py`, and changes nothing unless every target is provably
+staging (the guard of `staging-edge-outage`, whose settings and lock it shares). `SMOKE_STAGING_CLIENT` names the second
+fixture (default `pb-stg-b`).
 
 ## Extra Windows machines (winpool)
 

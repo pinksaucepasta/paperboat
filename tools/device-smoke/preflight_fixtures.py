@@ -37,6 +37,7 @@ NEEDS = {
     'console-invite-mail': ['console_tools', 'operator_session', 'team_admin'],
     'console-recording-replay': ['console_tools', 'fixture_host'],
     'staging-edge-outage': ['staging_stack'],
+    'staging-edge-idle': ['staging_stack'],
     # recipe_checks.py: throwaway console accounts and containers; the clean real machines are optional (their rows are NOT RUN without)
     **{check: ['console_tools', 'fixture_host'] for check in recipe_checks.CHECKS + account_rows.CHECKS},
     'billing-console': ['console_tools', 'workspace_db'],
