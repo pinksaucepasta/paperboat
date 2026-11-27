@@ -68,7 +68,7 @@ class Operator:
         headers = {'Content-Type': 'application/json'}
         if method != 'GET':
             headers.update({'X-CSRF-Token': self.csrf, 'Idempotency-Key': uuid.uuid4().hex,
-                            'Operator-Target': target or 'region-drain-check', 'Operator-Reason': 'region drain check'})
+                            'Operator-Target': target or 'region-drain-check', 'Operator-Reason': 'region-drain-check'})
         request = urllib.request.Request(self.api + path, method=method, headers=headers,
                                          data=json.dumps(body).encode() if body is not None else None)
         try:

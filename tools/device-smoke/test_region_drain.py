@@ -161,5 +161,25 @@ class RegionDrain(unittest.TestCase):
         return True
 
 
+class OperatorHeaders(unittest.TestCase):
+    def test_write_headers_are_valid_operator_identifiers(self):
+        # the server accepts Operator-Target/Operator-Reason only as identifiers (operatorinfra/service.go validCommon);
+        # a reason with spaces made every live drain fail with HTTP 400
+        import re
+        seen = {}
+
+        class Opener:
+            def open(self, request, timeout):
+                seen.update(request.headers)
+                raise region_drain.urllib.error.HTTPError(request.full_url, 418, 'stop', {}, None)
+
+        operator = region_drain.Operator('https://api.example.test', '/nonexistent')
+        operator.opener = Opener()
+        operator.call('POST', '/v1/admin/nodes/node_x/drain', {'revision': 1}, target='node_x')
+        identifier = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$')
+        self.assertRegex(seen['Operator-reason'], identifier)
+        self.assertRegex(seen['Operator-target'], identifier)
+
+
 if __name__ == '__main__':
     unittest.main()
