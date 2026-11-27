@@ -105,7 +105,7 @@ func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
 		guard    machineguard.RuntimeStatus
 		version  string
 		notOlder bool
-		revision int // the candidate build's guard revision; 0 means r
+		revision int // the candidate build's guard revision; 0 means r (this build's)
 	}{
 		// 2026-11-27: official pb 2026.11.26.21 running `pb update --from <dev build>` kept its own guard because the
 		// decision used the running installer's revision, not the candidate's.
