@@ -37,6 +37,9 @@ REGION, INSTANCE = get_setting("staging_region", "staging"), "slot-01"
 # "pub2", not "pub": Let's Encrypt's duplicate-certificate limit (per exact name set, per week) refused *.pub.stg after
 # many staging resets (issuer_rate_limited, 2026-11-27); a new name set issues at once. Bump again if it recurs.
 PUBLIC_LABEL = "pub2"
+# The runtime wildcard (*.rt.stg) hit the same duplicate limit; previews dial machine-<id>.<runtime base> and fail
+# without it (L41), so the runtime names moved to a new name set as well.
+RUNTIME_LABEL = "rt2"
 # The regional domain is "stg." under the production API host's parent domain (read from the prod server env at init,
 # kept in the stack's .env): no domain is written in code.
 PORT = int(os.environ.get("STAGING_PORT", "18443"))           # inside the staging host's open public range 10000-59999
@@ -134,7 +137,7 @@ def build_env(existing, prod):
         "PAPERBOAT_CLI_VERIFICATION_URL": api + "/cli", "PAPERBOAT_MACHINES_URL": api + "/machines",
         "PAPERBOAT_BROWSER_LOGIN_ORIGIN": api,
         "PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN": sub("loc"), "PAPERBOAT_PREVIEW_BASE_DOMAIN": public_base,
-        "PAPERBOAT_TUNNEL_BASE_DOMAIN": public_base, "PAPERBOAT_RUNTIME_BASE_DOMAIN": sub("rt"),
+        "PAPERBOAT_TUNNEL_BASE_DOMAIN": public_base, "PAPERBOAT_RUNTIME_BASE_DOMAIN": sub(RUNTIME_LABEL),
         "PAPERBOAT_SELFHOST_ALLOW_PRIVATE_INGRESS": "true",
         # production's setting; the default (disabled) refuses every config sync credential with 401 credential_invalid
         "PAPERBOAT_CONFIG_SYNC_MODE": "leased_writes",
@@ -512,7 +515,7 @@ def edge(image, second=False):
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:443",
             "private_https_listen_address": "127.0.0.1:7279", "public_http_listen_address": f"0.0.0.0:{http_port}",
             "preview_base_domain": public_base, "tunnel_base_domain": public_base,
-            "runtime_base_domain": f"rt.{domain()}",
+            "runtime_base_domain": f"{RUNTIME_LABEL}.{domain()}",
             "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 2048, "control_interval": 5_000_000_000,
             "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768,
             **({"public_tcp_idle_timeout": int(idle) * 1_000_000_000} if idle else {})}),
