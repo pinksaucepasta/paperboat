@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/spf13/cobra"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,6 +38,11 @@ func newLoginHTTPClient() *http.Client {
 // authBrowserLogin adds this computer to the account, or signs it in again when it is already added.
 // "Start fresh" removes the old local setup and machine record first, then adds the computer again.
 func authBrowserLogin(c *command.Context) error {
+	if cobraCommand, ok := c.Context.Value(confirmationCommandKey{}).(*cobra.Command); ok {
+		if err := refuseInvalidGivenServer(cobraCommand); err != nil {
+			return err
+		}
+	}
 	token := strings.TrimSpace(c.String("api-token"))
 	if token == "" {
 		token = strings.TrimSpace(os.Getenv("PAPERBOAT_API_TOKEN"))

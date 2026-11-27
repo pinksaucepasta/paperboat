@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/spf13/cobra"
 )
 
 // An invalid --server on pb install was dropped and the install went on with the inherited server.
@@ -86,5 +87,38 @@ func TestServerCheckBoundsTheResponse(t *testing.T) {
 	defer huge.Close()
 	if err := checkServerIsAPI(context.Background(), huge.Client(), huge.URL); err == nil {
 		t.Fatal("a response past the size limit was read in full and accepted")
+	}
+}
+
+// pb update and pb auth login dropped an invalid --server silently and kept the installed server.
+func TestUpdateAndAuthLoginRefuseAnInvalidServerFlag(t *testing.T) {
+	for name, run := range map[string]func(*cobra.Command, []string) error{"update": actionUpdate, "auth login": actionRun(authBrowserLogin)} {
+		command := &cobra.Command{Use: "x", RunE: run, SilenceUsage: true, SilenceErrors: true}
+		command.PersistentFlags().String("server", "", "") // the root command's flag
+		command.Flags().String("from", "", "")
+		command.Flags().Bool("force", false, "")
+		command.Flags().String("api-token", "", "")
+		command.Flags().Bool("fresh", true, "")
+		command.SetContext(withInstallDependencies(t.Context(), func(d *installDependencies) {
+			d.runningSource = func() (string, installsource.Source, error) {
+				t.Fatalf("%s went on past an invalid --server", name)
+				return "", installsource.Source{}, nil
+			}
+		}))
+		command.SetArgs([]string{"--server", "not-a-url"})
+		err := command.Execute()
+		if err == nil || !strings.Contains(err.Error(), "invalid Paperboat server URL") {
+			t.Fatalf("%s --server not-a-url: %v", name, err)
+		}
+		if result := classifyCLIJSONError(err); result.StateChanged != false {
+			t.Fatalf("%s: state_changed = %v (%s)", name, result.StateChanged, result.Code)
+		}
+	}
+	// A blank --server counts as not given: no refusal, and the installed server is kept.
+	command := &cobra.Command{Use: "x"}
+	command.PersistentFlags().String("server", "", "")
+	_ = command.PersistentFlags().Set("server", "   ")
+	if err := refuseInvalidGivenServer(command); err != nil || selectedInstallServer(command) != "" {
+		t.Fatalf("blank --server: err=%v selected=%q", err, selectedInstallServer(command))
 	}
 }

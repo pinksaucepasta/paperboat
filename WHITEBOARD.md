@@ -51,6 +51,8 @@ User rule: before launch, fix what a user would notice or feel; the rest waits h
 - **Test hygiene:** a deploy test may still expect the removed postgres service (fix now only if CI fails); some device-smoke scripts still SSH to the old deployment-host setting; the paste tests append env overrides after the user's environment, so TERM/INPUTRC/ZDOTDIR can affect the bash/zsh subtests.
 - **`pb pair` on HTTP 429:** the CLI does not honor Retry-After or retry, and says "invalid machine bootstrap" (`local_io`) instead of rate limited (`cli/internal/hostruntime/bootstrap/bootstrap.go`).
 - **Self-host first platform wildcard is slow with a straggler edge:** `Coordinator.Ensure` makes every first certificate all-or-nothing (`requireAll`, `server/internal/tunnelcert/coordinator.go`, `domain.CertificateReference == ""`), and that also covers a platform wildcard's first issue, whose targets are every ready edge. One slow edge on a fresh install delays it through retries; it succeeds once every edge is ready. Fix: scope that branch to durable routes (`TargetDurableRoute`, no leaf).
+- **Windows diagnostics left by every command:** every `pb` command, even a refused one, leaves `%LOCALAPPDATA%\Paperboat\state\diagnostics` (telemetry-shutdown NDJSON and `writer.lock`) behind on Windows.
+- **`pb pair --server https://app.pprbt.dev` without a token writes state:** the console host proxies `/v1` to the API, so the console check passes; pair then writes `%LOCALAPPDATA%\Paperboat\runtime\machine-identity.json` before refusing for the missing token, while reporting `state_changed:false`.
 
 ## Before launch: decide
 

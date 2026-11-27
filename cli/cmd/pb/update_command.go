@@ -451,6 +451,9 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 	if err := refuseMacRootInstall(runtime.GOOS, os.Geteuid()); err != nil {
 		return err
 	}
+	if err := refuseInvalidGivenServer(command); err != nil {
+		return err
+	}
 	from, _ := command.Flags().GetString("from")
 	force, _ := command.Flags().GetBool("force")
 	if from != "" {

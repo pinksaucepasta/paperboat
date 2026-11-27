@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
@@ -87,6 +88,18 @@ func selectedInstallServer(command *cobra.Command) string {
 		return ""
 	}
 	return server
+}
+
+// refuseInvalidGivenServer refuses a --server that is given (non-blank) but not a valid server URL, before any
+// step, with the same message as pair and install; a blank --server counts as not given. selectedInstallServer
+// would otherwise drop it silently and keep the installed server.
+func refuseInvalidGivenServer(command *cobra.Command) error {
+	server := strings.TrimSpace(workspaceServerOverride(command))
+	if server == "" {
+		return nil
+	}
+	_, err := pairPreflightServerURL(server)
+	return err
 }
 
 // refuseMacRootInstall stops `pb install`, `pb pair` and `pb update` as root on macOS before any step: the install is per user (launchd
