@@ -149,9 +149,7 @@ func ensureHostdToken(paths installPaths, request Request) error {
 }
 
 func ensureSharedUserParents(paths installPaths) error {
-	if runtime.GOOS != "darwin" {
-		return nil
-	}
+	// On Linux too: a strict-umask attempt left /var/lib/paperboat(/users) 0700, and hostd cannot reach its token.
 	users := filepath.Dir(paths.runtimeState)
 	root := filepath.Dir(users)
 	for _, path := range []string{root, users} {

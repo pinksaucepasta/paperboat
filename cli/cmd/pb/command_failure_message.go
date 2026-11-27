@@ -505,7 +505,7 @@ func credentialStoreUnreadable(err error) bool {
 
 // localPathFailure names a file failure's operation, path and cause only inside Paperboat's system locations.
 func localPathFailure(err *os.PathError) string {
-	if strings.Contains(err.Path, "..") {
+	if err.Err == nil || strings.Contains(err.Path, "..") {
 		return ""
 	}
 	for _, root := range []string{"/usr/local/libexec/paperboat", "/var/lib/paperboat", "/run/paperboat", "/Library/PrivilegedHelperTools/Paperboat", "/Library/Application Support/Paperboat"} {
