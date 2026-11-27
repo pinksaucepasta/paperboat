@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +63,14 @@ func installPreflightServer(command *cobra.Command) error {
 		server = strings.TrimSpace(buildinfo.DefaultServerURL)
 	}
 	if server == "" {
+		// A fresh install with no server anywhere (no flag, build default, saved configuration or installation)
+		// would fail only after writing the installation; refuse it before anything is written.
+		if inherited := installDependenciesOf(command.Context()).inheritedServer; inherited != nil {
+			if saved, known := inherited(); known && strings.TrimSpace(saved) == "" {
+				_, err := pairPreflightServerURL("")
+				return err
+			}
+		}
 		return nil
 	}
 	normalized, err := pairPreflightServerURL(server)
@@ -89,4 +101,18 @@ func (r *statusRecorder) status() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.last
+}
+
+// pairServerURLBeforeIdentity refuses a fresh pairing (no machine registration in stateRoot) that has no
+// server URL from --server or the build, before anything is written under stateRoot.
+func pairServerURLBeforeIdentity(command *cobra.Command, stateRoot string) error {
+	server, _ := command.Flags().GetString("server")
+	if strings.TrimSpace(server) != "" || strings.TrimSpace(buildinfo.DefaultServerURL) != "" {
+		return nil
+	}
+	if _, err := os.Lstat(filepath.Join(stateRoot, "machine-registration.json")); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	_, err := pairPreflightServerURL("")
+	return err
 }

@@ -103,6 +103,10 @@ func pairCommand() *cobra.Command {
 					return err
 				}
 			}
+			// A fresh pairing with no server URL fails before the machine identity (and its state) is created.
+			if err := pairServerURLBeforeIdentity(command, stateRoot); err != nil {
+				return err
+			}
 			identityStore, err := identity.Open(identity.Config{StateRoot: stateRoot})
 			if err != nil {
 				return fmt.Errorf("open machine identity: %w", err)

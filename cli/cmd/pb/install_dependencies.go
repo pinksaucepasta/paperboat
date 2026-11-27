@@ -38,6 +38,7 @@ type installDependencies struct {
 	applyLocalAccess   func(context.Context, *config.Config, string) error
 	disconnectMachine  func(*command.Context) error
 	awaitingEnrollment func(context.Context) bool // the local daemon says this computer is signed out or not added
+	inheritedServer    func() (string, bool)      // saved or installed server a plain pb install keeps (known=false: cannot tell)
 }
 
 func defaultInstallDependencies() installDependencies {
@@ -57,6 +58,7 @@ func defaultInstallDependencies() installDependencies {
 		applyLocalAccess:   applyLocalAccessConfig,
 		disconnectMachine:  disconnectOwnMachine,
 		awaitingEnrollment: localDaemonAwaitingEnrollment,
+		inheritedServer:    inheritedInstallServer,
 	}
 }
 
@@ -72,4 +74,13 @@ func installCurrentUserService(ctx context.Context, executable, configPath, serv
 		return errors.New("local daemon installation is disabled during command tests")
 	}
 	return localdaemon.InstallCurrentUserService(ctx, executable, configPath, server)
+}
+
+// inheritedInstallServer reads this computer's saved or installed server; a command test never reads the
+// test account's real configuration and injects its own answer where it needs one.
+func inheritedInstallServer() (string, bool) {
+	if testing.Testing() {
+		return "", false
+	}
+	return hostruntimecmd.InheritedInstallServer()
 }
