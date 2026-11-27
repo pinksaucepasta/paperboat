@@ -216,9 +216,9 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
-	// An updater finishing an installed update reports an empty candidate (no id, no version): there is nothing to
-	// review or approve, and printing it read "Downloaded Paperboat  (/, 0 bytes) ... pb update --approve " (smoke 11-27).
-	if response.Candidate != nil && response.Candidate.ID == "" {
+	// An older updater reports an empty candidate (no id, no version) while an installed update finishes: it is no
+	// candidate (smoke 11-27). One known by version only still counts for the newer-version logic below.
+	if response.Candidate != nil && response.Candidate.ID == "" && response.Candidate.Version == "" {
 		response.Candidate = nil
 	}
 	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Activating, HealthDeadline: response.Transaction.HealthDeadline, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
@@ -319,7 +319,7 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 	if result.RuntimeState != "" {
 		fmt.Fprintf(command.OutOrStdout(), "Runtime state: %s\n", result.RuntimeState)
 	}
-	if result.UpdateAvailable && result.Candidate == nil && !result.ActivationPending {
+	if result.UpdateAvailable && (result.Candidate == nil || result.Candidate.ID == "") && !result.ActivationPending {
 		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is available. Run `pb update` to download and review it.\n", result.LatestVersion)
 	}
 	if result.CandidateRejected != nil {
