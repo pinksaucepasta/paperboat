@@ -623,6 +623,27 @@ TLIST=($DEVICES)
             self.assertNotIn('env-scopes', out)
             self.assertEqual(calls, '')
 
+    def test_update_window_runs_only_for_a_named_scenario_and_needs_the_right_outcome(self):
+        releases = {'SMOKE_RELEASE_OLD': '2026.11.27.0', 'SMOKE_RELEASE_NEW': '2026.11.27.3'}
+        hold = json.dumps({'check': 'update-window-hold', 'status': 'PASS', 'installed': '2026.11.27.0', 'latest': '2026.11.27.3',
+                           'window': '09:14', 'stayed_on': '2026.11.27.0', 'samples': [{'version': '2026.11.27.0'}]})
+        out, calls = self.run_new_check('test_update_window', dict(releases, SMOKE_UPDATE_WINDOW='hold'), hold, devices='boxa')
+        self.assertRegex(out, r'update-window-hold:boxa\s+PASS')
+        self.assertIn('update_window_hold.py --scenario hold --installed 2026.11.27.0 --latest 2026.11.27.3', calls)
+        moved = json.dumps(dict(json.loads(hold), stayed_on='2026.11.27.3'))
+        out, _ = self.run_new_check('test_update_window', dict(releases, SMOKE_UPDATE_WINDOW='hold'), moved, devices='boxa')
+        self.assertRegex(out, r'update-window-hold:boxa\s+FAIL')
+        missed = json.dumps({'check': 'update-window-missed', 'status': 'PASS', 'installed': '2026.11.27.0', 'latest': '2026.11.27.3',
+                             'window': '09:03', 'seconds_to_catch_up': 240, 'samples': [{'version': '2026.11.27.3'}]})
+        out, _ = self.run_new_check('test_update_window', dict(releases, SMOKE_UPDATE_WINDOW='missed'), missed, devices='boxa')
+        self.assertRegex(out, r'update-window-missed:boxa\s+PASS')
+        stuck = json.dumps(dict(json.loads(missed), samples=[{'version': '2026.11.27.0'}]))
+        out, _ = self.run_new_check('test_update_window', dict(releases, SMOKE_UPDATE_WINDOW='missed'), stuck, devices='boxa')
+        self.assertRegex(out, r'update-window-missed:boxa\s+FAIL')
+        out, none = self.run_new_check('test_update_window', releases, hold, devices='boxa')
+        self.assertRegex(out, r'update-window\s+NOT RUN')
+        self.assertNotIn('update_window_hold.py', none)
+
     def test_scheduled_update_compares_a_device_offset_stamp_in_utc(self):
         import update_scheduled
         self.assertEqual(update_scheduled.utc_stamp('2026-11-11T04:00:00+05:30'), '2026-11-10T22:30')

@@ -1151,6 +1151,36 @@ test_update_scheduled() {
   done
 }
 
+# F14-06b: a signed release waits for the update window (no install right after an install, an updater restart or a
+# manual pb update --from) and a missed window catches up on wake (update_window_hold.py; smoke 11-26 mp5/lp12).
+# Runs only when SMOKE_UPDATE_WINDOW names the scenario (hold or missed) for this shard's device, a paired official
+# install of SMOKE_RELEASE_OLD; it waits (SMOKE_UPDATE_WINDOW_WAIT s, default 3600) for SMOKE_RELEASE_NEW to be published.
+# hold leaves the machine a custom install: give each scenario its own device.
+test_update_window() {
+  skipped update-window && return
+  case "${SMOKE_UPDATE_WINDOW:-}" in
+    hold|missed) ;;
+    *) record update-window "NOT RUN" 0 "$(release_gap "no scenario for this shard's device (SMOKE_UPDATE_WINDOW=hold or missed)")"; return 0 ;;
+  esac
+  [ -n "${SMOKE_RELEASE_OLD:-}" ] && [ -n "${SMOKE_RELEASE_NEW:-}" ] || { record update-window "NOT RUN" 0 "$(release_gap "the releases are not set")"; return 0; }
+  local device id out status t0 scenario=$SMOKE_UPDATE_WINDOW
+  for device in "${TLIST[@]}"; do
+    id="update-window-$scenario:$device"
+    skipped "$id" && continue
+    t0=$(now)
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage the device fixture"
+      continue
+    fi
+    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_window_hold.py --scenario $scenario --installed $(printf %q "$SMOKE_RELEASE_OLD") --latest $(printf %q "$SMOKE_RELEASE_NEW") --wait-latest ${SMOKE_UPDATE_WINDOW_WAIT:-3600}" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-window-"+sys.argv[2] and r["status"]=="PASS" and r["samples"];assert sys.argv[2]!="hold" or r["stayed_on"]==r["installed"];assert sys.argv[2]!="missed" or r["samples"][-1]["version"]==r["latest"]' "$out" "$scenario" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "$(python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);print(("stayed on %s through an updater restart, a failed and a same-version pb update --from, past the %s window" % (r["installed"], r["window"])) if "stayed_on" in r else ("asleep across the %s window; %s installed %d s after waking" % (r["window"], r["latest"], r["seconds_to_catch_up"])))' "$out")"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
 # F14-07: a minimum supported version blocks an old official build, never a custom build. Runs against STAGING only (never
 # production) and only when SMOKE_STAGING_FLOOR_CRED (the staging operator credential file), SMOKE_STAGING_OFFICIAL and
 # SMOKE_STAGING_CUSTOM (two staging machines: an official build and a dev build, containers on the staging docker host)
@@ -1470,6 +1500,7 @@ fixture_check config-team-default
 fixture_check team-business
 fixture_check recording-key-rotation
 test_update_scheduled
+test_update_window
 test_update_floor
 
 # ---------------------------------------------------------------- report
