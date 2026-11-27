@@ -650,6 +650,36 @@ assert set(receipt["phases"])==set(phases.split())
   done
 }
 
+# A file dropped the moment `pb connect` starts, before the remote prompt or the file transfer is ready: it must still
+# upload and be on the target byte for byte (terminal_lifecycle.py --check drop).
+test_terminal_drop_pairs() {
+  local source target out status t0 id staged
+  for source in "${TLIST[@]}"; do
+    staged=1
+    stage_terminal_fixtures "$source" || staged=0
+    for target in "${TLIST[@]}"; do
+      id="terminal-drop:$source-$target"
+      skipped "$id" && continue
+      if [ "$staged" = 0 ]; then
+        record "$id" FAIL 0 "could not stage the terminal fixture"
+        continue
+      fi
+      t0=$(now)
+      out=$(device_py "$source" terminal_lifecycle.py $target --check drop 2>&1); status=$?
+      if [ "$status" = 0 ] && python3 -c '
+import json,sys
+receipt=json.loads(sys.argv[1].splitlines()[-1])
+assert receipt["status"]=="PASS" and receipt["check"]=="terminal-drop" and receipt["target"]==sys.argv[2]
+assert set(receipt["phases"])=={"drop_uploaded","exact_session_cleanup"}
+' "$out" "$target" 2>/dev/null; then
+        record "$id" PASS $(( $(now)-t0 ))
+      else
+        record_command_failure "$id" $(( $(now)-t0 )) "$out"
+      fi
+    done
+  done
+}
+
 # Public management commands and the local project-directory entry point.
 test_terminal_commands() {
   local source target id out status t0 staged
@@ -1367,6 +1397,7 @@ done
 test_terminal_commands
 test_terminal_features
 skipped terminal-main || test_terminal_main_pairs
+skipped terminal-drop || test_terminal_drop_pairs
 skipped terminal-replay || test_terminal_replay
 test_application_pairs exec-main exec_lifecycle.py exec
 test_application_pairs ssh-main ssh_lifecycle.py
@@ -1442,6 +1473,29 @@ test_update_scheduled
 test_update_floor
 
 # ---------------------------------------------------------------- report
+# A row that failed in an earlier receipt of this build and passes now counts as FAIL until its cause is recorded in
+# SMOKE_RERUN_CAUSES (rerun_rule.py). The RERUN lines are not result rows: the row's own line stays as it ran.
+apply_rerun_rule() {
+  local verdicts id state label i status secs detail code
+  if ! verdicts=$(for i in "${ROWS[@]}"; do IFS='|' read -r id status secs detail code <<<"$i"; [ "$status" != PASS ] || echo "$id"; done |
+      python3 "$HERE/rerun_rule.py" --results-dir "$RESULTS_DIR" --version "$EXPECT_VERSION" --run "${SMOKE_RUN_ID:-$RUN_ID}" --causes "${SMOKE_RERUN_CAUSES:-}"); then
+    echo "RERUN the rerun rule could not be applied (see above): this run does not pass" >&2
+    FAILED=1
+    return
+  fi
+  while IFS=$'\t' read -r id state label; do
+    [ -n "$id" ] || continue
+    for i in "${!ROWS[@]}"; do
+      [ "${ROWS[$i]%%|*}" = "$id" ] || continue
+      IFS='|' read -r _ status secs detail code <<<"${ROWS[$i]}"
+      [ "$status" = PASS ] || continue
+      ROWS[$i]="$id|$state|$secs|${label//|//}|$code"
+    done
+    [ "$state" = PASS ] || FAILED=1
+    echo "RERUN $id: $label"
+  done <<<"$verdicts"
+}
+
 if [ -n "$ONLY_CHECK" ]; then
   found=0
   for row in "${ROWS[@]}"; do [ "${row%%|*}" != "$ONLY_CHECK" ] || found=1; done
@@ -1457,6 +1511,7 @@ if [ -n "$ONLY_LIST" ]; then
   done
 fi
 for source in "${TLIST[@]}"; do ctl "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>&1; done
+apply_rerun_rule
 {
   printf '{"run":"%s","at":"%s","expect_version":"%s","update_version":"%s","results":[' "$RUN_ID" "$STAMP" "$EXPECT_VERSION" "$UPDATE_VERSION"
   first=1

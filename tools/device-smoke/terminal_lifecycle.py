@@ -3,14 +3,17 @@
 import argparse
 import errno
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shlex
 import signal
 import struct
+import subprocess
 import sys
 import termios
 import tempfile
@@ -18,6 +21,7 @@ import time
 import uuid
 
 from pairing_lifecycle import command_diagnostic
+from exec_lifecycle import run as run_pb_exec
 from install_lifecycle import registration
 from machine_lifecycle import machine, restore_all
 from session_cleanup import cleanup
@@ -383,7 +387,96 @@ def windows_phases(terminal, check, status_bar, cwd_leaf=None):
     return ['input_output', 'unicode', 'resize', 'colour', 'ctrl_c', 'exit']
 
 
-def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='off'):
+DROP_BOUND = 120  # seconds for a dropped file to be on the target, from the drop
+
+
+def drop_refused(output):
+    """pb gave up on the dropped file and typed its local path instead. A Windows client's ConPTY may draw the notice
+    with cursor moves and line breaks between the words, so escapes and white space are ignored."""
+    text = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\s', b'', bytes(output))
+    for notice in (b'file transfer unavailable', b'file upload failed', b'file uploaded, but'):
+        if notice.replace(b' ', b'') in text:
+            return notice.decode() + '; pasting original path'
+    return 'pasting original path' if b'pastingoriginalpath' in text else None
+
+
+def pump(terminal, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if select.select([terminal.fd], [], [], 0.1)[0]:
+            terminal.drain()
+
+
+def received_hash(pb, target, name):
+    """sha256 of the file `name` in the target's Inbox, or None while it is not there."""
+    if windows_target.is_windows(pb, target):
+        argv = windows_target.ps_argv(
+            "$p=Join-Path %s '%s';if(Test-Path -LiteralPath $p){$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower()}"
+            "else{$h='missing'};[Console]::Out.Write('PB_DROP '+$h)" % (windows_target.INBOX, name))
+    else:
+        argv = ['python3', '-c', "import hashlib\nfrom pathlib import Path\np=Path.home()/'Paperboat/Inbox'/%r\n"
+                "print('PB_DROP '+(hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else 'missing'))" % name]
+    found = re.search(rb'PB_DROP ([0-9a-f]{64}|missing)', run_pb_exec(pb, 'exec', target, '--', *argv)[0])
+    if not found:
+        raise RuntimeError('the target did not answer the Inbox query')
+    return None if found[1] == b'missing' else found[1].decode()
+
+
+def remove_received(pb, target, name):
+    if windows_target.is_windows(pb, target):
+        argv = windows_target.ps_argv(windows_target.inbox_cleanup_script(name, [name]))
+    else:
+        argv = ['python3', '-c', "from pathlib import Path\n(Path.home()/'Paperboat/Inbox'/%r).unlink(missing_ok=True)" % name]
+    run_pb_exec(pb, 'exec', target, '--', *argv)
+
+
+def await_drop(terminal, digest, remote_hash, bound=DROP_BOUND):
+    """The dropped file arrives on the target with this hash, and pb never says it typed the local path instead."""
+    deadline = time.monotonic() + bound
+    unanswered = None
+    arrived = False
+    while True:
+        pump(terminal, 2)
+        refused = drop_refused(terminal.output)
+        if refused:
+            raise RuntimeError('the dropped file was not uploaded: ' + refused)
+        if arrived:  # one more look at the terminal after the file appeared
+            return
+        try:
+            got = remote_hash()
+        except (RuntimeError, subprocess.SubprocessError) as error:
+            got, unanswered = None, error
+        if got == digest:
+            arrived = True
+        elif got is not None:
+            raise RuntimeError('the dropped file arrived with another sha256')
+        elif time.monotonic() >= deadline:
+            raise RuntimeError('the dropped file was not on the target within %d s%s'
+                               % (bound, ' (last query failed: %s)' % unanswered if unanswered else ''))
+
+
+def drop_file(terminal, pb, target, path, digest):
+    """Drop `path` as a terminal does (a bracketed paste of the path, no Enter) right now: nothing is waited for."""
+    terminal.send(b'\x1b[200~' + str(path).encode() + b'\x1b[201~')
+    await_drop(terminal, digest, lambda: received_hash(pb, target, path.name))
+
+
+def qualify_drop(pb, target):
+    prefix = 'paperboat-smoke-drop-' + uuid.uuid4().hex
+    with winhost.workdir(prefix) as directory:  # on the device pb runs on: that is where a dropped file is
+        path = directory / (prefix + '.bin')
+        digest = winhost.write_random(path, 1 << 20)
+        failure = None
+        try:
+            qualify(pb, target, 'drop', None, drop=(path, digest))
+        except BaseException as error:
+            failure = error
+            raise
+        finally:
+            restore_all(failure, lambda: remove_received(pb, target, path.name))
+
+
+def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='off', drop=None):
     name = 'smoke-terminal-' + uuid.uuid4().hex[:12]
     terminal = None
     started = time.monotonic()
@@ -397,8 +490,14 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
             arguments = [target] if entry == 'root' else ['connect', target]
         on_device = entry == 'new' and winhost.device() is not None
         device_cwd, local_cwd = (cwd, None) if on_device else (None, cwd)
-        terminal = Terminal(winhost.terminal_argv(pb, [*arguments, '--name', name, '--status-bar', status_bar], device_cwd), cwd=local_cwd, env=winhost.terminal_env(pb))
-        if windows_target.is_windows(pb, target):
+        announce = 'PB_DROP_START_' + uuid.uuid4().hex if drop and winhost.device() else None
+        terminal = Terminal(winhost.terminal_argv(pb, [*arguments, '--name', name, '--status-bar', status_bar], device_cwd, announce), cwd=local_cwd, env=winhost.terminal_env(pb))
+        if drop:  # before anything else, also before asking what the target is: that takes seconds
+            if announce:  # the ssh login to the Windows client is not part of pb connect
+                terminal.expect(announce)
+            drop_file(terminal, pb, target, *drop)
+            phases = ['drop_uploaded']
+        elif windows_target.is_windows(pb, target):
             phases = windows_phases(terminal, check, status_bar, windows_target.leaf(cwd) if on_device else None)
         else:
             phases = unix_phases(terminal, check, monitor, entry, cwd, status_bar)
@@ -408,7 +507,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
     except Exception as error:
         if terminal is not None:
             receipt = command_diagnostic(terminal.arguments, terminal.output.decode(errors='replace'), '')
-            raise RuntimeError('terminal main path failed; private diagnostics: ' + str(receipt)) from error
+            raise RuntimeError('terminal %s path failed; private diagnostics: %s' % ('drop' if drop else 'main', receipt)) from error
         raise
     finally:
         restore_all(sys.exc_info()[1],
@@ -420,14 +519,18 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
-    parser.add_argument('--check', choices=['main', 'paste', 'typing', 'apps', 'monitor', 'all'], default='all')
+    parser.add_argument('--check', choices=['main', 'paste', 'typing', 'apps', 'monitor', 'all', 'drop'], default='all')
     parser.add_argument('--monitor-path', default='htop')
     parser.add_argument('--entry', choices=['connect', 'root', 'new'], default='connect')
     parser.add_argument('--cwd-root', type=Path, default=Path.home(),
                         help='parent of the distinct project directory; /tmp exercises namespace isolation')
     args = parser.parse_args()
     pb = winhost.pb_path()
-    if args.entry == 'new' and winhost.device():
+    if args.check == 'drop':
+        if args.entry != 'connect':
+            parser.error('--check drop is a drop into `pb connect`')
+        qualify_drop(pb, args.target)
+    elif args.entry == 'new' and winhost.device():
         with winhost.device().temp_dir('pb-new') as directory:  # a directory of the device: the terminal must start in it
             qualify(pb, args.target, args.check, args.monitor_path, args.entry, str(directory))
     elif args.entry == 'new':

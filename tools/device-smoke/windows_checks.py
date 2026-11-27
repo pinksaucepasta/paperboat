@@ -106,7 +106,7 @@ def checks(args):
     table['terminal-vt'] = (['terminal_vt_input.py', args.peer], ['--peer'])
     table['ctrlc-interactive'] = (['ctrlc_interactive.py', args.peer], ['--peer'])  # a real console Ctrl-C key (ETX through ConPTY) stops pb.exe: the other interrupts are CTRL_BREAK
     table['terminal-new'] = (['terminal_lifecycle.py', args.machine, '--check', 'main', '--entry', 'new'], ['--machine'])  # C045: pb new on this device, in a directory the check chose
-    for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
+    for name in ('main', 'paste', 'typing', 'drop'):  # paste and typing need a Unix peer (sh)
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
     # two shards, each within --timeout. N14/N12 restart the peer's host runtime (--restart-target-cmd, a shell command
     # here) and this device's daemon (pb.exe service restart over ssh, built in run_check).

@@ -6,6 +6,15 @@
   1. direct: after a ping, `pb status` names the direct path for TARGET, `pb doctor TARGET` peer_reachability says direct
   2. UDP blocked (iptables, always removed): pings go over the regional relay, `pb status` reports selected_path
      wss or relay with a relay_region, doctor says regional_relay, and the bug report's status.json carries both
+
+From the moment UDP is blocked until just before it is unblocked, `pb status` is sampled and one wrong path in any
+sample fails the check, however briefly it shows. selected_path is one of none, direct, relay, wss, mixed
+(cli/internal/localapi/types.go transportSummary; localdaemon observations.go and snapshot_source.go set it):
+  allowed  relay, wss  the forced path
+           none        no path observed (yet): the state while pb is connecting; the relay must still show within 90 s
+           mixed       only while every transport_consumers path is relay or wss
+  wrong    direct, mixed with a direct consumer (or listing none), and any other value
+standby_path is not the path in use: it is recorded and not judged. Every sample is in the receipt, with its time.
 """
 import contextlib
 import io
@@ -14,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 
@@ -90,29 +100,111 @@ def wait_for(what, condition, seconds=90):
     raise RuntimeError('%s: not seen in %d s' % (what, seconds))
 
 
-def main():
+RELAY_PATHS = ('relay', 'wss')
+
+
+def wrong_path(sample):
+    """Whether one sample taken while the relay is forced reports a path that cannot be in use. A sample whose status
+    could not be read reports none."""
+    path = sample.get('path')
+    if 'error' in sample or path == 'none' or path in RELAY_PATHS:
+        return False
+    if path == 'mixed':
+        consumers = sample.get('consumers')
+        return not consumers or any(consumer not in RELAY_PATHS for consumer in consumers)
+    return True
+
+
+class Sampler:
+    """Reads the status over and over on its own thread, so nothing the check does leaves the window unwatched."""
+
+    def __init__(self, read, pause=0.5):
+        self.read, self.pause, self.samples = read, pause, []
+        self.forced = time.monotonic()
+        self.stopping = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def sample(self):
+        asked = time.monotonic() - self.forced
+        sample = {'t': round(asked, 2), 'at': time.strftime('%H:%M:%SZ', time.gmtime())}
+        try:
+            status = self.read()
+            sample.update(path=status.get('selected_path'), region=status.get('relay_region', ''),
+                          standby=status.get('standby_path', ''),
+                          consumers=[c.get('path') for c in status.get('transport_consumers') or []])
+        except Exception as error:  # recorded, never dropped: a status that cannot be read is part of the window
+            sample['error'] = type(error).__name__
+        sample['answered'] = round(time.monotonic() - self.forced, 2)
+        self.samples.append(sample)
+
+    def _run(self):
+        while True:
+            self.sample()
+            if self.stopping.wait(self.pause):
+                return
+
+    def latest(self):
+        return self.samples[-1] if self.samples else {}
+
+    def stop(self):
+        """One last sample after everything the check did, then no more: call it while the relay is still forced."""
+        self.stopping.set()
+        self.thread.join(timeout=400)  # past pb()'s own 180 s bound
+        if self.thread.is_alive():
+            raise RuntimeError('the pb status sampler did not stop')
+        self.sample()
+
+
+def window_failures(samples):
+    failures = []
+    if not any('error' not in sample for sample in samples):
+        failures.append('pb status was never readable while the relay was forced')
+    wrong = [sample for sample in samples if wrong_path(sample)]
+    if wrong:
+        failures.append('pb status reported a wrong path in %d of %d samples while the relay was forced: %s at %.2f s, last at %.2f s'
+                        % (len(wrong), len(samples), wrong[0].get('path'), wrong[0]['t'], wrong[-1]['t']))
+    return failures
+
+
+def main(receipt):
     target = sys.argv[1]
     ping = lambda: pb('ping', target)
     wait_for('direct', lambda: (ping(), machine_status(target)['selected_path'] == 'direct')[1])
     if doctor_path(target) != 'direct':
         raise RuntimeError('doctor does not say direct on a direct path')
+    failures = []
     with udp_blocked():
-        wait_for('relay path in status', lambda: (ping(), machine_status(target)['selected_path'] in ('wss', 'relay'))[1])
-        status = machine_status(target)
-        if not status.get('relay_region'):
-            raise RuntimeError('status has a relay path but no relay_region')
-        if doctor_path(target) != 'regional_relay':
-            raise RuntimeError('doctor says %s on a relay-only path' % doctor_path(target))
-        bundle = json.loads(pb('bugreport', '--json')[1])
-        report = bundle_status(bundle['bundle_path'])
-        if status['selected_path'] not in report or status['relay_region'] not in report:
-            raise RuntimeError('the bug report status.json lacks the selected path or relay region')
-    print(json.dumps({'check': 'path-display', 'status': 'PASS', 'forced_path': status['selected_path'], 'region': status['relay_region']}))
+        sampler = Sampler(lambda: machine_status(target))
+        receipt['forced_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        receipt['samples'] = sampler.samples
+        try:
+            wait_for('relay path in status', lambda: (ping(), sampler.latest().get('path') in RELAY_PATHS)[1])
+            status = machine_status(target)
+            if status['selected_path'] not in RELAY_PATHS or not status.get('relay_region'):
+                raise RuntimeError('status has no relay path with a relay_region: %s' % status['selected_path'])
+            doctor = doctor_path(target)
+            if doctor != 'regional_relay':
+                raise RuntimeError('doctor says %s on a relay-only path' % doctor)
+            bundle = json.loads(pb('bugreport', '--json')[1])
+            report = bundle_status(bundle['bundle_path'])
+            if status['selected_path'] not in report or status['relay_region'] not in report:
+                raise RuntimeError('the bug report status.json lacks the selected path or relay region')
+        except Exception as err:  # the window's samples are judged whatever else failed
+            failures.append(str(err))
+        finally:
+            sampler.stop()
+    failures += window_failures(sampler.samples)
+    if failures:
+        raise RuntimeError('; '.join(failures))
+    receipt.update(forced_path=status['selected_path'], region=status['relay_region'])
 
 
 if __name__ == '__main__':
+    result = {'check': 'path-display', 'status': 'PASS'}
     try:
-        main()
+        main(result)
     except Exception as err:
-        print(json.dumps({'check': 'path-display', 'status': 'FAIL', 'detail': str(err)}))
-        sys.exit(1)
+        result.update(status='FAIL', detail=str(err))
+    print(json.dumps(result))
+    sys.exit(0 if result['status'] == 'PASS' else 1)

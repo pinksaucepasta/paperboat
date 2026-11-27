@@ -1,0 +1,66 @@
+import hashlib
+from pathlib import Path
+import sys
+import textwrap
+import unittest
+from unittest.mock import patch
+
+import terminal_lifecycle as tl
+
+# A stand-in for `pb connect` that is slow to take the terminal: the drop is typed before it is in raw mode.
+FAKE = textwrap.dedent('''
+    import os, sys, termios, time, tty
+    time.sleep(0.7)
+    tty.setraw(0, termios.TCSANOW)  # as Go's term.MakeRaw: pending input is kept
+    data = b''
+    while not data.endswith(b'\\x1b[201~'):
+        data += os.read(0, 1024)
+    os.write(1, b'GOT ' + data[6:-6] + b' END')
+    time.sleep(30)
+''')
+
+
+class Drop(unittest.TestCase):
+    def terminal(self, script=FAKE):
+        terminal = tl.Terminal([sys.executable, '-c', script])
+        self.addCleanup(terminal.close)
+        return terminal
+
+    def test_the_notice_that_pb_typed_the_local_path_is_found_also_as_conpty_draws_it(self):
+        self.assertIn('file transfer unavailable', tl.drop_refused(b'\r\n[paperboat] file transfer unavailable; pasting original path\r\n'))
+        self.assertIn('file upload failed', tl.drop_refused(b'[paperboat]\x1b[1Cfile\x1b[1Cupload failed; pasting\r\n\x1b[5;1Horiginal path'))
+        self.assertIsNone(tl.drop_refused(b'$ /tmp/paperboat-smoke-drop-1.bin'))
+
+    def test_the_drop_is_sent_at_once_and_reaches_a_program_that_is_not_reading_yet(self):
+        terminal = self.terminal()
+        with patch.object(tl, 'received_hash', side_effect=lambda *a: 'abc' if b'END' in terminal.output else None):
+            tl.drop_file(terminal, 'pb', 'peer', Path('/tmp/drop.bin'), 'abc')
+        self.assertIn(b'GOT /tmp/drop.bin END', terminal.output)
+
+    def test_the_unavailable_notice_fails_even_if_the_file_is_there(self):
+        terminal = self.terminal('print("[paperboat] file transfer unavailable; pasting original path", flush=True); import time; time.sleep(30)')
+        with self.assertRaisesRegex(RuntimeError, 'file transfer unavailable; pasting original path'):
+            tl.await_drop(terminal, 'abc', lambda: 'abc', bound=20)
+
+    def test_another_hash_and_a_file_that_never_arrives_fail(self):
+        with self.assertRaisesRegex(RuntimeError, 'another sha256'):
+            tl.await_drop(self.terminal(), 'abc', lambda: 'def', bound=20)
+        with self.assertRaisesRegex(RuntimeError, 'not on the target within 0 s'):
+            tl.await_drop(self.terminal(), 'abc', lambda: None, bound=0)
+
+    def test_a_pb_that_exits_fails(self):
+        with self.assertRaisesRegex(RuntimeError, 'terminal closed'):
+            tl.await_drop(self.terminal('pass'), 'abc', lambda: None, bound=20)
+
+    def test_the_inbox_query_reads_a_unix_target(self):
+        digest = hashlib.sha256(b'x').hexdigest()
+        with patch.object(tl.windows_target, 'is_windows', return_value=False):
+            with patch.object(tl, 'run_pb_exec', return_value=(b'PB_DROP ' + digest.encode() + b'\n', b'')) as call:
+                self.assertEqual(tl.received_hash('pb', 'peer', 'a.bin'), digest)
+            compile(call.call_args.args[-1], 'query', 'exec')
+            with patch.object(tl, 'run_pb_exec', return_value=(b'PB_DROP missing\n', b'')):
+                self.assertIsNone(tl.received_hash('pb', 'peer', 'a.bin'))
+
+
+if __name__ == '__main__':
+    unittest.main()
