@@ -90,9 +90,9 @@ a used one is uninstalled at the end. The one-liner is the line `pb recipe creat
 takes about 10 minutes. Not automated: the console's offer to create a missing vault (its recipe editor was removed on
 2026-11-21; the CLI path is checked) and reading the server's stored vault bytes.
 
-`recipe-apply:container` (F26-05) pairs a machine from one commented recipe file with every section and restarts its daemon; the
-config repository is a public HTTPS one (`SMOKE_RECIPE_CONFIG_URL`). The script also takes `linux`, `macos` and `windows` (a
-Windows target needs `python`); a variant becomes a smoke row after its first passing run on a real machine.
+`recipe-apply:{container,windows}` (F26-05) pairs a machine from one commented recipe file with every section and restarts its daemon; the
+config repository is a public HTTPS one (`SMOKE_RECIPE_CONFIG_URL`). A Windows target needs `python`. The script also takes
+`linux` and `macos`; a variant becomes a smoke row after its first passing run on a real machine.
 
 ## Rows that need an account of their own (F10-07, F27-05, F1-03)
 

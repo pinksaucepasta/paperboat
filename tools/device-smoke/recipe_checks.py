@@ -41,7 +41,7 @@ import recipe_devices as rd
 
 PLATFORMS = ('container', 'linux', 'macos', 'windows')
 CHECKS = (('recipe-lifecycle', 'recipe-errors', 'recipe-vaults', 'recipe-lifetimes', 'recipe-api-tokens')
-          + tuple('recipe-install:' + p for p in PLATFORMS) + ('recipe-apply:container', ))
+          + tuple('recipe-install:' + p for p in PLATFORMS) + ('recipe-apply:container', 'recipe-apply:windows', ))
 CONFIG_URL = 'https://github.com/octocat/Spoon-Knife.git'  # small, public, its branch is main, no sync manifest
 SSH_SETTING = {p: 'SMOKE_RECIPE_%s_SSH' % p.upper() for p in ('linux', 'macos', 'windows')}
 # the paired smoke machines: a recipe check installs and uninstalls Paperboat, so it never runs on one of them
