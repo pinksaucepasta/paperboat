@@ -61,7 +61,8 @@ func bridgeHop(t *testing.T, sessions session.Service) *Client {
 // and then deliver the output.
 func TestIdleOutputWaitOutlivesTheRequestDeadline(t *testing.T) {
 	oldServer, oldClient := serverRequestTimeout, clientRequestTimeout
-	serverRequestTimeout, clientRequestTimeout = 150*time.Millisecond, 250*time.Millisecond
+	// The client deadline is far past the server's, as in production, so a loaded runner cannot invert them.
+	serverRequestTimeout, clientRequestTimeout = 150*time.Millisecond, 600*time.Millisecond
 	t.Cleanup(func() { serverRequestTimeout, clientRequestTimeout = oldServer, oldClient })
 	for _, hops := range []int{1, 2} {
 		owner := &idleOutputService{outputAt: time.Now().Add(700 * time.Millisecond)}
