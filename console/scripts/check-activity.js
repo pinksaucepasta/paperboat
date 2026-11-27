@@ -32,10 +32,11 @@
 
   const times = rows().map((li) => Date.parse(li.querySelector("time").getAttribute("datetime")))
   pass("rows have valid times", times.every(Number.isFinite))
-  pass(
-    "newest first",
-    times.every((time, index) => index === 0 || time <= times[index - 1]),
-  )
+  // A failure names the pair, so it can be looked up in the audit log.
+  // two events written at once by two requests may be listed either way round: only a second or more is out of order
+  const late = times.findIndex((time, index) => index > 0 && time - times[index - 1] >= 1000)
+  const named = (index) => `${rows()[index].querySelector("time").getAttribute("datetime")} ${sentence(rows()[index]).slice(0, 60)}`
+  pass("newest first", late < 0, late < 0 ? "" : `row ${late + 1} is newer than the row above: ${named(late - 1)} | then ${named(late)}`)
   const text = rows().map(sentence)
   pass(
     "every row has an actor and a sentence",

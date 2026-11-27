@@ -32,7 +32,11 @@
 
   const edit = async (change) => {
     window.next.router.push(`/machines/${id}`)
-    const open = await until(() => button(document.querySelector("[data-machine-tags]"), "Edit tags"))
+    // a machine without tags offers "Add tags"
+    const open = await until(() => {
+      const line = document.querySelector("[data-machine-tags]")
+      return line && (button(line, "Edit tags") ?? button(line, "Add tags"))
+    })
     open?.click()
     await until(dialog)
     await change()

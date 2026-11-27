@@ -167,6 +167,11 @@
           (b) => !b.closest("[role=tablist], nav") && !b.disabled,
         )
       }
+      // "… above" names the action higher up the page: there has to be one before the line.
+      if (!actionable && /\babove\b/i.test(text))
+        actionable = [...document.querySelectorAll("main a[href], main button")].some(
+          (b) => !b.closest("[role=tablist], nav") && !b.disabled && !b.closest(hidden) && b.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING,
+        )
       if (!actionable) flag(route, "empty state without a next action", text)
     }
     // Failed calls must read as something a person can act on.

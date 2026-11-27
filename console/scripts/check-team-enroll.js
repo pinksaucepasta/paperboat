@@ -22,7 +22,7 @@
   const dialog = () => document.querySelector("[role=dialog]")
   const note = () => dialog()?.querySelector("[data-new-machine-access]")
   const radio = (name) =>
-    [...(dialog()?.querySelectorAll("[role=radio]") ?? [])].find((r) => r.textContent.includes(name))
+    [...document.querySelectorAll("[role=menuitemradio]")].find((r) => r.textContent.includes(name))
 
   const workspaces = (await get("workspaces")).items
   const team = workspaces.find((w) => w.kind === "team")
@@ -48,11 +48,25 @@
     )
     pass("Add machine is on the page", Boolean(add))
     add.click()
-    await until(() => dialog() && radio(team.name))
-    pass("the dialog offers the team", Boolean(radio(team.name)))
+    // The destination is a dropdown ("Workspace") of the dialog; its items live outside the dialog's own element.
+    const press = (element) => {
+      for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"])
+        element.dispatchEvent(new (type.startsWith("pointer") ? PointerEvent : MouseEvent)(type, { bubbles: true, button: 0, pointerType: "mouse" }))
+      element.click()
+    }
+    const choose = async (name) => {
+      const trigger = await until(() => dialog()?.querySelector('button[aria-label="Workspace"]'))
+      if (!trigger) return false
+      press(trigger)
+      const item = await until(() => radio(name))
+      if (item) press(item)
+      await until(() => !radio(name), 5000)
+      return Boolean(item)
+    }
+    await until(() => dialog()?.querySelector('button[aria-label="Workspace"]'))
     pass("no line about access while Personal is chosen", !note())
 
-    radio(team.name).click()
+    pass("the dialog offers the team", await choose(team.name))
     const shown = await until(() => note())
     const text = shown?.innerText.replace(/\s+/g, " ") ?? ""
     pass("choosing the team shows who can use the machine", Boolean(shown), text)
@@ -63,7 +77,7 @@
     pass("it names the team and Machine access", text.includes(team.name) && /Machine access/.test(text))
     pass("it does not promise access", !/everyone|all members can/i.test(text))
 
-    radio("Personal").click()
+    await choose("Personal")
     pass("choosing Personal removes the line", Boolean(await until(() => !note())))
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))

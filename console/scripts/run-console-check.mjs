@@ -15,7 +15,8 @@ const page = await (await browser.newContext({ storageState: process.env.STATE }
 await page.goto(origin + path)
 await page.waitForLoadState("networkidle").catch(() => {})
 await page.waitForTimeout(4000)
-await page.evaluate((g) => Object.assign(window, g), JSON.parse(globals))
+// CHECK_GLOBALS: globals that must not show in the process list (a vault password)
+await page.evaluate((g) => Object.assign(window, g), { ...JSON.parse(globals), ...JSON.parse(process.env.CHECK_GLOBALS ?? "{}") })
 const steps = await page.evaluate(readFileSync(script, "utf8"))
 let failed = 0
 for (const s of steps ?? []) {

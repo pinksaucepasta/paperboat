@@ -77,7 +77,7 @@
   for (const repository of repositories) {
     const count = repository.machine_count ?? 0
     const used = count === 0 ? "Not used" : `Used by ${count} ${count === 1 ? "machine" : "machines"}`
-    pass(`repository ${repository.display_name} says "${used}"`, pageText.includes(used))
+    pass(`repository ${repository.display_name} says "${used}"`, Boolean(await until(() => (main()?.innerText ?? "").includes(used))))
   }
 
   // The table lists the machines that sync; the ones that don't are folded under "Not syncing".

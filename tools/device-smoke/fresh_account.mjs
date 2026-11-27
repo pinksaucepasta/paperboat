@@ -1,6 +1,6 @@
 // A throwaway console account for the final re-check: signup creates it (disposable mail.tm inbox, AuthKit sign-up) and
 // leaves its session in DIR/state.json; delete removes it again through the console's Delete account page.
-// usage: ORIGIN=<console origin> PW_CHROMIUM=<chromium> [PW_MODULE=<playwright-core index.mjs>] node fresh_account.mjs signup|delete DIR
+// usage: ORIGIN=<console origin> PW_CHROMIUM=<chromium> [PW_MODULE=<playwright-core index.mjs>] node fresh_account.mjs signup|delete|reauth DIR
 // DIR is created mode 700, its files mode 600; nothing secret is printed.
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { randomBytes } from "node:crypto"
@@ -55,35 +55,65 @@ async function signup() {
 async function reauthenticate(page, { email, password, mailToken }) {
   const seen = new Set(((await mailtm("/messages", mailToken))["hydra:member"] ?? []).map((m) => m.id))
   // The delete page may already have sent the browser to the sign-in page.
-  if (page.url().startsWith(origin)) {
-    await page.getByRole("link", { name: "Sign in again" }).or(page.getByRole("button", { name: "Sign in again" })).first().click()
+  const again = page.getByRole("link", { name: "Sign in again" }).or(page.getByRole("button", { name: "Sign in again" })).first()
+  if (page.url().startsWith(origin) && (await again.waitFor({ timeout: 30000 }).then(() => true, () => false))) await again.click()
+  // Then whatever the sign-in pages ask, in the order they ask it, until the console is back. A page loads when it
+  // loads: each field is filled once, when it shows.
+  const code = 'input[inputmode="numeric"]:visible, input[name="code"]:visible, input[autocomplete="one-time-code"]:visible'
+  const done = new Set()
+  const deadline = Date.now() + 420000 // the live console compiles the callback route on first use (minutes on a busy dev server)
+  while (Date.now() < deadline) {
     await page.waitForTimeout(3000)
-  }
-  // A re-authentication page shows the account's email read-only or hidden.
-  if (await page.locator('input[name="email"]:not([readonly]):visible').count()) {
-    await page.fill('input[name="email"]:not([readonly]):visible', email)
-    await page.keyboard.press("Enter")
-    await page.waitForTimeout(3000)
-  }
-  if (await page.locator('input[type="password"]').count()) {
-    await page.fill('input[type="password"]', password)
-    await page.keyboard.press("Enter")
-    await page.waitForTimeout(4000)
-  }
-  const boxes = page.locator('input[inputmode="numeric"], input[name="code"], input[autocomplete="one-time-code"]')
-  if (await boxes.count()) {
-    let code = ""
-    for (let i = 0; i < 30 && !code; i++) {
-      const fresh = ((await mailtm("/messages", mailToken))["hydra:member"] ?? []).find((m) => !seen.has(m.id))
-      if (fresh) code = ((await mailtm(`/messages/${fresh.id}`, mailToken)).text ?? "").match(/\b(\d{6})\b/)?.[1] ?? ""
-      else await new Promise((r) => setTimeout(r, 4000))
+    const url = new URL(page.url())
+    if (url.origin === origin && !url.pathname.startsWith("/auth/")) {
+      if (done.size || (await page.locator("#confirm-email").count().catch(() => 0))) return
+      if (await again.isVisible().catch(() => false)) await again.click().catch(() => {})
+      continue
     }
-    if (!code) throw new Error("no sign-in code arrived in the disposable inbox")
-    if ((await boxes.count()) > 1) (await boxes.first().click(), await page.keyboard.type(code))
-    else await boxes.first().fill(code)
-    await page.keyboard.press("Enter").catch(() => {})
+    // Only a field that is still on the same page a moment later takes text: a page on its way out loses what is typed.
+    const shown = async (selector) => {
+      const before = page.url()
+      if (!(await page.locator(selector).count().catch(() => 0))) return false
+      await page.waitForTimeout(7000) // the sign-in form collects its browser signals for a few seconds first
+      return page.url() === before && (await page.locator(selector).count().catch(() => 0)) > 0
+    }
+    // A password typed while the form was still loading is refused as wrong: it is typed once more.
+    if (done.has("password") && !done.has("password-again") && (await page.getByText("Invalid email or password").count().catch(() => 0)) && (await shown('input[type="password"]:visible'))) {
+      await page.fill('input[type="password"]:visible', password)
+      await page.keyboard.press("Enter")
+      done.add("password-again")
+      continue
+    }
+    if (!done.has("code") && (await shown(code))) {
+      let sent = ""
+      for (let i = 0; i < 30 && !sent; i++) {
+        const fresh = ((await mailtm("/messages", mailToken))["hydra:member"] ?? []).find((m) => !seen.has(m.id))
+        if (fresh) sent = ((await mailtm(`/messages/${fresh.id}`, mailToken)).text ?? "").match(/\b(\d{6})\b/)?.[1] ?? ""
+        else await new Promise((r) => setTimeout(r, 4000))
+      }
+      if (!sent) throw new Error("no sign-in code arrived in the disposable inbox")
+      const boxes = page.locator(code)
+      if ((await boxes.count()) > 1) (await boxes.first().click(), await page.keyboard.type(sent))
+      else await boxes.first().fill(sent)
+      await page.keyboard.press("Enter").catch(() => {})
+      done.add("code")
+    } else if (!done.has("password") && (await shown('input[type="password"]:visible'))) {
+      await page.fill('input[type="password"]:visible', password)
+      await page.keyboard.press("Enter")
+      done.add("password")
+    } else if (!done.has("email") && !done.has("password") && (await shown('input[name="email"]:not([readonly]):visible'))) {
+      // A re-authentication page shows the account's email read-only or hidden.
+      await page.fill('input[name="email"]:not([readonly]):visible', email)
+      await page.keyboard.press("Enter")
+      done.add("email")
+    }
   }
-  await page.waitForURL((u) => u.href.startsWith(origin), { waitUntil: "domcontentloaded", timeout: 420000 }) // the live console compiles the callback route on first use (minutes on a busy dev server)
+  const text = await page.locator("body").innerText().catch(() => "")
+  // which account the form names, never the values themselves
+  const form = await page.evaluate((expected) => [...document.querySelectorAll("input")].filter((i) => i.offsetParent !== null)
+    .map((i) => `${i.name}:${i.value.length}${i.name === "email" && i.value ? (i.value === expected ? " (this account)" : " (ANOTHER address)") : ""}`).join(" "), email).catch(() => "")
+  console.error(`sign-in form inputs: ${form}`)
+  throw new Error(`signing in again did not come back to the console: at ${new URL(page.url()).host}${new URL(page.url()).pathname} after ${[...done].join(",") || "no step"}: ${text.replace(/[^\s@]+@[^\s@]+/g, "<email>").replace(/\s+/g, " ").slice(0, 200)}`)
 }
 
 async function remove() {
@@ -122,8 +152,25 @@ async function remove() {
   console.log("fresh account deleted")
 }
 
+// A new sign-in for the stored session, for what asks for one from the last five minutes; the new session is saved.
+async function reauth() {
+  const account = JSON.parse(readFileSync(accountFile, "utf8"))
+  const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM })
+  try {
+  const context = await browser.newContext({ storageState: stateFile })
+  const page = await context.newPage()
+  await page.goto(`${origin}/account/delete`)
+  await page.waitForTimeout(5000)
+  if (!(await page.locator("#confirm-email").count())) await reauthenticate(page, account)
+  write(stateFile, JSON.stringify(await context.storageState()))
+  console.log("signed in again")
+  } finally {
+    await browser.close()
+  }
+}
+
 try {
-  if (action === "signup" || action === "delete") await warm()
+  if (action === "signup" || action === "delete" || action === "reauth") await warm()
   if (action === "signup") {
     // One retry on a transport error only (the dev server dropped the connection); the first attempt's mailbox is abandoned.
     await signup().catch(async (e) => {
@@ -132,7 +179,7 @@ try {
       await warm()
       await signup()
     })
-  } else await (action === "delete" ? remove() : Promise.reject(new Error("usage: signup|delete DIR")))
+  } else await (action === "delete" ? remove() : action === "reauth" ? reauth() : Promise.reject(new Error("usage: signup|delete|reauth DIR")))
 } catch (e) {
   console.error(String(e.message ?? e))
   process.exit(1)

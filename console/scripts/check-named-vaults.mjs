@@ -64,7 +64,9 @@ try {
     await page.waitForLoadState("networkidle").catch(() => {})
     const locked = page.locator('input[name="vault-password"]')
     const fresh = page.getByText("Create your vault", { exact: true })
-    await locked.or(fresh).or(button("Add variable")).first().waitFor(long)
+    // Without a kept password the account has no vault yet (or opens it by itself): the shell's unlock card is not the
+    // answer, and its button stays disabled until the vault is read.
+    await (kept || TEAM ? locked.or(fresh) : fresh).or(button("Add variable")).first().waitFor(long)
     if (await fresh.isVisible()) {
       // A form filled before React hydrates is cleared: fill, wait, and fill again until the text stays.
       for (const field of ["#vault-new-password", "#vault-confirm-password"]) {

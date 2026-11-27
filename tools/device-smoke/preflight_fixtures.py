@@ -37,6 +37,12 @@ NEEDS = {
     'console-signout-switch': ['console_tools', 'operator_session', 'operator_password', 'team_admin'],
     'console-invite-mail': ['console_tools', 'operator_session', 'team_admin'],
     'console-recording-replay': ['console_tools', 'fixture_host'],
+    # console_pages.py: throwaway accounts and containers; the two read-only or fleet rows use the smoke team owner's session
+    **{check: ['console_tools', 'fixture_host'] for check in ('console-account', 'console-account-delete', 'console-previews', 'console-tunnels',
+       'console-files', 'console-team', 'console-env', 'console-config-sync', 'console-terminal', 'console-access-login')},
+    **{check: ['console_tools'] for check in ('console-site', 'console-announcements', 'admin-panel')},
+    'console-public': ['console_tools', 'operator_session'],
+    'console-terminal-fleet': ['console_tools', 'operator_session'],
     'staging-edge-outage': ['staging_stack'],
     'staging-edge-idle': ['staging_stack'],
     # recipe_checks.py: throwaway console accounts and containers; the clean real machines are optional (their rows are NOT RUN without)

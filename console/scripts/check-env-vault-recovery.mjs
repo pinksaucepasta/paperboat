@@ -22,6 +22,7 @@ const browser = await chromium.launch({ executablePath })
 const context = await browser.newContext({ storageState: state, viewport: { width: 1280, height: 900 } })
 const page = await context.newPage()
 page.on("request", (request) => seen.push(`${request.url()}\n${request.postData() ?? ""}`))
+const recoveryReplace = () => page.getByRole("button", { name: "Turn off…" }).locator("xpath=..").getByRole("button", { name: "Replace…" })
 const long = { timeout: 90000 }
 const button = (name) => page.getByRole("button", { name, exact: true })
 const body = () => page.locator("body").innerText()
@@ -86,7 +87,7 @@ try {
     await confirmSaved("Create vault")
     await unlocked()
     await page.getByText("Recovery code", { exact: true }).waitFor(long)
-    await page.getByRole("button", { name: "Replace…" }).waitFor(long)
+    await recoveryReplace().waitFor(long)
     if ((await body()).includes(code)) throw new Error("the code is still on the page")
   })
 
@@ -101,11 +102,11 @@ try {
   await step("locking brings back the unlock card with the recovery link", async () => {
     await button("Lock").click()
     await lockedCard()
-    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).waitFor()
+    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).first().waitFor()
   })
 
   await step("a wrong recovery code is refused and nothing opens", async () => {
-    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).click()
+    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).first().click()
     await page.locator("#vault-recovery-code").fill("pbvr1-" + "A".repeat(58))
     await fillPasswords(password())
     await button("Continue").click()
@@ -121,7 +122,7 @@ try {
   secrets.push(second)
   let next = ""
   await step("the recovery code opens the vault in the browser and a new code is shown first", async () => {
-    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).click()
+    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).first().click()
     await page.locator("#vault-recovery-code").fill(code)
     await fillPasswords(second)
     await button("Continue").click()
@@ -144,7 +145,7 @@ try {
     await lockedCard()
     await unlockWith(first)
     await refused()
-    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).click()
+    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).first().click()
     await page.locator("#vault-recovery-code").fill(code)
     await fillPasswords(password())
     await button("Continue").click()
@@ -173,7 +174,7 @@ try {
   })
 
   await step("the recovery code is replaced: the new code is shown first, the old one stops working", async () => {
-    await page.getByRole("button", { name: "Replace…" }).click()
+    await recoveryReplace().click()
     const replacement = await shownCode()
     secrets.push(replacement)
     await page.getByRole("dialog").getByRole("checkbox").check()
@@ -181,7 +182,7 @@ try {
     await page.getByRole("dialog").waitFor({ state: "detached", ...long })
     await button("Lock").click()
     await lockedCard()
-    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).click()
+    await page.getByRole("button", { name: "Forgot password? Use your recovery code" }).first().click()
     await page.locator("#vault-recovery-code").fill(next)
     await fillPasswords(password())
     await button("Continue").click()
@@ -205,7 +206,7 @@ try {
     secrets.push(created)
     await page.getByRole("dialog").getByRole("checkbox").check()
     await page.getByRole("dialog").getByRole("button", { name: "Create", exact: true }).click()
-    await page.getByRole("button", { name: "Replace…" }).waitFor(long)
+    await recoveryReplace().waitFor(long)
   })
 
   await step("the variable is still there and can be removed", async () => {

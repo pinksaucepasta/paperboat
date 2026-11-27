@@ -37,12 +37,14 @@ const marker = (name) => `M${name}-${Date.now().toString(36)}`
 const resyncs = async (p) => Number(await attr(p, "data-terminal-resyncs"))
 const counts = async (p) => [Number(await attr(p, "data-terminal-reconnects")), Number(await attr(p, "data-terminal-replays"))]
 
+const opened = new Set() // every terminal this run opened: closed at the end even when the row stops on an error
 async function open() {
   const p = await ctx.newPage()
   await p.goto(`${origin}/terminals/new?machine=${machine}&workspace=personal`, { timeout: 280000 })
   await p.waitForURL(/\/terminals\/(?!new)[^/?]+/, { timeout: 60000 }).catch(() => {})
   const id = p.url().match(/\/terminals\/([^/?]+)/)?.[1]
   log(!!id && id !== "new", "a terminal opens", id)
+  if (id && id !== "new") opened.add(id)
   return { p, id }
 }
 
@@ -53,7 +55,14 @@ async function live(p, name) {
   if (attached) await type(p, `echo ${m}`)
   const echoed = attached && (await shows(p, m))
   await shot(p, name)
-  log(echoed, `${name}: attached and echoes its marker`, `phase=${await attr(p, "data-terminal-phase")} close=${await attr(p, "data-terminal-close")}`)
+  let detail = `phase=${await attr(p, "data-terminal-phase")} close=${await attr(p, "data-terminal-close")}`
+  if (attached && !echoed) {
+    // Which half is broken: a reload replays the shell's screen, so the line shows there if the keys reached the shell.
+    await p.reload({ waitUntil: "domcontentloaded" })
+    const replayed = (await phaseIs(p, "attached", 60000)) && (await shows(p, m, 15000))
+    detail += replayed ? "; the keys reached the shell: its output shows only after a reload" : "; not on screen after a reload either"
+  }
+  log(echoed, `${name}: attached and echoes its marker`, detail)
   return echoed
 }
 
@@ -161,7 +170,8 @@ const sttyCols = async (p) => {
 // F3-07: open, type, resize, reconnect, close, from the console.
 async function f307() {
   const { p, id } = await open()
-  if (!(await live(p, "open+type"))) return id
+  // A failed echo is one failed step: the rest runs while the terminal is attached.
+  if (!(await live(p, "open+type")) && !(await phaseIs(p, "attached", 30000))) return id
   const wide = await sttyCols(p)
   await p.setViewportSize({ width: 800, height: 520 })
   await p.waitForTimeout(3000)
@@ -191,7 +201,8 @@ const peopleLack = (p, text, ms = 15000) =>
 // F3-08: the sharing panel: real identities, join codes, guests with and without an account, presence.
 async function f308() {
   const { p, id } = await open()
-  if (!(await live(p, "owner"))) return id
+  // A failed echo is one failed step: the rest runs while the terminal is attached.
+  if (!(await live(p, "owner")) && !(await phaseIs(p, "attached", 30000))) return id
   await p.getByRole("button", { name: /^People/ }).click({ timeout: 15000 }).catch(() => {})
   log(await peopleHave(p, "Owner"), "the panel lists the owner", (await people(p)).join(" | "))
   await p.getByRole("button", { name: "Share", exact: true }).click({ timeout: 15000 })
@@ -201,24 +212,53 @@ async function f308() {
   log(!!code, "Share makes a join code", code ? "code shown" : "no code")
   await p.keyboard.press("Escape")
 
-  // A guest with no account: the code and a name, in a browser with nothing signed in.
+  // A guest with no account: the code and a name, in a browser with nothing signed in. A guest who cannot get in is
+  // one failed step; the teammate steps below still run.
   const guestCtx = await browser.newContext({ viewport: { width: 1100, height: 700 } })
-  const guest = await guestCtx.newPage()
-  await guest.goto(`${origin}/terminal/${id}`, { timeout: 120000 })
-  await guest.getByText("Enter it", { exact: true }).click({ timeout: 30000 })
-  await guest.locator("#join-code").fill(code ?? "")
-  await guest.locator("#join-name").fill("Guest Tester")
-  await guest.getByRole("button", { name: "Join", exact: true }).click()
-  log(await phaseIs(guest, "attached"), "a guest with no account joins with the code")
-  log(await peopleHave(p, "Guest Tester"), "the owner's panel lists the guest by name", (await people(p)).join(" | "))
-  log(await peopleHave(p, "Guest"), "...marked as a guest (no account)")
-  const watch = marker("guestkey")
-  await type(guest, `echo ${watch}`).catch(() => {})
-  await p.waitForTimeout(2500)
-  log(!(await screenText(p)).includes(watch), "a code guest is watch-only: their keys do not reach the shell")
-  await guest.close()
-  log(await peopleLack(p, "Guest Tester", 15000), "presence: the guest leaves the panel when their tab closes")
+  try {
+    const guest = await guestCtx.newPage()
+    await guest.goto(`${origin}/terminal/${id}`, { timeout: 120000 })
+    await guest.waitForTimeout(10000) // a redirect away from the join page comes after it has asked who is signed in
+    const offered = await guest.getByText("Enter it", { exact: true }).click({ timeout: 30000 }).then(() => true, () => false)
+    const at = new URL(guest.url())
+    log(offered && at.origin === origin, "the shared link offers a signed-out guest the join code", `${at.host}${at.pathname}`)
+    if (!offered) throw new Error("no join form for the guest")
+    await guest.locator("#join-code").fill(code ?? "")
+    await guest.locator("#join-name").fill("Guest Tester")
+    await guest.getByRole("button", { name: "Join", exact: true }).click()
+    log(await phaseIs(guest, "attached"), "a guest with no account joins with the code")
+    log(await peopleHave(p, "Guest Tester"), "the owner's panel lists the guest by name", (await people(p)).join(" | "))
+    log(await peopleHave(p, "Guest"), "...marked as a guest (no account)")
+    const watch = marker("guestkey")
+    await type(guest, `echo ${watch}`).catch(() => {})
+    await p.waitForTimeout(2500)
+    log(!(await screenText(p)).includes(watch), "a code guest is watch-only: their keys do not reach the shell")
+    await guest.close()
+    log(await peopleLack(p, "Guest Tester", 15000), "presence: the guest leaves the panel when their tab closes")
+  } catch (error) {
+    log(false, "guest steps stopped", String(error.message).split("\n")[0].slice(0, 160))
+  }
   await guestCtx.close()
+
+  // A guest with an account the terminal is not shared with: signed in, they join with the code too.
+  if (MEMBER_STATE) {
+    const signedCtx = await browser.newContext({ storageState: MEMBER_STATE, viewport: { width: 1100, height: 700 } })
+    try {
+      const signed = await signedCtx.newPage()
+      await signed.goto(`${origin}/terminal/${id}`, { timeout: 120000 })
+      await signed.getByRole("button", { name: "Join with a code" }).click({ timeout: 30000 })
+      await signed.locator("#join-code").fill(code ?? "")
+      await signed.locator("#join-name").fill("Signed Guest")
+      await signed.getByRole("button", { name: "Join", exact: true }).click()
+      log(await phaseIs(signed, "attached"), "a guest with an account joins with the code")
+      log(await peopleHave(p, "Signed Guest") || (await people(p)).length > 1, "the owner's panel lists that guest", (await people(p)).join(" | "))
+      await signed.close()
+      log((await peopleLack(p, "Signed Guest", 15000)) && (await people(p)).length === 1, "presence: that guest leaves the panel when their tab closes", (await people(p)).join(" | "))
+    } catch (error) {
+      log(false, "signed-in guest steps stopped", String(error.message).split("\n")[0].slice(0, 160))
+    }
+    await signedCtx.close()
+  }
 
   // A signed-in teammate: shared by email, listed by their real name, not an id.
   if (MEMBER_STATE && MEMBER_EMAIL) {
@@ -306,7 +346,14 @@ async function f319() {
   return id
 }
 
-for (const id of [await { f307, f308, f313, f314, f319, w15 }[row]()].flat()) {
+let leftOpen
+try {
+  leftOpen = [await { f307, f308, f313, f314, f319, w15 }[row]()].flat()
+} catch (error) {
+  log(false, `${row} stopped`, String(error.message).split("\n")[0].slice(0, 200))
+  leftOpen = [...opened]
+}
+for (const id of leftOpen) {
   if (!id || id === "new") continue
   const p = await ctx.newPage()
   await p.goto(`${origin}/terminals/${id}`, { timeout: 280000 })

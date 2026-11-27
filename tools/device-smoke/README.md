@@ -107,6 +107,26 @@ E2E gives every shard with these rows the `browser` lock. Every row keeps its st
 | `console-invite-mail` | F12-02-mail-live | invites a new disposable mail.tm inbox (only this run can read it; no other address is ever invited) to the smoke team, reads the mail, Resends from the console, opens the link signed out and signs up. `SMOKE_MAIL_CONSOLE_ORIGIN` is the console the server writes into mail links (default `SMOKE_CONSOLE_ORIGIN`); a link to another host fails and is not opened. The invitation is cancelled by its id and the account deleted. |
 | `console-recording-replay` | F25-05 | a throwaway owner and sandbox-paid team as in `recording-key-rotation`; `record_for_replay.py` makes a ticking, a tiny and a ~40 MB recording on the team machine and `check-recordings.mjs` replays them in the browser (decrypt, play, pause, seek, speed, unknown recording, REC in the web terminal, then every replay rule removed while the long one downloads). A skipped step fails the row (except the offline-machine state, not in the cell). Deleting the account deletes the team. Linux recordings only; Windows and macOS targets stay with X-33. |
 
+## Console page rows (console_pages.py)
+
+`fixture_checks.py console-*` and `admin-panel` (also `smoke.sh` check ids) cover the signed-in console pages that the
+four rows above do not; `console_pages.py` lists each row with its CHECKLIST ids. Every row signs up its own throwaway
+account(s), pairs its own container machine(s) on `SMOKE_FIXTURE_HOST` (a linuxpool runner with the `test-systemd` image,
+`test-systemd.Dockerfile`; `SMOKE_FIXTURE_PB` is the build under test) and removes both again, on failure too. Only
+`console-public` (read only) and `console-terminal-fleet` use the smoke team owner's session.
+
+The browser need not run on the controller. `console_browser.sh` starts a Playwright server in a container on
+`BROWSER_HOST` (default `ubuntu@anvit`, refused above load 25), forwards it over SSH and prints the settings the rows
+read; scripts and session files stay on the controller:
+
+    eval "$(tools/device-smoke/console_browser.sh up)"     # down: remove the container and the forward
+    python3 tools/device-smoke/fixture_checks.py console-tunnels
+
+`console-terminal-fleet` needs `SMOKE_CONSOLE_TERMINAL_TARGETS="name,name:powershell"` (online macOS and Windows machines
+of the smoke team owner). `console-announcements` and `admin-panel` use the operator credential file
+(`~/.config/paperboat-dev/operator-cred`, `SMOKE_OPERATOR_CRED`); the admin panel origin is `SMOKE_ADMIN_ORIGIN`.
+Full redacted logs are in `results/fixture-checks/`.
+
 ## Recipe rows (PLAN F26)
 
 `recipe_checks.py` (smoke.sh `recipe-lifecycle`, `recipe-errors`, `recipe-vaults`, `recipe-api-tokens`, `recipe-lifetimes`,

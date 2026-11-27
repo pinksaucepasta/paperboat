@@ -1521,9 +1521,13 @@ for text in sys.argv[1].splitlines():
 recipe_checks_run() { harness_checks_run recipe_checks.py "$RECIPE_CHECKS" "$RECIPE_MACHINE_CHECKS"; }
 account_rows_run() { harness_checks_run account_rows.py "$ACCOUNT_CHECKS" "$ACCOUNT_MACHINE_CHECKS"; }
 
+# Console page rows (console_pages.py, README.md "Console page rows"): every signed-in console page and feature, run
+# through fixture_check. The browser is SMOKE_PW_MODULE (console_browser.sh puts it on another host).
+CONSOLE_PAGE_CHECKS="console-public console-account console-account-delete console-previews console-tunnels console-files console-team console-env console-config-sync console-terminal console-terminal-fleet console-site console-access-login console-announcements admin-panel"
+
 # ---------------------------------------------------------------- run
 # Preflight: every operator fixture of the checks about to run exists, or nothing starts (preflight_fixtures.py names what is missing).
-fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation console-team-admin console-signout-switch console-invite-mail console-recording-replay billing-console bandwidth-throttle-send plus-alias-signup billing-team-lifecycle policy-cli policy-token machine-tags policy-team tunnel-create tunnel-route-rules tunnel-ip-rules preview-ip-rules tunnel-origin tunnel-origin-proxies billing-renewal-failure billing-team-yearly billing-sandbox-purchase billing-declined-card billing-topup staging-edge-outage staging-edge-idle $RECIPE_CHECKS $RECIPE_MACHINE_CHECKS $ACCOUNT_CHECKS $ACCOUNT_MACHINE_CHECKS; do skipped "$id" || printf '%s,' "$id"; done)
+fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation console-team-admin console-signout-switch console-invite-mail console-recording-replay billing-console bandwidth-throttle-send plus-alias-signup billing-team-lifecycle policy-cli policy-token machine-tags policy-team tunnel-create tunnel-route-rules tunnel-ip-rules preview-ip-rules tunnel-origin tunnel-origin-proxies billing-renewal-failure billing-team-yearly billing-sandbox-purchase billing-declined-card billing-topup staging-edge-outage staging-edge-idle $CONSOLE_PAGE_CHECKS $RECIPE_CHECKS $RECIPE_MACHINE_CHECKS $ACCOUNT_CHECKS $ACCOUNT_MACHINE_CHECKS; do skipped "$id" || printf '%s,' "$id"; done)
 [ -z "$fixture_ids" ] || python3 "$HERE/preflight_fixtures.py" --checks "${fixture_ids%,}" || exit 2
 IFS=, read -r -a TLIST <<<"$TARGETS"
 echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARGETS"
@@ -1636,6 +1640,7 @@ fixture_check console-team-admin
 fixture_check console-signout-switch
 fixture_check console-invite-mail
 fixture_check console-recording-replay
+for id in $CONSOLE_PAGE_CHECKS; do fixture_check "$id"; done
 recipe_checks_run
 account_rows_run
 fixture_check billing-console

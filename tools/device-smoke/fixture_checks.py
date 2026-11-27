@@ -3,6 +3,7 @@
 
 usage: fixture_checks.py free-plan|config-team-default|team-business|recording-key-rotation|fresh-install-window|billing-console|bandwidth-throttle-send|plus-alias-signup|billing-team-lifecycle
        fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail|console-recording-replay   (console_rows.py)
+       fixture_checks.py console-previews|...   (console_pages.py: the console pages)
        fixture_checks.py staging-edge-outage   (staging_edge_outage.py: STAGING only)
        fixture_checks.py staging-edge-idle     (staging_edge_idle.py: STAGING only, edges set to a 120 s idle limit first)
        fixture_checks.py policy-cli|policy-token|machine-tags|policy-team|tunnel-ip-rules|preview-ip-rules|tunnel-route-rules|tunnel-create|tunnel-origin|tunnel-origin-proxies   (access_checks.py)
@@ -38,6 +39,7 @@ import tempfile
 import threading
 import time
 
+import console_pages
 import console_rows
 import staging_edge_idle
 import staging_edge_outage
@@ -446,7 +448,7 @@ def fresh_install_window(m):
 
 CHECKS = {'free-plan': free_plan, 'config-team-default': config_team_default, 'team-business': team_business, 'recording-key-rotation': recording_key_rotation,
           'fresh-install-window': fresh_install_window, 'staging-edge-outage': staging_edge_outage.check,
-          'staging-edge-idle': staging_edge_idle.check, **console_rows.CHECKS}
+          'staging-edge-idle': staging_edge_idle.check, **console_rows.CHECKS, **console_pages.CHECKS}
 
 
 def main(argv):
