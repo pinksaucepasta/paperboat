@@ -284,7 +284,7 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		}
 		if typed.Code == localapi.RecipeReachCode {
 			result.Code, result.Category, result.StateChanged, result.Retryable = localapi.RecipeReachCode, "authorization_or_entitlement", false, false
-			result.Recovery = "Add this machine and action to the recipe's [[reach]] and run `pb recipe update`."
+			result.Recovery = "Add this machine and action to the recipe's \"reach\" list and run `pb recipe update`."
 		}
 	case commandRejection:
 		if failure.kind == commandRejected && typed.valid() {
