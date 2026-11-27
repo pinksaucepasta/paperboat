@@ -63,7 +63,14 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
   const refresh = useRefreshBilling(workspace)
   const changed = quantity !== bought
   const preview = useApiQuery({ ...seatPreviewQuery(workspace, quantity), enabled: billingLive.seats && changed })
-  const save = useMutation({ mutationFn: () => setSeats(workspace, quantity), onSuccess: refresh })
+  const save = useMutation({
+    mutationFn: () => setSeats(workspace, quantity),
+    // A removal takes effect at renewal, so the bought count stays: show it, with the scheduled count below.
+    onSuccess: () => {
+      if (quantity < bought) setQuantity(bought)
+      return refresh()
+    },
+  })
   const live = billingLive.seats && billing.can_manage
   // Granted seats are fixed by the grant; changing them needs a subscription.
   if (billing.granted)
