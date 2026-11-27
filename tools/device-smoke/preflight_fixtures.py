@@ -30,6 +30,9 @@ NEEDS = {
     'team-business': ['operator_session', 'team_members', 'team_plan', 's3_keys', 'fixture_host'],
     'ssh-rsync': ['windows_rsync'],
     'recording-key-rotation': ['console_tools', 'fixture_host'],
+    'console-team-admin': ['console_tools', 'operator_session', 'team_admin'],
+    'console-signout-switch': ['console_tools', 'operator_session', 'operator_password', 'team_admin'],
+    'console-invite-mail': ['console_tools', 'operator_session', 'team_admin'],
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
 NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],
@@ -126,6 +129,13 @@ def team_plan():
     return None
 
 
+def operator_password():
+    path = Path(setting('SMOKE_OPERATOR_PASSWORD_FILE', '~/.config/paperboat-dev/console-workos.password'))
+    if not path.is_file() or path.stat().st_mode & 0o077:
+        return 'the smoke team owner password file %s is missing or not mode 0600 (set SMOKE_OPERATOR_PASSWORD_FILE; %s)' % (path, FIX_ACCOUNTS)
+    return None
+
+
 def s3_keys():
     for name in ('.f19-s3ak', '.f19-s3sk'):
         path = Path.home() / name
@@ -176,7 +186,7 @@ def console_tools():
 
 
 VERIFIERS = {f.__name__: f for f in (team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
-                                      s3_keys, fixture_host, windows_rsync, console_tools)}
+                                      s3_keys, fixture_host, windows_rsync, console_tools, operator_password)}
 
 
 def selected(args):

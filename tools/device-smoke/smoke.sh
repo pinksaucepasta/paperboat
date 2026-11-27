@@ -1388,7 +1388,7 @@ $parent"
   rm -rf "$probe_root"
 }
 
-# fixture_check ID: free-plan, config-team-default, team-business, recording-key-rotation (PB-R1: C307, C308, F25-11, F25-12; fixture_checks.py:
+# fixture_check ID: the console-* rows (console_rows.py), free-plan, config-team-default, team-business, recording-key-rotation (PB-R1: C307, C308, F25-11, F25-12; fixture_checks.py:
 # their own throwaway machines on SMOKE_FIXTURE_HOST as the Free fixture account, the smoke team's owner or new throwaway accounts;
 # preflight_fixtures.py verified the fixtures).
 fixture_check() {
@@ -1402,7 +1402,7 @@ fixture_check() {
 
 # ---------------------------------------------------------------- run
 # Preflight: every operator fixture of the checks about to run exists, or nothing starts (preflight_fixtures.py names what is missing).
-fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation; do skipped "$id" || printf '%s,' "$id"; done)
+fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation console-team-admin console-signout-switch console-invite-mail; do skipped "$id" || printf '%s,' "$id"; done)
 [ -z "$fixture_ids" ] || python3 "$HERE/preflight_fixtures.py" --checks "${fixture_ids%,}" || exit 2
 IFS=, read -r -a TLIST <<<"$TARGETS"
 echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARGETS"
@@ -1509,6 +1509,10 @@ fixture_check free-plan
 fixture_check config-team-default
 fixture_check team-business
 fixture_check recording-key-rotation
+# Console browser rows (console_rows.py), one headless browser at a time: F19-13, F2-07, F12-02-mail-live.
+fixture_check console-team-admin
+fixture_check console-signout-switch
+fixture_check console-invite-mail
 test_update_scheduled
 test_update_window
 test_update_fresh_install

@@ -101,10 +101,15 @@
         if (!trigger) return false
         trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }))
         click(trigger)
-        const item = await until(
-          () => [...document.querySelectorAll("[role=menuitemradio],[role=menuitem],[role=option]")].find((i) => i.textContent.trim() === wanted),
-          5000,
-        )
+        const find = () => [...document.querySelectorAll("[role=menuitemradio],[role=menuitem],[role=option]")].find((i) => i.textContent.trim() === wanted)
+        const item = await until(() => find() ?? (!trigger.isConnected && "replaced"), 5000)
+        if (item === "replaced") {
+          // The server page replaced the shell under an open menu and the menu went with it: its own failed step, then the
+          // choice is made again on the settled page, so the filter and export steps below are still checked.
+          pass("a filter menu opened on arrival stays open when the server page replaces the shell", false, current)
+          await until(() => !document.querySelector(".shell-delay"), 30000)
+          return choose(current, wanted)
+        }
         if (!item) return false
         click(item)
         // The trigger shows the choice once the page took it.

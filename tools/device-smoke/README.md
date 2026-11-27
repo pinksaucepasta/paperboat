@@ -50,6 +50,18 @@ the owner's session) is on the controller: the container asks for it through fil
 When a console session has expired, preflight says which one: sign it in again with `console_session.mjs` (operator) or
 with the credentials in `free-account/account.json` (Free account).
 
+## Console rows (browser)
+
+`fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail` (called by `smoke.sh`, `console_rows.py`) drive the
+live console in headless Chromium on the controller. They need no machine. Run one browser at a time on the controller: the full
+E2E gives every shard with these rows the `browser` lock. Every row keeps its step list in `results/fixture-checks/`, addresses removed.
+
+| Row | Cell | What it does and what it leaves |
+|---|---|---|
+| `console-team-admin` | F19-13 | `check-f19.js` (roles, audit log filters, CSV export), `check-f19-security.js` and `check-audit-streams.js` on the smoke team with `SMOKE_OPERATOR_STATE`. Each export adds one `team.activity_exported` audit event (the log is append-only). A configured SSO connection, directory groups and the bypass log need an identity provider (`check-f19-sso-round.js`, by hand). |
+| `console-signout-switch` | F2-07 | signs the owner in anew for this run (`SMOKE_OPERATOR_PASSWORD_FILE`, default `~/.config/paperboat-dev/console-workos.password`, mode 600), runs both machine paging checks, switches Personal ↔ team and signs that session out. It refuses to sign out `SMOKE_OPERATOR_STATE` and proves it still works. |
+| `console-invite-mail` | F12-02-mail-live | invites a new disposable mail.tm inbox (only this run can read it; no other address is ever invited) to the smoke team, reads the mail, Resends from the console, opens the link signed out and signs up. `SMOKE_MAIL_CONSOLE_ORIGIN` is the console the server writes into mail links (default `SMOKE_CONSOLE_ORIGIN`); a link to another host fails and is not opened. The invitation is cancelled by its id and the account deleted. |
+
 ## Extra Windows machines (winpool)
 
 `winpool.sh` turns up to fourteen GitHub-hosted `windows-latest` runners into temporary Windows test machines, so

@@ -4,6 +4,7 @@
 // DIR is created mode 700, its files mode 600; nothing secret is printed.
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { randomBytes } from "node:crypto"
+import { mailtm, signUpForm } from "./console_signup.mjs"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 const origin = process.env.ORIGIN
@@ -11,23 +12,6 @@ const [action, dir] = process.argv.slice(2)
 const accountFile = `${dir}/account.json`
 const stateFile = `${dir}/state.json`
 const write = (file, text) => (writeFileSync(file, text, { mode: 0o600 }), chmodSync(file, 0o600))
-// mail.tm answers 429 when several runs share this address: wait as it asks (Retry-After, else 5 s) and retry, at most 8 times
-const mailtm = async (path, token, body) => {
-  for (let attempt = 0; ; attempt++) {
-    const r = await fetch("https://api.mail.tm" + path, {
-      method: body ? "POST" : "GET",
-      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: body && JSON.stringify(body),
-    })
-    if (r.status === 429 && attempt < 8) {
-      await new Promise((resolve) => setTimeout(resolve, Math.min(30, Number(r.headers.get("retry-after")) || 5) * 1000))
-      continue
-    }
-    if (!r.ok) throw new Error(`mail.tm ${path.replace(/\/messages\/.*/, "/messages/<id>")}: HTTP ${r.status}`)
-    return r.json()
-  }
-}
-
 // The live console is a dev server that compiles a route on its first request: ask for each route this script uses until it answers
 // (anything below 500, redirects not followed), for at most five minutes in all.
 async function warm() {
@@ -53,29 +37,7 @@ async function signup() {
   const context = await browser.newContext()
   const page = await context.newPage()
   await page.goto(origin + "/")
-  await page.getByRole("link", { name: "Sign up" }).click()
-  await page.waitForTimeout(3000)
-  for (const [selector, value] of [['input[name="email"]', email], ['input[name="first_name"]', "Final"], ['input[name="last_name"]', "Recheck"]]) {
-    if (await page.locator(selector).count()) await page.fill(selector, value)
-  }
-  await page.keyboard.press("Enter")
-  await page.waitForTimeout(4000)
-  if (await page.locator('input[type="password"]').count()) {
-    await page.fill('input[type="password"]', password)
-    await page.keyboard.press("Enter")
-    await page.waitForTimeout(5000)
-  }
-  let code = ""
-  for (let i = 0; i < 30 && !code; i++) {
-    const [first] = (await mailtm("/messages", mailToken))["hydra:member"]
-    if (first) code = ((await mailtm(`/messages/${first.id}`, mailToken)).text ?? "").match(/\b(\d{6})\b/)?.[1] ?? ""
-    else await new Promise((r) => setTimeout(r, 4000))
-  }
-  if (!code) throw new Error("no verification code arrived in the disposable inbox")
-  const boxes = page.locator('input[inputmode="numeric"], input[name="code"], input[autocomplete="one-time-code"]')
-  if ((await boxes.count()) > 1) (await boxes.first().click(), await page.keyboard.type(code))
-  else await boxes.first().fill(code)
-  await page.keyboard.press("Enter").catch(() => {})
+  await signUpForm(page, { email, password, mailToken })
   await page.waitForURL((u) => u.href.startsWith(origin), { waitUntil: "domcontentloaded", timeout: 420000 }) // the live console compiles the callback route on first use (minutes on a busy dev server)
   write(stateFile, JSON.stringify(await context.storageState()))
   let me = 0
