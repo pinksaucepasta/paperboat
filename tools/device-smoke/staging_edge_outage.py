@@ -224,13 +224,12 @@ def drill(run, tag, leftovers):
     s = run.s
     s.guard()  # before anything changes
     run.log(True, 'every target is staging: API, fixture sign-in and each edge\'s control_url')
-    undo, cleanups = [], []
-    got = s.ssh('mkdir %s && echo %s > %s/owner' % (LOCK, tag, LOCK), check=False)
+    undo, cleanups, netns = [], [], {}
+    got = s.ssh('mkdir %s && { echo %s > %s/owner || { rmdir %s; false; }; }' % (LOCK, tag, LOCK, LOCK), check=False)
     if got.returncode:
         run.log(False, 'no other staging edge disturbance is running', 'lock %s on the staging host is held (remove it only when no run is active)' % LOCK)
         return
     try:
-        netns = {}
         for container, _, node in s.edges:
             netns[container] = s.netns(container)
             if 'DROP' in s.rules(netns[container]):
@@ -245,12 +244,14 @@ def drill(run, tag, leftovers):
         s.ssh('%s exec -d -u %s %s python3 -m http.server %d --bind 127.0.0.1 --directory %s' % (DOCKER, CT_USER, s.machine, port, work))
         made = {}
         # registered before the create: a create that failed after the server accepted it is found by its name and removed
-        cleanups.append(('tunnel %s' % tag, lambda: delete_tunnel(s, made.get('tunnel', (tag,))[0], missing_ok=True)))
+        gone = set()  # what the drill itself deleted: cleanup leaves it alone
+        cleanups.append(('tunnel %s' % tag, lambda: 'tunnel' in gone or delete_tunnel(s, made.get('tunnel', (tag,))[0], missing_ok=True)))
         _, created = s.pb('tunnel', 'create', tag, '--port', str(port), '--duration', '1h', '--wait')
         made['tunnel'] = (created['tunnel']['id'], created['tunnel']['stable_endpoint'])
+        # registered before the create too: a preview made by a command that then failed is found by this run's origin port
+        cleanups.append(('preview of port %d' % port, lambda: 'preview' in gone or remove_previews(s, port, made.get('preview'))))
         _, preview = s.pb('preview', str(port), '--background', '--ttl', '30m')
         made['preview'] = (preview['id'], preview['endpoint'])
-        cleanups.append(('preview %s' % preview['id'], lambda: delete_preview(s, preview['id'], missing_ok=True)))
         urls = {kind: {'%s on %s' % (kind, edge): url for edge, url in run.addresses(made[kind][1])} for kind in ('preview', 'tunnel')}
         both = {**urls['preview'], **urls['tunnel']}
         up = run.until_served(both, 180)
@@ -283,13 +284,15 @@ def drill(run, tag, leftovers):
             healthy, age = s.heartbeat_age(node)
             run.log(healthy and age < 30, '%s is ready and heartbeating again' % container, 'heartbeat %d s old' % age)
         delete_preview(s, made['preview'][0])
+        gone.add('preview')
         run.dropped(urls['preview'], urls['tunnel'], 'preview')
         delete_tunnel(s, made['tunnel'][0])
+        gone.add('tunnel')
         run.dropped(urls['tunnel'], {}, 'tunnel')
     finally:
         if undo:
             try:
-                restore(s, {c: s.netns(c) for c, _, _ in s.edges}, undo, tag)
+                restore(s, running(s), undo, tag)
             except Exception as error:  # noqa: BLE001 reported with the exact command; the timer on the host still runs
                 leftovers.append('edge cut NOT removed by this run (%s); the host timer removes it within %d s, or run as root there: %s' % (
                     str(error)[:120], DEAD_MAN_SECONDS, '; '.join(undo)))
@@ -298,7 +301,31 @@ def drill(run, tag, leftovers):
                 cleanup()
             except Exception as error:  # noqa: BLE001
                 leftovers.append('staging %s NOT removed: %s' % (what, str(error)[:150]))
-        s.ssh('rm -f %s/owner && rmdir %s' % (LOCK, LOCK), check=False)
+        try:
+            s.ssh('rm -f %s/owner && rmdir %s' % (LOCK, LOCK))
+        except Exception as error:  # noqa: BLE001
+            leftovers.append('staging lock %s NOT removed (remove it when no run is active): %s' % (LOCK, str(error)[:120]))
+
+
+def running(s):
+    """{edge: netns} of the edges that run. A stopped edge's namespace, and the rules in it, are gone: it never blocks the
+    restore of the others."""
+    spaces = {}
+    for container, _, _ in s.edges:
+        try:
+            spaces[container] = s.netns(container)
+        except RuntimeError:
+            pass
+    return spaces
+
+
+def remove_previews(s, port, made):
+    if made:
+        return delete_preview(s, made[0], missing_ok=True)
+    _, listed = s.pb('preview', 'list')
+    for item in listed.get('items', []):
+        if (item.get('target') or {}).get('address') == '127.0.0.1:%d' % port:
+            delete_preview(s, item['id'], missing_ok=True)
 
 
 def restore(s, netns, undo, tag):

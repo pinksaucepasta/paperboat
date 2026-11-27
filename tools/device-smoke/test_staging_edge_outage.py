@@ -19,12 +19,17 @@ class Host:
     def __init__(self, control=API, server=API):
         self.control, self.server = control, server
         self.scripts, self.rules, self.deleted, self.lock_held, self.sticky_rules = [], '', [], False, False
+        self.preview_fails, self.lock_sticks, self.port = False, False, None
 
     def __call__(self, argv, **kw):
         script = argv[-1]
         self.scripts.append(script)
         out, code = '', 0
-        if 'control_url' in script:
+        if 'rmdir' in script and script.startswith('rm -f'):
+            code = 1 if self.lock_sticks else 0
+        elif 'preview list' in script:
+            out = json.dumps({'items': [{'id': 'preview_lost', 'target': {'address': '127.0.0.1:%s' % self.port}}, {'id': 'preview_other', 'target': {'address': '127.0.0.1:1'}}]})
+        elif 'control_url' in script:
             out = self.control + '\n'
         elif 'config show' in script:
             out = json.dumps({'data': {'server_url': self.server}})
@@ -51,6 +56,9 @@ class Host:
         elif '.local/bin/pb preview delete' in script:
             self.deleted.append('preview')
             out = '{"id": "preview_1"}'
+        elif '.local/bin/pb preview' in script and self.preview_fails:
+            self.port = re.search(r'pb preview (\d+)', script).group(1)
+            code = 1
         elif '.local/bin/pb preview' in script:
             out = json.dumps({'id': 'preview_1', 'endpoint': 'https://b.pub.stg.example.test'})
         elif 'tunnel delete' in script:
@@ -198,7 +206,36 @@ class Drill(unittest.TestCase):
         run, _ = drill(held)
         self.assertTrue(run.failed)
         self.assertFalse([s for s in held.scripts if 'iptables' in s or 'tunnel create' in s])
-        self.assertFalse([s for s in held.scripts if 'rmdir' in s])  # someone else's lock is not released
+        self.assertFalse([s for s in held.scripts if s.startswith('rm -f')])  # someone else's lock is not released
+
+
+class Cleanups(unittest.TestCase):
+    def test_a_preview_made_by_a_failed_command_is_found_by_the_runs_port_and_deleted(self):
+        host = Host()
+        host.preview_fails = True
+        run, leftovers = drill(host)
+        self.assertTrue(run.failed)
+        self.assertEqual([], leftovers)
+        deletes = [s for s in host.scripts if 'pb preview delete' in s]
+        self.assertEqual(1, len(deletes))
+        self.assertIn('preview_lost', deletes[0])
+
+    def test_a_lock_that_stays_is_reported(self):
+        host = Host()
+        host.lock_sticks = True
+        _, leftovers = drill(host)
+        self.assertTrue(any('lock' in text and 'NOT removed' in text for text in leftovers), leftovers)
+
+    def test_a_stopped_edge_does_not_block_the_restore_of_the_others(self):
+        class Two:
+            edges = [('pb-stg-edge', 1, 'stg_a'), ('pb-stg-edge-b', 2, 'stg_b')]
+
+            def netns(self, container):
+                if container == 'pb-stg-edge':
+                    raise RuntimeError('edge pb-stg-edge is not running')
+                return 'nsenter -t 7 -n'
+
+        self.assertEqual({'pb-stg-edge-b': 'nsenter -t 7 -n'}, row.running(Two()))
 
 
 class Registration(unittest.TestCase):
