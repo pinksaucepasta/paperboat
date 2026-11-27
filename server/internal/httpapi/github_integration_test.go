@@ -257,7 +257,7 @@ func TestGitHubProvisionRetriesAfterCreateFailure(t *testing.T) {
 // A connected account without the GitHub App is sent to install it by the same Connect GitHub, and nothing is
 // listed or created there until it has.
 func TestGitHubConnectWithoutAppSendsToInstall(t *testing.T) {
-	_, router, fake := newGitHubIntegrationRouter(t, []string{"repo"}, func(cfg *config.Config) {
+	store, router, fake := newGitHubIntegrationRouter(t, []string{"repo"}, func(cfg *config.Config) {
 		cfg.GitHub.AppID, cfg.GitHub.AppSlug = "123", "paperboat-test"
 	})
 	fake.NotInstalled = true
@@ -323,6 +323,18 @@ func TestGitHubConnectWithoutAppSendsToInstall(t *testing.T) {
 	}
 	if listed := serve(http.MethodGet, "/v1/github/repositories", "", cookies); listed.Code != http.StatusOK {
 		t.Fatalf("repositories after installing = %d %s", listed.Code, listed.Body.String())
+	}
+
+	// The config repository disconnected, then GitHub: connecting again brings the config repository back.
+	if _, err := store.SQL().Exec(`UPDATE paperboat.control_config_repositories SET state='disconnected', disconnected_at=now()
+		WHERE owner_user_id=$1 AND provider='github'`, userIDByEmail(t, store, "github-app@example.com")); err != nil {
+		t.Fatal(err)
+	}
+	if disconnected := serve(http.MethodDelete, "/v1/github/connection", "", cookies); disconnected.Code != http.StatusOK {
+		t.Fatalf("disconnect after the repository = %d %s", disconnected.Code, disconnected.Body.String())
+	}
+	if _, _, again := connect(); !strings.Contains(again, `"config_repo_provisioned":true`) {
+		t.Fatalf("reconnected after disconnecting the config repository = %s", again)
 	}
 }
 

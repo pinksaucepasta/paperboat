@@ -124,7 +124,8 @@ VALUES ($1,$2,'github',$3,$4,$5,$3,$6,$6,$7,$8,'provider_user_repository',now())
 ON CONFLICT (owner_user_id,provider,external_ref) DO UPDATE SET
  display_name=EXCLUDED.display_name,provider_account_id=EXCLUDED.provider_account_id,external_repository_id=EXCLUDED.external_repository_id,
  clone_url=EXCLUDED.clone_url,publish_url=EXCLUDED.publish_url,default_branch=EXCLUDED.default_branch,authorization_ref=EXCLUDED.authorization_ref,
- credential_capability=EXCLUDED.credential_capability,provisioned_at=now(),updated_at=now(),version=control_config_repositories.version+1
+ credential_capability=EXCLUDED.credential_capability,provisioned_at=now(),state='active',disconnected_at=NULL,
+ updated_at=now(),version=control_config_repositories.version+1
 RETURNING id
 `
 
