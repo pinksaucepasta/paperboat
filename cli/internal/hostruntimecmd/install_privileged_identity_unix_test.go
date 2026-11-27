@@ -10,6 +10,10 @@ import (
 )
 
 func TestPrivilegedInstallCommandsSelectRootHomeAndKeepEnrolledUID(t *testing.T) {
+	// The plain child (no systemd-run, or macOS); the transient-service form is TestInstallStepsRunAsATransientServiceOnLinux.
+	previous := systemdRun
+	t.Cleanup(func() { systemdRun = previous })
+	systemdRun = "/nonexistent/systemd-run"
 	for _, operation := range []string{"install-supplied", "commit-supplied", "rollback-supplied", "manuals"} {
 		t.Run(operation, func(t *testing.T) {
 			arguments := []string{"__runtime-service", operation}

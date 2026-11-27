@@ -49,6 +49,10 @@ func TestASlowPrivilegedInstallStepIsNotReportedAsFailed(t *testing.T) {
 // Past the outer bound pb stops waiting: the root child is still finishing, so the message says so instead of
 // "failed".
 func TestAPrivilegedStepPastItsBoundSaysStillFinishing(t *testing.T) {
+	// The plain sudo child (macOS, or Linux without systemd-run): it outlives the killed sudo.
+	previousRun := systemdRun
+	t.Cleanup(func() { systemdRun = previousRun })
+	systemdRun = "/nonexistent/systemd-run"
 	if os.Geteuid() == 0 {
 		t.Skip("as root no sudo hop is left to outlive the kill: the step ends with it (install_running_unix.go)")
 	}
@@ -72,6 +76,10 @@ func TestAPrivilegedStepPastItsBoundSaysStillFinishing(t *testing.T) {
 // apple 2026-11-26: sudo was killed at the bound but its root child (stuck on a macOS trust prompt) still held
 // the stderr pipe, so Run never returned and pb hung with no message. WaitDelay ends the wait.
 func TestAPrivilegedStepWhoseChildHoldsStderrStillReturnsAtItsBound(t *testing.T) {
+	// The plain sudo child (macOS, or Linux without systemd-run): it outlives the killed sudo.
+	previousRun := systemdRun
+	t.Cleanup(func() { systemdRun = previousRun })
+	systemdRun = "/nonexistent/systemd-run"
 	if os.Geteuid() == 0 {
 		t.Skip("as root no sudo hop is left to outlive the kill: the step ends with it (install_running_unix.go)")
 	}

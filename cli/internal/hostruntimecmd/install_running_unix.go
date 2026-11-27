@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -159,6 +160,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		if err = command.Run(); errors.Is(err, exec.ErrWaitDelay) {
 			err = nil // exited 0; a service it started kept the pipe
 		}
+		if err != nil && detachedLauncher([]string{"__runtime-service", operation}, account.Uid) != nil && detachedStepRunning(detachedUnit(operation, account.Uid)) {
+			return errors.Join(errStepStillRunning, err)
+		}
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
@@ -220,9 +224,10 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	err = invoke(stepCtx, "install-supplied")
 	stepEnded := stepCtx.Err() != nil
 	cancelStep()
-	if err != nil && stepEnded && os.Geteuid() != 0 { // as root the kill ended the step itself: nothing finishes
+	// As root without a transient service the kill ended the step itself: nothing finishes.
+	if err != nil && (errors.Is(err, errStepStillRunning) || stepEnded && os.Geteuid() != 0 && detachedLauncher([]string{"__runtime-service", "install-supplied"}, account.Uid) == nil) {
 		// The root child outlives its sudo and holds its own locks until it exits; it is not a failure yet.
-		return "", StillFinishingFailure(fmt.Sprintf("The Paperboat install is still finishing in the background after %s. Run `pb status` to see when it is done; run `pb install` again only if it reports no installation.", suppliedInstallBound), err)
+		return "", StillFinishingFailure("The Paperboat install is still finishing in the background. Run `pb status` to see when it is done; run `pb install` again only if it reports no installation.", err)
 	}
 	if bounded {
 		parent := ctx
@@ -251,7 +256,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	link, err := installWorkerCommand(directory, layout.Binary)
 	var restoreService func(context.Context) error
 	rollback := func(cause error) (string, error) {
-		// rollback-supplied is never cut off. Killing its sudo at a bound either left the root child restoring
+		// rollback-supplied is never cut off where pb's kill would end it (macOS, no systemd-run). Killing its sudo at a bound either left the root child restoring
 		// while pb restored over it, or, from a terminal, made sudo hang up the child mid-restore (device check
 		// 11-27: sudo sends SIGHUP/SIGTERM to a child on its terminal), leaving the failed build and its journal.
 		// It is waited for like a package manager's own rollback; past suppliedRollbackNotice pb says so once.
@@ -259,8 +264,22 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		notice := time.AfterFunc(suppliedRollbackNotice, func() {
 			fmt.Fprintln(os.Stderr, "Still restoring the previous Paperboat version; waiting for it to finish...")
 		})
-		binaryErr := invoke(context.WithoutCancel(ctx), "rollback-supplied")
+		rollbackCtx, cancelRollback := context.WithoutCancel(ctx), context.CancelFunc(func() {})
+		if detachedLauncher([]string{"__runtime-service", "rollback-supplied"}, account.Uid) != nil {
+			// As a service it outlives pb, so a generous bound is safe here and frees unattended callers.
+			rollbackCtx, cancelRollback = context.WithTimeout(rollbackCtx, suppliedRollbackBound)
+		}
+		binaryErr := invoke(rollbackCtx, "rollback-supplied")
+		cancelRollback()
 		notice.Stop()
+		if errors.Is(binaryErr, errStepStillRunning) {
+			// Nothing may restore over it: only the user's own command link is put back.
+			var linkErr error
+			if link != nil {
+				linkErr = link.Rollback()
+			}
+			return "", StillFinishingFailure("The update failed and Paperboat is still restoring the previous version in the background. Wait for it to finish, then run `pb install` to make sure the previous version is fully restored.", cause, binaryErr, linkErr)
+		}
 		// The steps after it have their own budget: sharing one 45 s with it left them an expired context.
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), suppliedRecoveryBound)
 		defer cancel()
@@ -320,7 +339,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	if err = invoke(ctx, "commit-supplied"); err != nil {
+	if err = invoke(ctx, "commit-supplied"); errors.Is(err, errStepStillRunning) {
+		return "", StillFinishingFailure("The Paperboat install is still being committed in the background. Run `pb install` again once it finishes to confirm it.", err)
+	} else if err != nil {
 		return "", runtimeFailure("installation commit could not be confirmed; keep the installed files and run pb doctor before retrying", err)
 	}
 	if err = link.Commit(); err != nil {
@@ -368,6 +389,7 @@ const installInventoryTimeout = 2 * time.Minute
 // Variables so tests can shorten them.
 var (
 	suppliedRollbackNotice = 2 * time.Minute
+	suppliedRollbackBound  = 30 * time.Minute
 	suppliedRecoveryBound  = 45 * time.Second
 )
 
@@ -381,7 +403,7 @@ var systemdRun = "/usr/bin/systemd-run"
 // it finishes whatever happens to pb, sudo or the terminal; --wait and --pipe keep its output, input and exit status
 // for pb, and KillMode=process leaves anything it started running. macOS needs no launcher: its sudo never kills a
 // child that ignores the hangup (service_unix.go ignores it), so the step stays a plain child there.
-func detachedLauncher(arguments []string) []string {
+func detachedLauncher(arguments []string, invokingUID string) []string {
 	if runtime.GOOS != "linux" || len(arguments) != 2 || arguments[0] != "__runtime-service" {
 		return nil
 	}
@@ -390,11 +412,42 @@ func detachedLauncher(arguments []string) []string {
 	default:
 		return nil
 	}
-	if info, err := os.Stat(systemdRun); err != nil || !info.Mode().IsRegular() {
+	if info, err := os.Stat(systemdRun); err != nil || !info.Mode().IsRegular() || !systemdRunSupported() {
 		return nil
 	}
-	return []string{systemdRun, "--quiet", "--wait", "--pipe", "--collect", "--property=KillMode=process"}
+	// One fixed name per step and account: a second concurrent step is refused by systemd, and pb can ask whether
+	// the step is still running after systemd-run itself ended (a Ctrl-C, or the bound killed it).
+	return []string{systemdRun, "--quiet", "--wait", "--pipe", "--collect", "--property=KillMode=process", "--unit=" + detachedUnit(arguments[1], invokingUID)}
 }
+
+func detachedUnit(operation, invokingUID string) string {
+	return "paperboat-" + operation + "-u" + invokingUID + ".service"
+}
+
+// systemdRunSupported reports systemd 236 or newer (--collect; --pipe is 235, --wait 232), as Tailscale checks
+// (clientupdate.go:400). Older hosts keep the plain sudo child. Tests replace it.
+var systemdRunSupported = sync.OnceValue(func() bool {
+	out, err := exec.Command(systemdRun, "--version").Output()
+	fields := strings.Fields(string(out))
+	if err != nil || len(fields) < 2 || fields[0] != "systemd" {
+		return false
+	}
+	version, err := strconv.Atoi(fields[1])
+	return err == nil && version >= 236
+})
+
+// detachedStepRunning reports whether a step's transient service is still running; tests replace it.
+var detachedStepRunning = func(unit string) bool {
+	for _, systemctl := range []string{"/usr/bin/systemctl", "/bin/systemctl"} {
+		if _, err := os.Stat(systemctl); err == nil {
+			return exec.Command(systemctl, "is-active", "--quiet", unit).Run() == nil
+		}
+	}
+	return true // cannot tell: never restore over a step that may still run
+}
+
+// errStepStillRunning: pb stopped waiting (its bound, or Ctrl-C ended systemd-run) while the step's service runs on.
+var errStepStillRunning = errors.New("the privileged step is still running in the background")
 
 // yieldInstallIO marks an update's context: its privileged children run at idle I/O and nice 10 (e4586fcee).
 type yieldInstallIO struct{}
@@ -417,7 +470,7 @@ var privilegedInstallCommand = func(ctx context.Context, effectiveUID int, rootH
 	args = append(args, executable)
 	args = append(args, arguments...)
 	launcher := []string{"/usr/bin/env"}
-	if transient := detachedLauncher(arguments); transient != nil {
+	if transient := detachedLauncher(arguments, invokingUID); transient != nil {
 		// The service manager runs the step, not sudo's session: see detachedLauncher.
 		launcher = append(transient, "/usr/bin/env", "HOME="+rootHome, "USER=root", "LOGNAME=root")
 	}
