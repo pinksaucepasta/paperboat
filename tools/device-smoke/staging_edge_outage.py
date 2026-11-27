@@ -123,7 +123,9 @@ class Staging:
         except (ValueError, IndexError):
             value = {}
         if check and (done.returncode or not value):
-            raise RuntimeError('pb %s failed: exit %d: %s' % (' '.join(words[:2]), done.returncode, (done.stdout + done.stderr)[-200:]))
+            error = value.get('error') or {}  # pb's own code and sentence when it printed one: the tail of the text is support ids
+            said = '%s: %s' % (error.get('code'), str(error.get('message'))[:160]) if error else (done.stdout + done.stderr)[-200:]
+            raise RuntimeError('pb %s failed: exit %d: %s' % (' '.join(words[:2]), done.returncode, said))
         return done.returncode, value
 
     def guard(self):
