@@ -160,6 +160,21 @@ const page = { url: () => "https://checkout.stripe.com/c/pay/cs_live_abc", getBy
 console.log(JSON.stringify(await payTestCheckout(page).then(() => "paid", (e) => e.message)))''')
         self.assertIn('refusing to pay', got)
 
+    def test_a_dropped_card_field_is_typed_again_before_submitting(self):
+        got = self.node('''
+import { keepTyped, sameValue, whyStillThere } from "./stripe_pay.mjs"
+const typed = {}, writes = []
+let dropped = false
+const field = async (name) => ({
+  inputValue: async () => typed[name] ?? "",
+  fill: async (v) => { typed[name] = v },
+  pressSequentially: async (v) => { writes.push(name); typed[name] = name === "Card number" && !dropped ? (dropped = true, "") : v.replace(/(.{4})(?=.)/g, "$1 ") },
+})
+await keepTyped({ waitForTimeout: async () => {} }, field, [["Card number", "4242424242424242"], ["Security code", "123"]])
+const stuck = await keepTyped({ waitForTimeout: async () => {} }, async () => ({ inputValue: async () => "", fill: async () => {}, pressSequentially: async () => {} }), [["Card number", "4242"]]).then(() => "kept", (e) => e.message)
+console.log(JSON.stringify([writes.filter((w) => w === "Card number").length, sameValue("12 / 34", "1234"), sameValue("4242 4242", "42424243"), stuck.includes("did not keep")]))''')
+        self.assertEqual(got, [2, True, False, True])
+
     def test_every_paid_invoice_below_the_history_heading_counts(self):
         got = self.node('''
 import { historyOf, paidRows, amount } from "./billing_console.mjs"
