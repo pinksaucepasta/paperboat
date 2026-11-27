@@ -21,6 +21,7 @@ pb daemon [flags]
       --foreground      run the Paperboat service in the foreground as a container's main command (Linux)
   -h, --help            help for daemon
       --server string   Paperboat server URL
+  -v, --version         version for daemon
 ```
 
 ### Options inherited from parent commands
