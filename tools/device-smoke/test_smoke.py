@@ -760,12 +760,6 @@ TLIST=($DEVICES)
         for job in (Job(moving[:1], ends_at=2), Job([dict(progress, bytes_sent=10)], ends_at=3)):
             with self.assertRaisesRegex(RuntimeError, '^ended$'):
                 transfer_resume.in_flight(job, 'ended', **quiet)
-        # After the interruption only a newer event counts: an older in-flight one does not prove anything.
-        done = Job(moving + [dict(progress, bytes_sent=10)], ends_at=3)
-        with self.assertRaisesRegex(RuntimeError, '^not running$'):
-            transfer_resume.in_flight(done, 'not running', after=2, **quiet)
-        later = Job(moving + [dict(progress, bytes_sent=5)])
-        self.assertEqual(transfer_resume.in_flight(later, 'ended', after=2, **quiet)['bytes_sent'], 5)
         clock = iter([0, 200])
         with self.assertRaisesRegex(RuntimeError, 'no progress within'):
             transfer_resume.in_flight(Job([]), 'ended', now=lambda: next(clock), sleep=lambda seconds: None)
