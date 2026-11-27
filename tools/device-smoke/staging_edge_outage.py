@@ -4,23 +4,25 @@ cut off the control server for 100 s, stay served after it returns, and drop onl
 
 Usage: fixture_checks.py staging-edge-outage   (smoke.sh row of the same name)
 Settings: staging_host (targets.json top level), SMOKE_STAGING_API (the staging API URL), SMOKE_STAGING_MACHINE (a paired
-staging fixture container there, default pb-stg-a), SMOKE_STAGING_EDGES (CONTAINER:PUBLIC_HTTPS_PORT:NODE_ID, comma
-separated, default pb-stg-edge:18446:stg_managed_edge).
+staging fixture container there, default pb-stg-a), SMOKE_STAGING_EDGES (CONTAINER:PUBLIC_HTTPS_PORT:NODE_ID[:HOST_IP],
+comma separated, default pb-stg-edge:18446:stg_managed_edge). HOST_IP: the edge's port is closed from outside the staging
+host, so for this run it is forwarded over ssh to that address of the host (the URL's name is still verified).
 Safety: before anything changes, the API host must carry an `stg` label and not be the operator's production API, the
 fixture's pb must be signed in to exactly that API, and every edge must be a pb-stg-edge container whose own
 control_url is that API. The cut is DROP rules on the control port inside the edge's network namespace only (public
 traffic still arrives), tagged with this run's id; a timer on the staging host removes them even if this process dies.
 One run at a time (a lock directory on the staging host). The tunnel and preview also expire by themselves.
 """
+import http.client
 import json
 import re
 import secrets
 import shlex
+import socket
+import ssl
 import subprocess
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 
 from ct_env import CT_DOCKER as DOCKER, CT_HOME, CT_RUNDIR, CT_USER
 
@@ -37,17 +39,26 @@ CONTAINER_USER = '-u %s -e HOME=%s -e XDG_RUNTIME_DIR=%s -w %s' % (CT_USER, CT_H
 
 
 def fetch(url, timeout=8):
-    """(status, body) of one new connection with the certificate verified; status 0 when there was no HTTP answer."""
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args):
-            return None
+    """(status, body) of one new connection with the certificate verified against the URL's name; status 0 when there was no
+    HTTP answer. A `#dial=IP` fragment connects to that address instead of the name's (an edge with no public port from
+    here); the name still goes in SNI, the certificate check and Host. Redirects are not followed."""
+    parsed = urllib.parse.urlsplit(url)
+    dial = parsed.fragment.partition('dial=')[2]
+
+    class Connection(http.client.HTTPSConnection):
+        def connect(self):
+            sock = socket.create_connection((dial or self.host, self.port), self.timeout)
+            self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
+
+    connection = Connection(parsed.hostname, parsed.port or 443, timeout=timeout)
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect).open(url, timeout=timeout) as reply:
-            return reply.status, reply.read(4096).decode(errors='replace')
-    except urllib.error.HTTPError as error:
-        return error.code, ''
-    except (OSError, ValueError):
+        connection.request('GET', parsed.path or '/')
+        reply = connection.getresponse()
+        return reply.status, reply.read(4096).decode(errors='replace')
+    except (OSError, ValueError, http.client.HTTPException):
         return 0, ''
+    finally:
+        connection.close()
 
 
 class Refused(RuntimeError):
@@ -60,10 +71,30 @@ class Staging:
         self.api = env.get('SMOKE_STAGING_API', '').rstrip('/')
         self.production = env.get('SMOKE_OPERATOR_API', '')
         self.machine = env.get('SMOKE_STAGING_MACHINE', 'pb-stg-a')
-        self.edges = []
+        self.edges, self.dials = [], {}
         for item in env.get('SMOKE_STAGING_EDGES', 'pb-stg-edge:18446:stg_managed_edge').split(','):
-            container, port, node = item.strip().split(':')
+            container, port, node, *dial = item.strip().split(':')
             self.edges.append((container, int(port), node))
+            if dial:
+                self.dials[container] = dial[0]
+
+    def forward(self, address, port, popen=subprocess.Popen, ready=15):
+        """Forwards 127.0.0.1:port here to address:port as the staging host reaches it, until the returned stop() is called."""
+        process = popen(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ExitOnForwardFailure=yes', '-N',
+                         '-L', '127.0.0.1:%d:%s:%d' % (port, address, port), self.host], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def stop():
+            process.terminate()
+            process.wait(timeout=15)
+        deadline = time.monotonic() + ready
+        while process.poll() is None and time.monotonic() < deadline:
+            try:
+                socket.create_connection(('127.0.0.1', port), 1).close()
+                return stop
+            except OSError:
+                time.sleep(0.5)
+        stop()
+        raise RuntimeError('cannot forward port %d to %s on the staging host (is the local port taken?)' % (port, address))
 
     def ssh(self, script, timeout=90, check=True, stdin=None):
         done = self.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', self.host, script], capture_output=True, text=True,
@@ -100,6 +131,8 @@ class Staging:
         for container, _, node in self.edges:
             if not re.fullmatch(r'pb-stg-edge[a-z0-9-]*', container) or not re.fullmatch(r'stg_[a-z0-9_]+', node):
                 raise Refused('%s / %s is not a staging edge container and node' % (container, node))
+            if not re.fullmatch(r'[0-9.]*', self.dials.get(container, '')):
+                raise Refused('the dial address of %s is not an IPv4 address' % container)
             control = self.ssh('f=$(%s inspect -f %s %s) && sudo -n cat "$f/deployment.json" | python3 -c %s' % (
                 DOCKER, shlex.quote('{{range .Mounts}}{{if eq .Destination "/state"}}{{.Source}}{{end}}{{end}}'), container,
                 shlex.quote('import json,sys; print(json.load(sys.stdin)["control_url"])'))).stdout.strip().rstrip('/')
@@ -164,7 +197,8 @@ class Run:
         parsed = urllib.parse.urlsplit(endpoint)
         if parsed.scheme != 'https' or 'stg' not in (parsed.hostname or '').split('.'):
             raise RuntimeError('the endpoint %r is not a staging name' % endpoint)
-        return [(container, 'https://%s:%d/' % (parsed.hostname, port)) for container, port, _ in self.s.edges]
+        return [(container, 'https://%s:%d/%s' % (parsed.hostname, port, '#dial=127.0.0.1' if container in self.s.dials else ''))
+                for container, port, _ in self.s.edges]
 
     def served(self, url):
         status, body = self.fetch(url)
@@ -230,6 +264,10 @@ def drill(run, tag, leftovers):
         run.log(False, 'no other staging edge disturbance is running', 'lock %s on the staging host is held (remove it only when no run is active)' % LOCK)
         return
     try:
+        for container, port, _ in s.edges:
+            if container in s.dials:
+                cleanups.append(('port forward of %s' % container, s.forward(s.dials[container], port)))
+                run.log(True, '%s is reached through the staging host (its port is closed from here)' % container)
         for container, _, node in s.edges:
             netns[container] = s.netns(container)
             if 'DROP' in s.rules(netns[container]):

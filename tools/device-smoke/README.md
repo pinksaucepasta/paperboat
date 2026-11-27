@@ -118,7 +118,7 @@ edge during the row.
 | `staging_host` (top level) | none |
 | `SMOKE_STAGING_API` | none, e.g. `https://REGION.stg.DOMAIN:18443` |
 | `SMOKE_STAGING_MACHINE` | `pb-stg-a` (a paired container on `staging_host`) |
-| `SMOKE_STAGING_EDGES` | `pb-stg-edge:18446:stg_managed_edge` (container, public HTTPS port, node id; comma separated) |
+| `SMOKE_STAGING_EDGES` | `pb-stg-edge:18446:stg_managed_edge` (container, public HTTPS port, node id; comma separated; list every running edge). A fourth field, an IPv4 address of the staging host, is for an edge whose port is closed from outside it: the row forwards the port over ssh, so that edge is checked from the staging host only |
 
 Needed beforehand: the staging server, edge and fixture on the build under test (`deploy/staging.py status`, `check`, `edge IMAGE`).
 F21-37 (idle public TCP and TLS-passthrough streams) has no row: staging has no public TCP or TLS routes (`public_routes: []`).

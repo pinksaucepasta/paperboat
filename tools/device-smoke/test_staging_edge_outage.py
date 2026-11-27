@@ -89,14 +89,22 @@ class Clock:
         self.now += seconds
 
 
-def drill(host, fetch=None, env=ENV):
+def drill(host, fetch=None, env=ENV, forwards=None):
     clock = Clock()
 
     def served(url):
         kind = 'tunnel' if '//a.' in url else 'preview'
         return (404, '') if kind in host.deleted else (200, 'marker-x')
 
-    run = row.Run(row.Staging(env, 'user@staging', run=host), 'marker-x', sleep=clock.sleep, clock=clock, fetch=fetch(host, clock, served) if fetch else served)
+    staging = row.Staging(env, 'user@staging', run=host)
+    forwards = [] if forwards is None else forwards
+
+    def forward(address, port):
+        forwards.append(('open', address, port))
+        return lambda: forwards.append(('closed', address, port))
+
+    staging.forward = forward
+    run = row.Run(staging, 'marker-x', sleep=clock.sleep, clock=clock, fetch=fetch(host, clock, served) if fetch else served)
     leftovers = []
     with mock.patch('builtins.print'):
         try:
@@ -131,6 +139,52 @@ class Guards(unittest.TestCase):
         self.assertEqual(2, insert.count('--comment edgeout-1 -j DROP'))
         self.assertEqual(2, undo.count('--comment edgeout-1 -j DROP'))
         self.assertNotIn(' -F', undo)
+
+
+class Fetch(unittest.TestCase):
+    def test_a_dial_address_keeps_the_name_for_the_certificate_and_host(self):
+        seen = []
+
+        def refuse(address, timeout):
+            seen.append(address)
+            raise OSError('closed')
+
+        with mock.patch.object(row.socket, 'create_connection', refuse):
+            self.assertEqual((0, ''), row.fetch('https://a.pub.stg.example.test:18456/#dial=10.0.0.7'))
+            row.fetch('https://a.pub.stg.example.test:18446/')
+        self.assertEqual([('10.0.0.7', 18456), ('a.pub.stg.example.test', 18446)], seen)
+
+    def test_an_edge_with_a_dial_address_gets_it_on_its_urls_only(self):
+        env = dict(ENV, SMOKE_STAGING_EDGES='pb-stg-edge:18446:stg_a,pb-stg-edge-b:18456:stg_b:10.0.0.7')
+        run = row.Run(row.Staging(env, 'u@h', run=Host()), 'm')
+        self.assertEqual([('pb-stg-edge', 'https://x.pub.stg.example.test:18446/'), ('pb-stg-edge-b', 'https://x.pub.stg.example.test:18456/#dial=127.0.0.1')],
+                         run.addresses('https://x.pub.stg.example.test'))
+        with self.assertRaises(row.Refused):
+            row.Staging(dict(ENV, SMOKE_STAGING_EDGES='pb-stg-edge:1:stg_a:evil.example'), 'u@h', run=Host()).guard()
+
+
+class Forward(unittest.TestCase):
+    def test_the_forward_lasts_the_run_and_is_closed_even_when_the_drill_crashes(self):
+        env = dict(ENV, SMOKE_STAGING_EDGES='pb-stg-edge:18446:stg_a,pb-stg-edge-b:18456:stg_b:10.0.0.7')
+        forwards = []
+        run, leftovers = drill(Host(), env=env, forwards=forwards)
+        self.assertEqual((0, []), (run.failed, leftovers), run.lines)
+        self.assertEqual([('open', '10.0.0.7', 18456), ('closed', '10.0.0.7', 18456)], forwards)
+
+        def crash(host, clock, served):
+            def fetch(url):
+                raise KeyboardInterrupt
+            return fetch
+        forwards = []
+        with self.assertRaises(KeyboardInterrupt):
+            drill(Host(), crash, env=env, forwards=forwards)
+        self.assertEqual('closed', forwards[-1][0])
+
+    def test_a_forward_that_never_listens_is_an_error_and_its_process_is_stopped(self):
+        process = mock.Mock(**{'poll.return_value': 1})
+        with self.assertRaises(RuntimeError):
+            row.Staging(ENV, 'u@h', run=Host()).forward('10.0.0.7', 18456, popen=lambda *a, **k: process, ready=1)
+        process.terminate.assert_called_once()
 
 
 class EveryEdge(unittest.TestCase):
