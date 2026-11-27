@@ -22,7 +22,7 @@ func HealMachineGuard(ctx context.Context, source installsource.Source, executab
 		return false, hostInstallFailure("verify Paperboat machine guard executable", err)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	readyErr := existingMachineGuardReady(probeCtx, source.Version, machineguard.Revision)
+	readyErr := existingMachineGuardReady(probeCtx, source.Version, 0)
 	domain := ""
 	if readyErr != nil {
 		domain = existingMachineGuardDomain(probeCtx)
@@ -40,7 +40,7 @@ func HealMachineGuard(ctx context.Context, source installsource.Source, executab
 	}
 	if err == nil {
 		verifyCtx, cancelVerify := context.WithTimeout(ctx, 15*time.Second)
-		err = existingMachineGuardReady(verifyCtx, source.Version, machineguard.Revision)
+		err = existingMachineGuardReady(verifyCtx, source.Version, 0)
 		cancelVerify()
 	}
 	if err != nil {

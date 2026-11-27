@@ -86,7 +86,9 @@ func readyMachineGuard(ctx context.Context, version string, revision int) (resul
 // version or a release not older. Development versions do not order, so a development build keeps only a
 // guard of its own revision (an official guard with another revision is replaced, 2026-11-27: pb 2026.11.26.21
 // updating to a dev build kept its own guard), and a release keeps a development guard only when that guard
-// carries newer guard code (canaries 2026-11-26: custom -> official kept the custom build's guard).
+// carries newer guard code (canaries 2026-11-26: custom -> official kept the custom build's guard). Revision 0
+// (the candidate's revision is unknown: Windows, the heal, a candidate built before it reported one) keeps only
+// the same version or a release not older, so an unknown build never keeps a guard it cannot prove is its own.
 func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string, revision int) bool {
 	if status.Version == version {
 		return true
@@ -94,19 +96,22 @@ func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string, rev
 	if order, err := selfupdate.CompareVersions(status.Version, version); err == nil {
 		return order >= 0
 	}
+	if revision == 0 {
+		return false
+	}
 	if _, err := selfupdate.CompareVersions(version, version); err == nil {
 		return status.Revision > revision
 	}
 	return status.Revision == revision
 }
 
-// candidateGuardRevision is the guard revision of the build being installed: the units' own, or this
-// process's when the units are this build's (nil) or do not say (an older build's).
+// candidateGuardRevision is the guard revision of the build being installed: this process's for its own
+// units (nil), else the units' own, 0 when they do not say (never the installer's: it may be another build).
 func candidateGuardRevision(units *machineguard.UnitSet) int {
-	if units != nil && units.Revision != 0 {
-		return units.Revision
+	if units == nil {
+		return machineguard.Revision
 	}
-	return machineguard.Revision
+	return units.Revision
 }
 
 func validateMachineGuardStatus(status machineguard.RuntimeStatus) error {

@@ -139,7 +139,17 @@ func TestCandidateGuardRevisionIsTheUnits(t *testing.T) {
 	if got := candidateGuardRevision(nil); got != machineguard.Revision {
 		t.Fatalf("own build revision = %d", got)
 	}
-	if got := candidateGuardRevision(&machineguard.UnitSet{}); got != machineguard.Revision {
+	if got := candidateGuardRevision(&machineguard.UnitSet{}); got != 0 {
 		t.Fatalf("unknown revision = %d", got)
+	}
+	// An unknown candidate (Windows, the heal) keeps only its own version or a release not older.
+	official := machineguard.RuntimeStatus{Version: "2026.11.26.21", Revision: machineguard.Revision}
+	for version, keep := range map[string]bool{"dev-x": false, "2026.11.26.21": true, "2026.11.26.20": true, "2026.11.27.0": false} {
+		if got := MachineGuardNotOlder(official, version, 0); got != keep {
+			t.Errorf("unknown candidate %s: keep = %v", version, got)
+		}
+	}
+	if MachineGuardNotOlder(machineguard.RuntimeStatus{Version: "dev-a", Revision: machineguard.Revision + 9}, "2026.11.27.0", 0) {
+		t.Error("unknown release candidate kept a dev guard")
 	}
 }
