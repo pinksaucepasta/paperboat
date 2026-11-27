@@ -156,13 +156,16 @@ WHERE x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.desired='active' AND n
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state NOT IN ('pending','revoked','deleted')
  AND m.seat_state='occupied' AND m.public_identity_key=ra.public_identity_key
  AND identity.issued_at<=$1 AND identity.expires_at>$1
- AND node.registry_expires_at>$1 AND node.roles @> ARRAY['edge']::text[] AND node.drain_deadline IS NULL
+ AND node.registry_expires_at>$1 AND node.roles @> ARRAY['edge']::text[]
  -- A managed-only account eligible on this edge with a tunnel placed on no self-hosted node is node_route_eligible by
  -- its definition; anything else takes the full check.
  AND ((EXISTS(SELECT 1 FROM managed_account ma WHERE ma.account_id=t.account_id AND ma.owner_team_id IS NOT DISTINCT FROM t.owner_team_id)
    AND NOT EXISTS(SELECT 1 FROM selfhost_placements sp WHERE sp.resource_kind='tunnel' AND sp.resource_id=t.id))
   OR paperboat.node_route_eligible(node.id,t.account_id,r.id))
- AND node.state='ready' AND node.ready=true AND node.last_heartbeat_at>$1::timestamptz-interval '15 seconds'
+ -- A draining edge keeps serving the routes it already holds until its drain deadline (nodedrain.go); new placement
+ -- avoids it elsewhere. Same gate as the canonical route snapshot (control_plane.sql) and endpoints/edge.go.
+ AND ((node.state='ready' AND node.ready=true) OR (node.state='draining' AND node.drain_deadline>$1))
+ AND (node.drain_deadline IS NULL OR node.drain_deadline>$1) AND node.last_heartbeat_at>$1::timestamptz-interval '15 seconds'
 ORDER BY x.route_id,publication.hostname,publication.publication_id`
 
 // queryInWrittenJoinOrder runs one ingress projection in a read-only transaction that keeps the

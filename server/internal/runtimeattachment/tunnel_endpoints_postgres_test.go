@@ -414,6 +414,34 @@ VALUES ($1,$2,$3,decode(repeat('43',32),'hex'),'tunnel.create','tunnel',$4,'conn
 	if first, second := wire.IngressVersion(decisions, nil, nil, nil, nil, nil), wire.IngressVersion(again, nil, nil, nil, nil, nil); len(decisions) == 0 || first != second {
 		t.Fatalf("ingress version moved between idle pulls: %d decisions, %s then %s", len(decisions), first, second)
 	}
+	// F1: a drained edge keeps the routes it holds until its drain deadline (a plain drain and a drain-move's
+	// shorter deadline alike), and withdraws them once the deadline passes.
+	hasRoute := func(label string) bool {
+		got, err := ingressprojection.SQLIngressSource{DB: f.database, Quota: openQuota{}}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		for i := range got {
+			if got[i].Binding.RouteID == route {
+				return true
+			}
+		}
+		return false
+	}
+	for _, grace := range []string{"10 minutes", "90 seconds"} {
+		f.exec(t, `UPDATE control_tunnel_nodes SET state='draining',ready=false,drain_deadline=now()+$2::interval WHERE id=$1`, f.node, grace)
+		if !hasRoute("draining " + grace) {
+			t.Fatalf("draining edge (deadline in %s) dropped its route before the deadline", grace)
+		}
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET drain_deadline=now()-interval '1 second' WHERE id=$1`, f.node)
+	if hasRoute("drain deadline passed") {
+		t.Fatal("drained edge kept its route after the drain deadline")
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET state='ready',ready=true,drain_deadline=NULL WHERE id=$1`, f.node)
+	if !hasRoute("undrained") {
+		t.Fatal("route not restored after the edge returned to ready")
+	}
 	routesA, errA := control.CanonicalRouteSnapshot(f.ctx, f.node, f.edge.ProcessEpoch)
 	routesB, errB := control.CanonicalRouteSnapshot(f.ctx, f.node, f.edge.ProcessEpoch)
 	encodedA, _ := json.Marshal(routesA)

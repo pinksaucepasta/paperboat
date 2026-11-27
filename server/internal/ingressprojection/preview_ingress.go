@@ -44,8 +44,8 @@ WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
  AND m.public_identity_key=a.machine_identity_public_key AND identity.issued_at<=$3 AND identity.expires_at>$3
  AND (p.owner_team_id IS NULL OR (paperboat.team_paid_entitled(p.owner_team_id) AND paperboat.workspace_preview_management_allowed(p.account_id,p.owner_team_id,p.id)))
- AND n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[] AND n.registry_expires_at>$3
- AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds' AND n.drain_deadline IS NULL
+ AND ((n.state='ready' AND n.ready) OR (n.state='draining' AND n.drain_deadline>$3)) AND n.roles @> ARRAY['edge']::text[] AND n.registry_expires_at>$3
+ AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds' AND (n.drain_deadline IS NULL OR n.drain_deadline>$3)
  AND paperboat.node_preview_eligible(n.id,p.account_id,p.id)
  ORDER BY p.id,publication.hostname`
 
