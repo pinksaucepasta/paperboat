@@ -9,6 +9,7 @@ set -uo pipefail
 HOST=$1 VERSION=$2
 [[ $VERSION =~ ^20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$ ]] || { echo "bad release version" >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
+. "$HERE/ct_env.sh" # CT_DOCKER: HOST's docker command (SMOKE_CT_DOCKER)
 PUBLISHED=${SMOKE_SELFHOST_ORIGIN:?set SMOKE_SELFHOST_ORIGIN to the published self-host installer URL, https://get.<release domain>/selfhost}
 IMAGES=${SMOKE_SELFHOST_IMAGES:-ghcr.io/pinksaucepasta/paperboat}
 LOGS=${SMOKE_RESULTS_DIR:-$HERE/results}/selfhost; mkdir -p "$LOGS"; chmod 700 "$LOGS"
@@ -37,17 +38,17 @@ cp "$REPO/helper/deploy/qualify-fresh-host.sh" "$QUALIFY"
 images() { # every service image of VERSION is a multi-arch manifest
   local name arch out rc=0
   for name in server relay edge; do
-    out=$("${SSH[@]}" "sudo -n docker manifest inspect $IMAGES/$name:$VERSION") || { echo "FAIL $name:$VERSION: no manifest"; rc=1; continue; }
+    out=$("${SSH[@]}" "$CT_DOCKER manifest inspect $IMAGES/$name:$VERSION") || { echo "FAIL $name:$VERSION: no manifest"; rc=1; continue; }
     for arch in amd64 arm64; do grep -qE "\"architecture\": *\"$arch\"" <<<"$out" || { echo "FAIL $name:$VERSION has no linux/$arch"; rc=1; }; done
   done
   [ $rc != 0 ] || echo "PASS server, relay and edge $VERSION are linux/amd64 and linux/arm64"
   return $rc
 }
-fresh_host() { DOCKER="sudo docker" PAPERBOAT_QUALIFY_OLD_TAG=$VERSION timeout 900 sh "$QUALIFY" --ssh "$HOST" --both --published "$PUBLISHED"; }
+fresh_host() { DOCKER="$CT_DOCKER" PAPERBOAT_QUALIFY_OLD_TAG=$VERSION timeout 900 sh "$QUALIFY" --ssh "$HOST" --both --published "$PUBLISHED"; }
 on_host() { # qualify arguments: run on HOST, whose Docker holds the throwaway systemd container
   tar -czf - -C "$REPO" tools/fresh-host.sh -C "$REPO/.build/covf" qualify.sh |
     "${SSH[@]}" 'rm -rf covf-pbq && mkdir -p covf-pbq/.build/covf && tar -xzf - -C covf-pbq && mv covf-pbq/qualify.sh covf-pbq/.build/covf/' &&
-    "${SSH[@]}" "cd covf-pbq && DOCKER='sudo docker' PAPERBOAT_QUALIFY_OLD_TAG=$VERSION timeout 900 sh .build/covf/qualify.sh $* --published $PUBLISHED"
+    "${SSH[@]}" "cd covf-pbq && DOCKER='$CT_DOCKER' PAPERBOAT_QUALIFY_OLD_TAG=$VERSION timeout 900 sh .build/covf/qualify.sh $* --published $PUBLISHED"
 }
 commands() { "${SSH[@]}" "sh -s -- $PUBLISHED" <"$HERE/selfhost_commands.sh"; }
 
