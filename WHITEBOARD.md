@@ -357,3 +357,9 @@ ac1095ce while both go.mod files pin 2d32e5f0.
   "failed ... privileged cleanup returned an invalid result" although the new version installed and is ready. From code
   reading: the cancel check in `install_running_unix.go` reads a context cancelled later (`context.AfterFunc`), and the
   install's commit is not checked before calling it failed.
+- **Ctrl-C during a Mac restore (2026-11-27, device-checked):** on a paired Mac, Ctrl-C does not stop the automatic
+  restore; the old version comes back and `~/.local/bin/pb install` finishes cleanly (recovery step if in doubt). The
+  text is wrong, though: it says the install failed, suggests approving administrator access and adds "privileged
+  cleanup returned an invalid result", and never says the old version was restored. On an installed but not signed-in
+  Mac, `machineguard` stayed on the new version after the rollback and `pb install` did not replace it; not known
+  whether Ctrl-C causes that (next check: the same rollback without Ctrl-C).
