@@ -4,7 +4,8 @@
 # A raw SSH logon is a network session in session 0: the suite shows over a hundred failures there that are not product
 # bugs (no console, pipes, child processes; git cannot create folders). So this starts tools/win-test.sh as a scheduled
 # task of the machine's own user, interactive and highest: it runs in the logged-on console session, as the GitHub
-# runner's steps do (cross-platform.yml). Only committed files are tested. Each host runs one job at a time.
+# runner's steps do (cross-platform.yml). Only committed files are tested. Each host runs one job at a time,
+# and a host another lane holds on the runner board is refused (tools/runner-board.sh).
 # Prints the log; the go test -json events and the log are copied to ${WIN_TEST_OUT:-$TMPDIR/pb-win-test-<host>-<sha>}.
 set -euo pipefail
 
@@ -21,15 +22,18 @@ worktree=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
 [ -z "$(git status --porcelain --untracked-files=no)" ] || echo "win-remote-test: note: uncommitted changes are NOT tested (only HEAD $sha)" >&2
 exec 8>"${TMPDIR:-/tmp}/pb-win-remote-test-$host.lock"
 flock 8
+. tools/runner-board.sh
+board_guard "win-remote-test: $worktree $module $sha" "$host"
+trap board_release EXIT
 
 dir="pb-remote-test\\$worktree" task="pbtest-$worktree"
 out=${WIN_TEST_OUT:-${TMPDIR:-/tmp}/pb-win-test-$host-$sha}
 ssh_() { ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 "$host" "$@"; }
 cleanup() { ssh_ "schtasks /end /tn $task & schtasks /delete /tn $task /f" >/dev/null 2>&1 || true; }
-trap cleanup EXIT
+trap 'cleanup; board_release' EXIT
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/pb-win-remote-test.XXXXXX")
-trap 'rm -rf "$stage"; cleanup' EXIT
+trap 'rm -rf "$stage"; cleanup; board_release' EXIT
 git archive HEAD -- . ':!console' ':!marketing' | tar x -C "$stage"
 printf -v args ' %q' "$@"
 cat > "$stage/.pb-run.sh" <<RUN

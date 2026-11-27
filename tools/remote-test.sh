@@ -3,11 +3,12 @@
 #   tools/remote-test.sh <host> <module> [go test args...]
 # The host is an SSH destination or an alias in the local development target configuration.
 # Use a Linux host with Go, gcc, and passwordless sudo for CLI system fixtures. A host with
-# ~/.pb-test-pg-dsn runs PostgreSQL suites in separate databases. Each host runs one job at a time.
+# ~/.pb-test-pg-dsn runs PostgreSQL suites in separate databases. Each host runs one job at a time,
+# and a host another lane holds on the runner board is refused (tools/runner-board.sh).
 # Only committed files are synced, and GITHUB_SHA identifies the source revision.
 set -euo pipefail
 
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 [ $# -ge 2 ] || usage
 host=$1 module=$2
 shift 2
@@ -15,6 +16,7 @@ case $module in shared | cli | relay | edge | helper | server) ;; *) echo "remot
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+alias=$host
 host=$(python3 tools/device-smoke/dev_targets.py ssh "$host")
 [ -d "$module" ] || { echo "remote-test: no $module/ in $root" >&2; exit 2; }
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
@@ -30,9 +32,12 @@ for a in "$@"; do case $a in ./* | ...) wanted_pkg=1 ;; esac; done
 worktree=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
 exec 8>"${TMPDIR:-/tmp}/pb-remote-test-$host-$worktree.lock"
 flock 8
+. tools/runner-board.sh
+board_guard "remote-test: $worktree $module $(git rev-parse --short HEAD)" "$alias" "$host"
+trap board_release EXIT
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/pb-remote-test.XXXXXX")
-trap 'rm -rf "$stage"' EXIT
+trap 'rm -rf "$stage"; board_release' EXIT
 git archive HEAD -- . ':!console' ':!marketing' | tar x -C "$stage"
 sha=$(git rev-parse --short HEAD)
 
@@ -43,7 +48,8 @@ rsync -az --checksum --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remo
 # The quoted heredoc is the remote script; arguments are passed as positional parameters (no re-parsing).
 echo "remote-test: $host: go test -p 2 $* ($module)" >&2
 printf -v quoted ' %q' "$@"
-exec ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
+# Not exec: the EXIT trap releases the board lock. The script ends with this command's status.
+ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
   "cap=; systemctl --user show-environment >/dev/null 2>&1 && cap='systemd-run --user --scope -q -p MemoryMax=60%'; lock='flock -w 3600'; command -v flock >/dev/null || lock='lockf -t 3600'; GITHUB_SHA=$(git rev-parse HEAD) \$cap \$lock \$HOME/pb-remote-test/host.lock bash -s -- $module $worktree$quoted" <<'REMOTE'
 set -euo pipefail
 umask 022 # a host default of 002 makes every t.TempDir group-writable, which the daemon socket check refuses
