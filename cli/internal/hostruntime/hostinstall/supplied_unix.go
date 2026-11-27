@@ -5,6 +5,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
@@ -321,13 +323,34 @@ var (
 // to the update already under way and wait: the updater install-supplied just restarted takes the lock briefly
 // as it starts, and refusing there reported "busy ... installed version is unchanged" after the services had
 // been replaced (smoke 11-27 linuxpool-3, 5 of 10 same-version pb update --from).
+//
+// A commit or rollback that finds the lock held says once what it waits for, and waits at most one signed
+// activation (its 10 min stability window plus margin): a signed activation queued in the gap after a bound
+// install-supplied committed would otherwise hold pb update --from silent for up to 15 min.
 func lockSuppliedNative(ctx context.Context, root, operation string, explicit bool) (io.Closer, error) {
-	if !explicit || operation != "install-supplied" {
+	if !explicit {
 		return lockNative(ctx, root)
 	}
 	lock, err := tryLockNative(root)
-	if errors.Is(err, updated.ErrActivationPending) {
+	if !errors.Is(err, updated.ErrActivationPending) {
+		return lock, err
+	}
+	if operation == "install-supplied" {
 		return nil, hostdproto.ErrMaintenanceBusy
 	}
-	return lock, err
+	update := "another Paperboat update"
+	if candidate := updated.UnixActivationCandidate(root); candidate != "" {
+		update = "the Paperboat update to " + candidate
+	}
+	fmt.Fprintf(suppliedWaitOutput, "Waiting for %s that is finishing on this computer (at most %d minutes)...\n", update, int(suppliedCommitWait/time.Minute))
+	bounded, cancel := context.WithTimeout(ctx, suppliedCommitWait)
+	defer cancel()
+	return lockNative(bounded, root)
 }
+
+// suppliedCommitWait bounds a commit or rollback waiting for a signed activation: its stability window
+// (releasepolicy, 10 min) plus the health watch's margin, rounded up.
+const suppliedCommitWait = 11 * time.Minute
+
+// suppliedWaitOutput is the root step's stderr, which the invoking pb prints; tests replace it.
+var suppliedWaitOutput io.Writer = os.Stderr

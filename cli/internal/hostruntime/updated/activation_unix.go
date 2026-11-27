@@ -125,6 +125,15 @@ func readUnixHandoff(root string) (*unixActivationHandoff, error) {
 
 // UnixActivationActive lets a restarted ordinary updater initialize without
 // refreshing shared TUF state while the recovery helper owns the transaction.
+// UnixActivationCandidate is the version a queued or running signed activation installs, or "" without one.
+func UnixActivationCandidate(root string) string {
+	handoff, err := readUnixHandoff(root)
+	if err != nil || handoff == nil {
+		return ""
+	}
+	return handoff.Candidate
+}
+
 func UnixActivationActive(root, binary string, loadInstalled func() (installsource.Source, error)) (workerupdate.Release, bool, error) {
 	handoff, err := readUnixHandoff(root)
 	if err != nil || handoff == nil {

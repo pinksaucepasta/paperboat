@@ -3,10 +3,13 @@
 package hostinstall
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
@@ -39,5 +42,38 @@ func TestSuppliedUpdateCommitWaitsForABriefActivationLockHolder(t *testing.T) {
 	waited = 0
 	if _, err := lockSuppliedNative(ctx, "/state", "install-supplied", false); err != nil || waited != 1 {
 		t.Fatalf("an install that is not an explicit update waits: err=%v waited=%d", err, waited)
+	}
+}
+
+// A signed activation queued after a bound install-supplied committed holds the lock for its whole health check:
+// commit-supplied says once what it waits for and waits at most one activation, not 15 min in silence.
+func TestSuppliedUpdateCommitSaysWhatItWaitsForAndIsBounded(t *testing.T) {
+	previousTry, previousLock, previousOutput := tryLockNative, lockNative, suppliedWaitOutput
+	t.Cleanup(func() { tryLockNative, lockNative, suppliedWaitOutput = previousTry, previousLock, previousOutput })
+	tryLockNative = func(string) (io.Closer, error) { return nil, updated.ErrActivationPending }
+	var deadline time.Time
+	lockNative = func(ctx context.Context, _ string) (io.Closer, error) {
+		deadline, _ = ctx.Deadline()
+		return closedLock{}, nil
+	}
+	for _, operation := range []string{"commit-supplied", "rollback-supplied"} {
+		var output bytes.Buffer
+		suppliedWaitOutput = &output
+		deadline = time.Time{}
+		if _, err := lockSuppliedNative(context.Background(), t.TempDir(), operation, true); err != nil {
+			t.Fatal(err)
+		}
+		if got := output.String(); strings.Count(got, "Waiting for another Paperboat update that is finishing") != 1 || !strings.Contains(got, "at most 11 minutes") {
+			t.Fatalf("%s printed %q", operation, got)
+		}
+		if deadline.IsZero() || time.Until(deadline) > suppliedCommitWait {
+			t.Fatalf("%s waits unbounded or past one activation: deadline %v", operation, deadline)
+		}
+	}
+	tryLockNative = func(string) (io.Closer, error) { return closedLock{}, nil }
+	var output bytes.Buffer
+	suppliedWaitOutput = &output
+	if _, err := lockSuppliedNative(context.Background(), t.TempDir(), "commit-supplied", true); err != nil || output.Len() != 0 {
+		t.Fatalf("a free lock prints nothing: err=%v output=%q", err, output.String())
 	}
 }
