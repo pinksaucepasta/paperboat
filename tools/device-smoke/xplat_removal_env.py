@@ -35,7 +35,7 @@ DEVICES = {}
 def ensure_vault(ctl):
     """Create the account's ENV vault on the controller when there is none; the password file is the one xplat_env reads."""
     password = env.PASSWORD
-    if password.exists() and ctl.pb('env', 'vault', 'unlock', '--password-stdin', input=password.read_bytes().strip() + b'\n', timeout=120).rc == 0:
+    if password.exists() and ctl.pb('env', 'unlock', '--password-stdin', input=password.read_bytes().strip() + b'\n', timeout=120).rc == 0:
         return  # the vault of an earlier run of this account
     if not password.exists():
         password.write_bytes(os.urandom(18).hex().encode() + b'\n')
@@ -44,7 +44,7 @@ def ensure_vault(ctl):
     ctl.remove(ctl.home + '/.pb-xplat-recovery')
     ctl.write(remote, password.read_bytes(), mode='600')
     try:
-        done = ctl.pb('env', 'vault', 'init', '--password-file', remote, '--recovery-file', ctl.home + '/.pb-xplat-recovery', '--json', timeout=180)
+        done = ctl.pb('env', 'init', '--password-file', remote, '--recovery-file', ctl.home + '/.pb-xplat-recovery', '--json', timeout=180)
         text = done.text + done.errtext
         assert done.rc == 0 or 'already' in text.lower(), 'vault init failed: ' + text[-300:]
     finally:
@@ -52,7 +52,7 @@ def ensure_vault(ctl):
 
 
 def unlock(dev):
-    done = dev.pb('env', 'vault', 'unlock', '--password-stdin', input=env.PASSWORD.read_bytes().strip() + b'\n', timeout=120)
+    done = dev.pb('env', 'unlock', '--password-stdin', input=env.PASSWORD.read_bytes().strip() + b'\n', timeout=120)
     assert done.rc == 0, '%s: unlock failed: %s' % (dev.name, (done.text + done.errtext)[-200:])
 
 
