@@ -279,7 +279,11 @@ priority. Terminals narrower than 20 columns receive the full viewport without a
 Interactive `pb` attaches enable bracketed paste on the local terminal, so a paste
 or a dropped file can be told from typing. The remote program receives the paste
 markers only while it has asked for bracketed paste (DECSET 2004), as in tmux;
-otherwise (macOS bash 3.2, `cmd.exe`) it receives the plain text. A framed paste
+otherwise (macOS bash 3.2, `cmd.exe`) it receives the plain text. The local console
+also stays out of win32-input-mode, which a Windows target asks for: it would encode
+the paste as key records. A Windows target gets the same key input as from Linux or
+macOS, so key combinations only that mode can carry (such as Shift+Enter) arrive
+without the extra modifier. A framed paste
 containing only absolute local file paths is staged and rewritten to remote paths,
 whichever the program asked for. Supported path forms include `file://` URIs, quoted
 paths, and POSIX shell-escaped paths such as the escaped-space format emitted by

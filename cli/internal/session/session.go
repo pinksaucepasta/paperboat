@@ -124,6 +124,10 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 	} else if options.paste != nil {
 		options.paste.enabled.Store(true)
 	}
+	modes := options.paste
+	if modes == nil {
+		modes = &RemotePaste{unframed: true}
+	}
 
 	// Propagate the initial size and subsequent resizes.
 	stopResize := watchResize(readOnlyResize{Conn: conn, readOnly: options.isReadOnly}, options.remoteSize)
@@ -153,8 +157,8 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 				diagnostics.TerminalHop("client_terminal_write_start", "local", outputOffset, outputOffset+uint64(n), time.Now())
 				started := time.Now()
 				shown := buf[:n]
-				if isTerminal && options.paste != nil {
-					shown = options.paste.follow(shown)
+				if isTerminal {
+					shown = modes.follow(shown)
 				}
 				if _, writeErr := sink.Write(shown); writeErr != nil {
 					streamErr <- fmt.Errorf("write terminal output: %w", writeErr)
