@@ -71,7 +71,13 @@ class TargetYesWatcher(unittest.TestCase):
     def test_it_arms_on_the_flood_and_reports_the_end_only_when_yes_ends(self):
         with tempfile.TemporaryDirectory() as work:
             count = Path(work) / 'count'
-            count.write_text('1')  # one `yes` that was there before the flood
+
+            def set_count(text):  # replaced in one step: a `cat` must never see a half-written file
+                new = Path(work) / 'count.new'
+                new.write_text(text)
+                os.replace(new, count)
+
+            set_count('1')  # one `yes` that was there before the flood
             fake = Path(work) / 'pgrep'
             fake.write_text('#!/bin/sh\ncat %s\n' % shlex.quote(str(count)))
             fake.chmod(0o755)
@@ -79,14 +85,22 @@ class TargetYesWatcher(unittest.TestCase):
             watcher = conpty.YesWatcher(['env', 'PATH=' + path, 'sh', '-c', conpty.watch_script(1)])
             try:
                 self.assertIsNone(watcher._line(0.5))  # no new yes yet: neither armed nor an end time
-                count.write_text('2')
+                set_count('2')
                 self.assertEqual(watcher.armed(10), 2)
                 self.assertIsNone(watcher._line(0.5))  # still running
                 before = time.time()
-                count.write_text('1')
+                set_count('1')
                 gone = watcher.gone(10)
                 self.assertIsNotNone(gone)
                 self.assertGreaterEqual(gone, before)
+            finally:
+                watcher.close()
+            set_count('2')
+            watcher = conpty.YesWatcher(['env', 'PATH=' + path, 'sh', '-c', conpty.watch_script(1)])
+            try:
+                self.assertEqual(watcher.armed(10), 2)
+                set_count('')  # a count that failed is not an ended `yes`
+                self.assertIsNone(watcher.gone(10))
             finally:
                 watcher.close()
 

@@ -194,8 +194,9 @@ def clock_offset(pb, target):
 
 def watch_script(baseline):
     """Run on the target: wait for a new `yes` and print "armed N", then wait for it to end and print the target's clock (nothing if it still
-    runs after about 90 s). It gives up after about 90 s if no `yes` appears."""
-    count = '$(pgrep -x -c yes || true)'
+    runs about 90 s after it armed). It gives up after about 90 s if no `yes` appears, and at once on a count that is not a number: a failed
+    count must never read as "`yes` ended"."""
+    count = '$(pgrep -x -c yes || true); case $c in ""|*[!0-9]*) exit 5;; esac'
     return ('i=0; while c=%s; [ "$c" -le %d ]; do i=$((i+1)); [ $i -lt 800 ] || exit 3; sleep 0.1; done; echo "armed $c"; '
             'i=0; while c=%s; [ "$c" -gt %d ]; do i=$((i+1)); [ $i -lt 800 ] || exit 4; sleep 0.1; done; '
             'python3 -c "import time;print(time.time())"') % (count, baseline, count, baseline)
@@ -209,7 +210,8 @@ class YesWatcher:
     def __init__(self, argv):
         self.lines = queue.Queue()
         self.process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        threading.Thread(target=self._read, daemon=True).start()
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
 
     def _read(self):
         for line in self.process.stdout:
@@ -236,6 +238,10 @@ class YesWatcher:
 
     def close(self):
         self.process.kill()
+        self.process.wait(10)
+        self.reader.join(5)
+        if not self.reader.is_alive():
+            self.process.stdout.close()
 
 
 def main(pb, target, session, baseline):

@@ -742,7 +742,7 @@ def device_rows(events, baseline):
     if sent is None or 'gone' not in events:
         rows.append(('N6 Ctrl-C stops yes promptly', False, why))
     elif gone is None:
-        rows.append(('N6 Ctrl-C stops yes promptly', False, 'the target watcher did not see yes end within 90 s'))
+        rows.append(('N6 Ctrl-C stops yes promptly', False, 'the target watcher reported no end of yes (still running about 90 s after the flood started, or the watcher failed)'))
     elif gone - sent < -1:  # the clock offset is good to well under a second
         rows.append(('N6 Ctrl-C stops yes promptly', False, f'yes on the target ended {sent - gone:.1f} s before Ctrl-C was sent'))
     else:
@@ -768,7 +768,7 @@ def windows_client_ctrl_c(target, session):
                 while time.monotonic() < deadline:
                     done = process.returncode() is not None  # read the output after the exit code: nothing is written later
                     events = device_events(process.stdout().decode(errors='replace'))
-                    if done or 'error' in events or 'gone' in events:
+                    if done:  # not on its last event: it still has to close its ConPTY and its watcher
                         break
                     time.sleep(1)
                 else:
