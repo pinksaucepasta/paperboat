@@ -17,6 +17,10 @@ $token = [string]$env:PB_TOKEN
 $name = [string]$env:PB_NAME
 Remove-Item Env:PB_TOKEN -ErrorAction SilentlyContinue
 if ($repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'pb installer: PB_REPO must look like owner/repo' }
+# PB_NAME is checked before anything is downloaded, with the machine name rule (shared/machinename): only letters,
+# digits and inner hyphens can then reach pb's command line, which Windows PowerShell 5.1 does not quote safely.
+$name = $name.Trim().ToLowerInvariant()
+if ($name -ne '' -and $name -cnotmatch '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$') { throw 'Paperboat: PB_NAME is not a valid machine name. Use 1-63 letters, digits and hyphens, not starting or ending with a hyphen.' }
 # PB_RECIPE pairs from a recipe token and refuses at once, before anything is installed (PLAN F26).
 $recipe = -not [string]::IsNullOrWhiteSpace([string]$env:PB_RECIPE)
 if ($recipe) {
@@ -143,15 +147,14 @@ try {
     $installedPb = Invoke-PaperboatInstall $download
     Write-Host "Installed pb to $installedPb"
   }
-  if ($recipe) {
-    # pb pair reads PB_RECIPE; an already paired machine is left as it is.
+  if ($recipe -or $null -ne $tokenFile) {
+    # One pairing path: a recipe (pb pair reads PB_RECIPE; an already paired machine is left as it is) or an
+    # enrollment token file, both named by PB_NAME. Without it pb pair names the machine from the host name, as with
+    # install.sh (COMPUTERNAME is cut to 15 characters and can end in a hyphen, which pairing refuses). It uses the
+    # installed binary and never purges an existing identity.
     $pairArgs = @('pair')
-    Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
-  } elseif ($null -ne $tokenFile) {
-    if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$env:COMPUTERNAME }
-    $name = $name.Trim().ToLowerInvariant()
-    # Pairing uses the installed binary and never purges an existing identity.
-    $pairArgs = @('pair', '--enrollment-token-file', $tokenFile, '--name', $name)
+    if (-not $recipe) { $pairArgs += @('--enrollment-token-file', $tokenFile) }
+    if ($name -ne '') { $pairArgs += @('--name', $name) }
     Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
   } else {
     # No token: continue into the browser approval, which adds this computer to the account.

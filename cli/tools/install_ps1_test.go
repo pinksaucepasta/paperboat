@@ -64,7 +64,7 @@ func runWindowsInstaller(t *testing.T, r *fakeRelease, noSSHKeygen bool, env ...
 		script += "$env:PATH = '" + filepath.Join(r.root, "empty") + "'\n"
 	}
 	// pwsh on Linux is not Windows: the installer's OS guard (checked by its own test) is cut out so its download logic runs here.
-	script += "$text = (Get-Content -Raw -LiteralPath '" + r.powershell + "') -replace '(?m)^if \\(\\$PSVersionTable\\.PSEdition -eq ''Core'' -and -not \\$IsWindows\\).*$', ''\nInvoke-Expression $text\n"
+	script += "$text = (Get-Content -Raw -LiteralPath '" + r.powershell + "') -replace '(?m)^if \\(\\$PSVersionTable\\.PSEdition -eq ''Core'' -and -not \\$IsWindows\\).*$', ''\n$text = $text -replace '(?m)^  \\$principal = .*$', '' -replace '(?m)^  if \\(-not \\$principal\\.IsInRole.*$', ''\nInvoke-Expression $text\n"
 	if err := os.WriteFile(harness, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -247,5 +247,36 @@ func TestInstallPowerShellOnANonWindowsHostSaysWhichCommandToUse(t *testing.T) {
 	out, err := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", "install.ps1").CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "this command is for Windows") || strings.Contains(string(out), "Download") {
 		t.Fatalf("pwsh on this host: err %v, output %q", err, out)
+	}
+}
+
+// A recipe install pairs through the same path as a token install, named by PB_NAME (the Windows recipe row gave the
+// machine the computer's hostname). The administrator check is cut out above: pwsh on Linux has no Windows principal.
+func TestInstallPowerShellRecipeInstallPairsWithPBName(t *testing.T) {
+	r := windowsRelease(t)
+	calls, out, err := runWindowsInstaller(t, r, false, "PB_RECIPE=pbr_"+strings.Repeat("a", 63), "PB_NAME=Runner-7")
+	if err != nil {
+		t.Fatalf("installer failed: %v\n%s", err, out)
+	}
+	if joined := strings.Join(calls, "\n"); !strings.Contains(joined, "pb pair --name runner-7") {
+		t.Fatalf("recipe pair did not get PB_NAME: %q", calls)
+	}
+}
+
+// Without PB_NAME a recipe install lets pb pair choose the name (the token path writes a Windows ACL, so it is checked
+// on Windows machines): COMPUTERNAME is cut to 15 characters and can end in
+// a hyphen, which pairing refuses. An invalid PB_NAME (here one that would add arguments under Windows PowerShell 5.1)
+// is refused before anything is downloaded, without echoing it.
+func TestInstallPowerShellRecipeNameDefaultsAndRefusesABadPBNameFirst(t *testing.T) {
+	r := windowsRelease(t)
+	calls, out, err := runWindowsInstaller(t, r, false, "PB_RECIPE=pbr_"+strings.Repeat("a", 63), "COMPUTERNAME=MY-LONG-HOST-0-")
+	if err != nil || calls[len(calls)-1] != "pb pair" {
+		t.Fatalf("recipe without PB_NAME: %v %q\n%s", err, calls, out)
+	}
+	for _, bad := range []string{`box" --server https://other.example "`, "-box", "box-", "b_x", strings.Repeat("a", 64)} {
+		calls, out, err := runWindowsInstaller(t, windowsRelease(t), false, "PB_RECIPE=pbr_"+strings.Repeat("a", 63), "PB_NAME="+bad)
+		if err == nil || !strings.Contains(out, "PB_NAME is not a valid machine name") || strings.Contains(out, "other.example") || strings.Join(calls, "") != "" {
+			t.Fatalf("PB_NAME=%q: err=%v calls=%q\n%s", bad, err, calls, out)
+		}
 	}
 }
