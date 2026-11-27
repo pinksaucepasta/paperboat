@@ -1,11 +1,12 @@
 #!/bin/bash
-# fixture_machine.sh up HOST NAME BINARY STATE | down HOST NAME [MACHINE_ID]
+# fixture_machine.sh up HOST NAME BINARY STATE | bare HOST NAME | down HOST NAME [MACHINE_ID]
 # A disposable systemd container NAME on HOST (image SMOKE_CT_IMAGE, built from its <image>.Dockerfile when HOST lacks it) with BINARY
 # installed and paired as a machine of the console account in STATE (a Playwright storage state, mode 600, from console_session.mjs
 # or fresh_account.mjs). The account is whoever STATE is: the Free fixture, the smoke team's owner, a member. HOST needs only Docker.
 #   up    prints one JSON line {"name","machine_id","prefix"}; prefix is a shell prefix that runs ONE shell-string argument as the
 #         container user in its home (`ssh HOST docker exec -i ... NAME`), and the pb path in it is $HOME/.local/bin/pb. On any
 #         failure it removes what it made, says why on stderr (token-like strings redacted) and exits 1.
+#   bare  the same container with nothing of Paperboat in it (recipe_checks.py installs with the product's one-liner)
 #   down  the machine revokes itself by exact id (its own session, `pb machine revoke ID`, then --confirm TOKEN), then the container
 #         goes. No MACHINE_ID: only the container. Exit 1 when the revoke failed. Safe to run twice.
 # env: ORIGIN, PW_CHROMIUM, [PW_MODULE] (as mint_enrollment_token.mjs); SMOKE_CT_* as in ct_env.sh; [SMOKE_CT_TZ] the local zone. The enrollment token goes from
@@ -14,7 +15,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/stage_binary.sh"
 . "$HERE/ct_env.sh"
-usage() { echo "usage: $0 up HOST NAME BINARY STATE | down HOST NAME [MACHINE_ID]" >&2; exit 2; }
+usage() { echo "usage: $0 up HOST NAME BINARY STATE | bare HOST NAME | down HOST NAME [MACHINE_ID]" >&2; exit 2; }
 ACTION=${1:-} HOST=${2:-} NAME=${3:-}
 [ -n "$HOST" ] && [[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || usage
 redact() { sed -E "s/[A-Za-z0-9_+\/=-]{24,}/<redacted>/g"; }
@@ -39,6 +40,17 @@ ensure_image() { # build the harness image on HOST once, from $CT_IMAGE.Dockerfi
   tar -C "$HERE" -cf - "$CT_IMAGE.Dockerfile" | ssh "$HOST" "d=\$(mktemp -d) && tar -xf - -C \$d && $CT_DOCKER build -q -t $CT_IMAGE -f \$d/$CT_IMAGE.Dockerfile \$d >/dev/null; rc=\$?; rm -rf \$d; exit \$rc"
 }
 
+start_ct() { # a booted systemd container NAME with the test user's manager running; $1: more setup (starts with &&)
+  ssh -n "$HOST" "$CT_DOCKER rm -f $NAME >/dev/null 2>&1; $CT_DOCKER run -d --name $NAME --hostname $NAME --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null && sleep 8 ${1:-} \
+    && $CT_DOCKER exec $NAME loginctl enable-linger $CT_USER && $CT_DOCKER exec $NAME systemctl start user@$CT_UID.service"
+}
+
+bare() {
+  ensure_image || { echo "fixture_machine: could not build the container image on $HOST" >&2; exit 1; }
+  start_ct 2>&1 | redact >&2
+  [ "${PIPESTATUS[0]}" = 0 ] || { down ""; echo "fixture_machine: could not start the container on $HOST" >&2; exit 1; }
+}
+
 up() {
   local bin=${4:-} state=${5:-} out id
   [ -r "$bin" ] && [ -r "$state" ] && [ -n "${ORIGIN:-}" ] && [ -n "${PW_CHROMIUM:-}" ] || usage
@@ -52,10 +64,9 @@ up() {
     [[ "$SMOKE_CT_TZ" =~ ^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$ ]] || fail "SMOKE_CT_TZ is not a zone name"
     zone="&& $CT_DOCKER exec $NAME rm -f /etc/localtime && $CT_DOCKER cp -L /usr/share/zoneinfo/$SMOKE_CT_TZ $NAME:/etc/localtime"
   fi
-  ssh -n "$HOST" "$CT_DOCKER rm -f $NAME >/dev/null 2>&1; $CT_DOCKER run -d --name $NAME --hostname $NAME --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null && sleep 8 $zone \
-    && $CT_DOCKER exec $NAME loginctl enable-linger $CT_USER && $CT_DOCKER exec $NAME systemctl start user@$CT_UID.service \
-    && $CT_DOCKER cp /tmp/$NAME.pb $NAME:$CT_HOME/pb && rm -f /tmp/$NAME.pb && $CT_DOCKER exec $NAME sh -c 'chown $CT_USER:$CT_USER $CT_HOME/pb && chmod 755 $CT_HOME/pb' \
-    && $X ./pb install >/dev/null" 2>&1 | redact >&2
+  { start_ct "$zone" >/dev/null \
+    && ssh -n "$HOST" "$CT_DOCKER cp /tmp/$NAME.pb $NAME:$CT_HOME/pb && rm -f /tmp/$NAME.pb && $CT_DOCKER exec $NAME sh -c 'chown $CT_USER:$CT_USER $CT_HOME/pb && chmod 755 $CT_HOME/pb' \
+    && $X ./pb install >/dev/null"; } 2>&1 | redact >&2
   [ "${PIPESTATUS[0]}" = 0 ] || fail "could not install the build in the container on $HOST"
   STATE=$state node "$HERE/mint_enrollment_token.mjs" | ssh "$HOST" "$CT_DOCKER exec -i -u $CT_USER $NAME sh -c 'umask 077; cat > $CT_HOME/token'" \
     || fail "could not mint or deliver the enrollment token (is the console session in $state still valid?)"
@@ -68,6 +79,7 @@ up() {
 
 case $ACTION in
   up) up "$@" ;;
+  bare) bare ;;
   down) down "${4:-}" ;;
   *) usage ;;
 esac

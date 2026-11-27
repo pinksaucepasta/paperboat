@@ -63,6 +63,21 @@ E2E gives every shard with these rows the `browser` lock. Every row keeps its st
 | `console-invite-mail` | F12-02-mail-live | invites a new disposable mail.tm inbox (only this run can read it; no other address is ever invited) to the smoke team, reads the mail, Resends from the console, opens the link signed out and signs up. `SMOKE_MAIL_CONSOLE_ORIGIN` is the console the server writes into mail links (default `SMOKE_CONSOLE_ORIGIN`); a link to another host fails and is not opened. The invitation is cancelled by its id and the account deleted. |
 | `console-recording-replay` | F25-05 | a throwaway owner and sandbox-paid team as in `recording-key-rotation`; `record_for_replay.py` makes a ticking, a tiny and a ~40 MB recording on the team machine and `check-recordings.mjs` replays them in the browser (decrypt, play, pause, seek, speed, unknown recording, REC in the web terminal, then every replay rule removed while the long one downloads). A skipped step fails the row (except the offline-machine state, not in the cell). Deleting the account deletes the team. Linux recordings only; Windows and macOS targets stay with X-33. |
 
+## Recipe rows (PLAN F26)
+
+`recipe_checks.py` (smoke.sh `recipe-lifecycle`, `recipe-errors`, `recipe-vaults`, `recipe-api-tokens`, `recipe-lifetimes`,
+`recipe-install:{container,linux,macos,windows}`; CHECKLIST F26-01..04, F26-06..08, X-47). One run makes one throwaway console
+account (so the smoke account's ENV password never leaves the controller, and deleting the account takes every recipe, vault,
+tag and machine with it) and a paired creator container on `SMOKE_FIXTURE_HOST` (`SMOKE_FIXTURE_PB`). Linux targets are
+containers there. The real-machine rows are NOT RUN unless the run names a throwaway machine **with no Paperboat on it**:
+`SMOKE_RECIPE_LINUX_SSH`, `SMOKE_RECIPE_MACOS_SSH` (passwordless sudo), `SMOKE_RECIPE_WINDOWS_SSH` (key login as an
+administrator, e.g. `winpool-N`). A machine that has Paperboat, a paired smoke machine or a personal PC is refused untouched;
+a used one is uninstalled at the end. The one-liner is the line `pb recipe create` prints (`curl -fsSL <installer> | sh`,
+`irm <installer> | iex`), with `PB_RECIPE` on stdin, pinned to `--expect-version` when that is a release. `recipe-lifetimes`
+takes about 10 minutes. Not automated: the console's offer to create a missing vault (its recipe editor was removed on
+2026-11-21; the CLI path is checked) and reading the server's stored vault bytes.
+
+
 ## Extra Windows machines (winpool)
 
 `winpool.sh` turns up to fourteen GitHub-hosted `windows-latest` runners into temporary Windows test machines, so

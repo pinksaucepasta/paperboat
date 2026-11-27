@@ -1400,9 +1400,37 @@ fixture_check() {
   else record "$1" FAIL $(( $(now)-t0 )) "${detail#FAIL }"; fi
 }
 
+# recipe_checks_run: PLAN F26 (CHECKLIST F26-01..04, F26-06..08, X-47) through recipe_checks.py, one run (one throwaway account and
+# creator container on SMOKE_FIXTURE_HOST) that prints a receipt line per row. A real Linux, macOS or Windows row needs a clean
+# throwaway machine (SMOKE_RECIPE_<OS>_SSH, no Paperboat on it); without one it is NOT RUN.
+RECIPE_CHECKS="recipe-lifecycle recipe-errors recipe-vaults recipe-api-tokens recipe-lifetimes recipe-install:container"
+RECIPE_MACHINE_CHECKS="recipe-install:linux recipe-install:macos recipe-install:windows"
+recipe_checks_run() {
+  local id os setting out line status secs detail ids=()
+  for id in $RECIPE_CHECKS; do skipped "$id" || ids+=("$id"); done
+  for id in $RECIPE_MACHINE_CHECKS; do
+    skipped "$id" && continue
+    os=${id#*:}; setting=SMOKE_RECIPE_${os^^}_SSH
+    if [ -n "${!setting:-}" ]; then ids+=("$id"); else record "$id" "NOT RUN" 0 "no clean $os machine in this run ($setting)"; fi
+  done
+  [ ${#ids[@]} -gt 0 ] || return 0
+  out=$(python3 "$HERE/recipe_checks.py" "$(IFS=,; echo "${ids[*]}")" --expect-version "$EXPECT_VERSION")
+  for id in "${ids[@]}"; do
+    line=$(python3 -c 'import json,sys
+for text in sys.argv[1].splitlines():
+    try: row = json.loads(text)
+    except ValueError: continue
+    if isinstance(row, dict) and row.get("check") == sys.argv[2]:
+        print(row["status"], row["seconds"], " ".join(str(row["detail"]).split())); break' "$out" "$id")
+    read -r status secs detail <<<"$line"
+    if [ "$status" = PASS ]; then record "$id" PASS "$secs" "$detail"
+    else record "$id" FAIL "${secs:-0}" "${detail:-no receipt from recipe_checks.py}"; fi
+  done
+}
+
 # ---------------------------------------------------------------- run
 # Preflight: every operator fixture of the checks about to run exists, or nothing starts (preflight_fixtures.py names what is missing).
-fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation console-team-admin console-signout-switch console-invite-mail console-recording-replay; do skipped "$id" || printf '%s,' "$id"; done)
+fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation console-team-admin console-signout-switch console-invite-mail console-recording-replay $RECIPE_CHECKS $RECIPE_MACHINE_CHECKS; do skipped "$id" || printf '%s,' "$id"; done)
 [ -z "$fixture_ids" ] || python3 "$HERE/preflight_fixtures.py" --checks "${fixture_ids%,}" || exit 2
 IFS=, read -r -a TLIST <<<"$TARGETS"
 echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARGETS"
@@ -1514,6 +1542,7 @@ fixture_check console-team-admin
 fixture_check console-signout-switch
 fixture_check console-invite-mail
 fixture_check console-recording-replay
+recipe_checks_run
 test_update_scheduled
 test_update_window
 test_update_fresh_install

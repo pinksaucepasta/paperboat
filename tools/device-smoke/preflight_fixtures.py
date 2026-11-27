@@ -19,6 +19,7 @@ import sys
 
 import ct_env
 import dev_targets
+import recipe_checks
 
 HERE = Path(__file__).resolve().parent
 ENV = dev_targets.smoke_environment(dev_targets.load())
@@ -34,6 +35,8 @@ NEEDS = {
     'console-signout-switch': ['console_tools', 'operator_session', 'operator_password', 'team_admin'],
     'console-invite-mail': ['console_tools', 'operator_session', 'team_admin'],
     'console-recording-replay': ['console_tools', 'fixture_host'],
+    # recipe_checks.py: throwaway console accounts and containers; the clean real machines are optional (their rows are NOT RUN without)
+    **{check: ['console_tools', 'fixture_host'] for check in recipe_checks.CHECKS},
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
 NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],
