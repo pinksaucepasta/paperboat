@@ -67,11 +67,38 @@ export const useGitHubConnect = (returnTo: string) =>
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
   })
 
+/** Refusals that are about the GitHub account just chosen, so an earlier connection doesn't answer them. */
+const refusedAccount = new Set(["github_scope_denied", "github_identity_conflict"])
+
 /**
- * Finishes a console-started connect with the code GitHub returned (through /github/callback). Read
- * directly: a 401 here is GitHub refusing the code (github_oauth_failed), not an ended session.
+ * Finishes a console-started connect. The code works once, so a repeated callback (a reload, or one whose first
+ * answer never arrived) is refused although GitHub is connected: the connection's status decides.
  */
-export async function finishConnect(code: string, state: string) {
+export async function finishConnect(code: string, state: string): Promise<GitHubStatus & { return_to?: string }> {
+  try {
+    return await exchangeCode(code, state)
+  } catch (error) {
+    if (!(error instanceof ApiError) || refusedAccount.has(error.code)) throw error
+    const status = await api<GitHubStatus>("github/status").catch(() => null)
+    if (status?.connected) return status
+    throw error
+  }
+}
+
+/** The callback's one request. It sends the code by itself once: focus, reconnect and remount never send it again. */
+export const githubCallbackQuery = (code: string, state: string) =>
+  queryOptions({
+    queryKey: ["github-callback", state],
+    queryFn: () => finishConnect(code, state),
+    retry: false,
+    retryOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
+  })
+
+/** Read directly: a 401 here is GitHub refusing the code (github_oauth_failed), not an ended session. */
+async function exchangeCode(code: string, state: string) {
   const response = await send("/api/v1/github/oauth/callback", {
     method: "POST",
     headers: { ...json, accept: "application/json" },

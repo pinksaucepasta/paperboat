@@ -58,7 +58,11 @@ func timeout(duration time.Duration, logger *slog.Logger, next http.Handler) htt
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), duration)
+		limit := duration
+		if r.URL.Path == githubCallbackPath {
+			limit = max(limit, githubConnectTimeout)
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), limit)
 		defer cancel()
 
 		tw := newTimeoutResponseWriter(w)
@@ -97,6 +101,13 @@ func timeout(duration time.Duration, logger *slog.Logger, next http.Handler) htt
 
 	})
 }
+
+// Finishing a GitHub connect creates and fills the config repository, many calls to GitHub in one request: the
+// ordinary request timeout cut a connect that was succeeding.
+const (
+	githubCallbackPath   = "/v1/github/oauth/callback"
+	githubConnectTimeout = time.Minute
+)
 
 func isReleaseDownload(r *http.Request) bool {
 	if r.Method != http.MethodGet {

@@ -6,6 +6,7 @@ import {
   isSameOrigin,
   relayCookies,
 } from "@/lib/server/control-plane"
+import { withDeadline } from "@/lib/deadline"
 
 /**
  * Same-origin relay to the control plane. The control plane authenticates and authorizes
@@ -102,6 +103,9 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
     // Event streams and file transfers stay open; the browser's disconnect is their only deadline.
     // Everything else also ends when the browser goes away, and has the deadline.
     const open = fileUpload || fileDownload || request.headers.get("accept") === "text/event-stream"
+    // Finishing a GitHub connect creates the config repository, many calls to GitHub: giving up at the ordinary
+    // deadline loses the answer of a connect that succeeds. A little over the server's minute, so its answer arrives.
+    const connecting = unsafe && route === "github/oauth/callback"
     upstream = await controlPlaneFetch(
       `/v1/${path.join("/")}${search}`,
       {
@@ -109,9 +113,9 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
         headers,
         body: fileUpload ? request.body : unsafe ? await request.arrayBuffer() : undefined,
         ...(fileUpload && { duplex: "half" }),
-        signal: request.signal,
+        signal: connecting ? withDeadline(request.signal, 65_000) : request.signal,
       },
-      { deadline: !open },
+      { deadline: !open && !connecting },
     )
   } catch (error) {
     logFailure(reference, 503, request.method, path)

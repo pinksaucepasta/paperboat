@@ -8,7 +8,7 @@ import { ApiError } from "@/lib/api"
 import {
   approveLink,
   cancelLink,
-  finishConnect,
+  githubCallbackQuery,
   githubErrors,
   githubStatusQuery,
   reviewLink,
@@ -290,11 +290,8 @@ export function GitHubCallback() {
   // Back from the App's installation page without a usable sign-in code: nothing failed, connecting isn't finished.
   const installed = !(code && state) && !declined && Boolean(setup)
   const finish = useQuery({
-    queryKey: ["github-callback", state],
-    queryFn: () => finishConnect(code, state),
+    ...githubCallbackQuery(code, state),
     enabled: Boolean(code && state && !declined),
-    retry: false,
-    staleTime: Infinity,
   })
   const errorCode =
     declined ?? (finish.error instanceof ApiError ? finish.error.code : finish.error ? "provider_unavailable" : "")

@@ -156,3 +156,22 @@ func TestEdgeEndpointPullSkipsTheRequestTimeout(t *testing.T) {
 		}
 	}
 }
+
+// Finishing a GitHub connect outlives the ordinary request timeout; nothing beside it does.
+func TestGitHubConnectOutlivesTheRequestTimeout(t *testing.T) {
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(150 * time.Millisecond):
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	handler := requestID(timeout(20*time.Millisecond, slog.New(slog.NewTextHandler(io.Discard, nil)), slow))
+	for path, want := range map[string]int{"/v1/github/oauth/callback": http.StatusNoContent, "/v1/github/oauth/start": http.StatusServiceUnavailable} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		if rec.Code != want {
+			t.Fatalf("%s status = %d, want %d: %s", path, rec.Code, want, rec.Body.String())
+		}
+	}
+}
