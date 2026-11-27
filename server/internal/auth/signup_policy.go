@@ -44,7 +44,7 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 		if err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$2 AND
  coalesce(canonical_email,paperboat.canonical_email_address(primary_email))=$1),
  coalesce((SELECT primary_email FROM paperboat.users WHERE id<>$2 AND
- (canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1) ORDER BY created_at,id LIMIT 1),'')`, canonical, id).Scan(&other, &existing); err != nil {
+ (canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1) ORDER BY (canonical_email=$1) DESC NULLS LAST,created_at,id LIMIT 1),'')`, canonical, id).Scan(&other, &existing); err != nil {
 			return "", "", err
 		}
 		other = other && existing != ""

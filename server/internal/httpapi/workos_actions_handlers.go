@@ -17,10 +17,10 @@ import (
 
 const workOSActionTolerance = 5 * time.Minute
 
-// RegistrationAliasChecker reports the canonical address of an existing account when the submitted address is
-// only another spelling of it.
+// RegistrationAliasChecker reports the exact address of an existing account when the submitted address is
+// another spelling of its canonical address (F13-07, first sign-up wins).
 type RegistrationAliasChecker interface {
-	ExistingAccountForAlias(ctx context.Context, submitted string) (canonical string, exists bool, err error)
+	ExistingAccountForAlias(ctx context.Context, submitted string) (existing string, exists bool, err error)
 }
 
 // workOSRegistrationAction answers WorkOS AuthKit's User Registration Action. It denies a sign-up whose address
@@ -52,13 +52,13 @@ func workOSRegistrationAction(checker RegistrationAliasChecker, secret string, n
 			return
 		}
 		verdict, message := "Allow", ""
-		canonical, exists, err := checker.ExistingAccountForAlias(r.Context(), action.UserData.Email)
+		existing, exists, err := checker.ExistingAccountForAlias(r.Context(), action.UserData.Email)
 		if err != nil {
 			writeError(w, r, 503, "registration_action_unavailable", "Registration check is unavailable.", err)
 			return
 		}
 		if exists {
-			verdict, message = "Deny", "An account with "+canonical+" already exists. Sign in with that address."
+			verdict, message = "Deny", "An account with "+existing+" already exists. Sign in with that address."
 		}
 		signed, err := signWorkOSActionResponse(verdict, message, secret, now())
 		if err != nil {

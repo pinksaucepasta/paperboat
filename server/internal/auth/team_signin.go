@@ -13,9 +13,9 @@ import (
 // satisfies that team's Require SSO (and queues JIT provisioning where the team allows it).
 func recordTeamSignInTx(ctx context.Context, tx *db.Tx, account, email string, profile WorkOSProfile) error {
 	// Directory invitations are auto-accepted only for the exact address they
-	// name: a +tag can be a different mailbox from x (F13-07, L36).
-	if profile.EmailVerified && strings.EqualFold(strings.TrimSpace(profile.Email), email) {
-		if err := teams.AcceptDirectoryInvitationsTx(ctx, tx, account, email); err != nil {
+	// name, which is the account's own exact address (F13-07, first sign-up wins).
+	if profile.EmailVerified {
+		if err := teams.AcceptDirectoryInvitationsTx(ctx, tx, account, strings.ToLower(strings.TrimSpace(profile.Email))); err != nil {
 			return err
 		}
 	}
