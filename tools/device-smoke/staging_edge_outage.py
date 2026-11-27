@@ -40,14 +40,14 @@ CONTAINER_USER = '-u %s -e HOME=%s -e XDG_RUNTIME_DIR=%s -w %s' % (CT_USER, CT_H
 
 def fetch(url, timeout=8):
     """(status, body) of one new connection with the certificate verified against the URL's name; status 0 when there was no
-    HTTP answer. A `#dial=IP` fragment connects to that address instead of the name's (an edge with no public port from
-    here); the name still goes in SNI, the certificate check and Host. Redirects are not followed."""
+    HTTP answer. A `#dial=IP:PORT` fragment connects there instead (an edge's forward on this host); the URL's name still
+    goes in SNI, the certificate check and Host. Redirects are not followed."""
     parsed = urllib.parse.urlsplit(url)
-    dial = parsed.fragment.partition('dial=')[2]
+    dial_host, _, dial_port = parsed.fragment.partition('dial=')[2].partition(':')
 
     class Connection(http.client.HTTPSConnection):
         def connect(self):
-            sock = socket.create_connection((dial or self.host, self.port), self.timeout)
+            sock = socket.create_connection((dial_host or self.host, int(dial_port or self.port)), self.timeout)
             self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
 
     connection = Connection(parsed.hostname, parsed.port or 443, timeout=timeout)
@@ -71,7 +71,7 @@ class Staging:
         self.api = env.get('SMOKE_STAGING_API', '').rstrip('/')
         self.production = env.get('SMOKE_OPERATOR_API', '')
         self.machine = env.get('SMOKE_STAGING_MACHINE', 'pb-stg-a')
-        self.edges, self.dials = [], {}
+        self.edges, self.dials, self.local = [], {}, {}  # local: edge -> the port of its forward here
         for item in env.get('SMOKE_STAGING_EDGES', 'pb-stg-edge:18446:stg_managed_edge').split(','):
             container, port, node, *dial = item.strip().split(':')
             self.edges.append((container, int(port), node))
@@ -79,22 +79,32 @@ class Staging:
                 self.dials[container] = dial[0]
 
     def forward(self, address, port, popen=subprocess.Popen, ready=15):
-        """Forwards 127.0.0.1:port here to address:port as the staging host reaches it, until the returned stop() is called."""
+        """(local port, stop): a free port on 127.0.0.1 here forwarded to address:port as the staging host reaches it. Each
+        forward has its own port, never the edge's: whatever else listens here cannot answer for the edge."""
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            local = probe.getsockname()[1]
         process = popen(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ExitOnForwardFailure=yes', '-N',
-                         '-L', '127.0.0.1:%d:%s:%d' % (port, address, port), self.host], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         '-L', '127.0.0.1:%d:%s:%d' % (local, address, port), self.host], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         def stop():
             process.terminate()
-            process.wait(timeout=15)
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=15)
         deadline = time.monotonic() + ready
         while process.poll() is None and time.monotonic() < deadline:
             try:
-                socket.create_connection(('127.0.0.1', port), 1).close()
-                return stop
+                socket.create_connection(('127.0.0.1', local), 1).close()
+                time.sleep(1)  # a forward ssh could not set up ends the process (ExitOnForwardFailure): still running means it is ours
+                if process.poll() is None:
+                    return local, stop
             except OSError:
                 time.sleep(0.5)
         stop()
-        raise RuntimeError('cannot forward port %d to %s on the staging host (is the local port taken?)' % (port, address))
+        raise RuntimeError('cannot forward to %s:%d through the staging host' % (address, port))
 
     def ssh(self, script, timeout=90, check=True, stdin=None):
         done = self.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', self.host, script], capture_output=True, text=True,
@@ -197,7 +207,7 @@ class Run:
         parsed = urllib.parse.urlsplit(endpoint)
         if parsed.scheme != 'https' or 'stg' not in (parsed.hostname or '').split('.'):
             raise RuntimeError('the endpoint %r is not a staging name' % endpoint)
-        return [(container, 'https://%s:%d/%s' % (parsed.hostname, port, '#dial=127.0.0.1' if container in self.s.dials else ''))
+        return [(container, 'https://%s:%d/%s' % (parsed.hostname, port, '#dial=127.0.0.1:%d' % self.s.local[container] if container in self.s.dials else ''))
                 for container, port, _ in self.s.edges]
 
     def served(self, url):
@@ -266,7 +276,8 @@ def drill(run, tag, leftovers):
     try:
         for container, port, _ in s.edges:
             if container in s.dials:
-                cleanups.append(('port forward of %s' % container, s.forward(s.dials[container], port)))
+                s.local[container], stop = s.forward(s.dials[container], port)
+                cleanups.append(('port forward of %s' % container, stop))
                 run.log(True, '%s is reached through the staging host (its port is closed from here)' % container)
         for container, _, node in s.edges:
             netns[container] = s.netns(container)
@@ -286,8 +297,9 @@ def drill(run, tag, leftovers):
         cleanups.append(('tunnel %s' % tag, lambda: 'tunnel' in gone or delete_tunnel(s, made.get('tunnel', (tag,))[0], missing_ok=True)))
         _, created = s.pb('tunnel', 'create', tag, '--port', str(port), '--duration', '1h', '--wait')
         made['tunnel'] = (created['tunnel']['id'], created['tunnel']['stable_endpoint'])
+        made['machine'] = created['tunnel'].get('created_by_host_id')
         # registered before the create too: a preview made by a command that then failed is found by this run's origin port
-        cleanups.append(('preview of port %d' % port, lambda: 'preview' in gone or remove_previews(s, port, made.get('preview'))))
+        cleanups.append(('preview of port %d' % port, lambda: 'preview' in gone or remove_previews(s, port, made.get('preview'), made.get('machine'))))
         _, preview = s.pb('preview', str(port), '--background', '--ttl', '30m')
         made['preview'] = (preview['id'], preview['endpoint'])
         urls = {kind: {'%s on %s' % (kind, edge): url for edge, url in run.addresses(made[kind][1])} for kind in ('preview', 'tunnel')}
@@ -361,12 +373,16 @@ def running(s):
     return spaces
 
 
-def remove_previews(s, port, made):
+def remove_previews(s, port, made, machine):
+    """made: the run's preview, when its create answered. Otherwise the account is shared: only a preview of this fixture
+    machine (its id, as the run's own tunnel named it) that serves this run's origin port is deleted."""
     if made:
         return delete_preview(s, made[0], missing_ok=True)
+    if not machine:
+        return  # the preview is only ever created after the tunnel answered with the machine's id
     _, listed = s.pb('preview', 'list')
     for item in listed.get('items', []):
-        if (item.get('target') or {}).get('address') == '127.0.0.1:%d' % port:
+        if item.get('owner_machine_id') == machine and (item.get('target') or {}).get('address') == '127.0.0.1:%d' % port:
             delete_preview(s, item['id'], missing_ok=True)
 
 

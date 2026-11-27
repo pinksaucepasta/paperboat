@@ -28,7 +28,10 @@ class Host:
         if 'rmdir' in script and script.startswith('rm -f'):
             code = 1 if self.lock_sticks else 0
         elif 'preview list' in script:
-            out = json.dumps({'items': [{'id': 'preview_lost', 'target': {'address': '127.0.0.1:%s' % self.port}}, {'id': 'preview_other', 'target': {'address': '127.0.0.1:1'}}]})
+            target = {'address': '127.0.0.1:%s' % self.port}
+            out = json.dumps({'items': [{'id': 'preview_lost', 'owner_machine_id': 'machine_fixture', 'target': target},
+                                        {'id': 'preview_theirs', 'owner_machine_id': 'machine_other', 'target': target},
+                                        {'id': 'preview_other', 'owner_machine_id': 'machine_fixture', 'target': {'address': '127.0.0.1:1'}}]})
         elif 'control_url' in script:
             out = self.control + '\n'
         elif 'config show' in script:
@@ -52,7 +55,7 @@ class Host:
             if not self.sticky_rules:
                 self.rules = ''
         elif 'tunnel create' in script:
-            out = json.dumps({'tunnel': {'id': 'tunnel_1', 'stable_endpoint': 'https://a.pub.stg.example.test'}})
+            out = json.dumps({'tunnel': {'id': 'tunnel_1', 'stable_endpoint': 'https://a.pub.stg.example.test', 'created_by_host_id': 'machine_fixture'}})
         elif '.local/bin/pb preview delete' in script:
             self.deleted.append('preview')
             out = '{"id": "preview_1"}'
@@ -101,7 +104,7 @@ def drill(host, fetch=None, env=ENV, forwards=None):
 
     def forward(address, port):
         forwards.append(('open', address, port))
-        return lambda: forwards.append(('closed', address, port))
+        return 40000 + port % 1000, lambda: forwards.append(('closed', address, port))
 
     staging.forward = forward
     run = row.Run(staging, 'marker-x', sleep=clock.sleep, clock=clock, fetch=fetch(host, clock, served) if fetch else served)
@@ -150,14 +153,15 @@ class Fetch(unittest.TestCase):
             raise OSError('closed')
 
         with mock.patch.object(row.socket, 'create_connection', refuse):
-            self.assertEqual((0, ''), row.fetch('https://a.pub.stg.example.test:18456/#dial=10.0.0.7'))
+            self.assertEqual((0, ''), row.fetch('https://a.pub.stg.example.test:18456/#dial=127.0.0.1:40456'))
             row.fetch('https://a.pub.stg.example.test:18446/')
-        self.assertEqual([('10.0.0.7', 18456), ('a.pub.stg.example.test', 18446)], seen)
+        self.assertEqual([('127.0.0.1', 40456), ('a.pub.stg.example.test', 18446)], seen)
 
     def test_an_edge_with_a_dial_address_gets_it_on_its_urls_only(self):
         env = dict(ENV, SMOKE_STAGING_EDGES='pb-stg-edge:18446:stg_a,pb-stg-edge-b:18456:stg_b:10.0.0.7')
         run = row.Run(row.Staging(env, 'u@h', run=Host()), 'm')
-        self.assertEqual([('pb-stg-edge', 'https://x.pub.stg.example.test:18446/'), ('pb-stg-edge-b', 'https://x.pub.stg.example.test:18456/#dial=127.0.0.1')],
+        run.s.local['pb-stg-edge-b'] = 40456
+        self.assertEqual([('pb-stg-edge', 'https://x.pub.stg.example.test:18446/'), ('pb-stg-edge-b', 'https://x.pub.stg.example.test:18456/#dial=127.0.0.1:40456')],
                          run.addresses('https://x.pub.stg.example.test'))
         with self.assertRaises(row.Refused):
             row.Staging(dict(ENV, SMOKE_STAGING_EDGES='pb-stg-edge:1:stg_a:evil.example'), 'u@h', run=Host()).guard()
@@ -179,6 +183,21 @@ class Forward(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             drill(Host(), crash, env=env, forwards=forwards)
         self.assertEqual('closed', forwards[-1][0])
+
+    def test_a_forward_takes_a_free_local_port_and_kills_an_ssh_that_ignores_the_stop(self):
+        commands = []
+        process = mock.Mock(**{'poll.return_value': None, 'wait.side_effect': [subprocess.TimeoutExpired('ssh', 15), 0]})
+
+        def popen(argv, **kw):
+            commands.append(argv)
+            return process
+
+        with mock.patch.object(row.socket, 'create_connection'), mock.patch.object(row.time, 'sleep'):
+            local, stop = row.Staging(ENV, 'u@h', run=Host()).forward('10.0.0.7', 18456, popen=popen)
+        self.assertNotEqual(18456, local)
+        self.assertIn('127.0.0.1:%d:10.0.0.7:18456' % local, commands[0])
+        stop()
+        process.kill.assert_called_once()
 
     def test_a_forward_that_never_listens_is_an_error_and_its_process_is_stopped(self):
         process = mock.Mock(**{'poll.return_value': 1})
