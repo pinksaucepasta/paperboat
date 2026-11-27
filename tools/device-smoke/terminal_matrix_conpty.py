@@ -3,9 +3,11 @@
 Through the controller's pty -> `ssh -tt` -> ConPTY hop the 0x03 is lost or delayed under a flood (plain ssh.exe fails there 19/20; pb in a local
 ConPTY 20/20), so the Windows client's Ctrl-C row types here instead. Usage: python terminal_matrix_conpty.py PB TARGET SESSION BASELINE
 BASELINE is the number of `yes` already running on the target. One JSON object per line, flushed: {"flood": n}, {"sent": target-clock time of
-the Ctrl-C}, {"quiet": seconds the output took to go quiet, or null}, {"answered": the shell printed a marker computed by the command}, or {"error": why}."""
+the Ctrl-C}, {"quiet": seconds the output took to go quiet, or null}, {"answered": the shell printed a marker computed by the command},
+{"gone": target-clock time the flood's `yes` ended, or null if it still ran}, or {"error": why}."""
 import ctypes
 import json
+import queue
 import subprocess
 import sys
 import threading
@@ -13,7 +15,7 @@ import time
 import uuid
 from ctypes import wintypes
 
-k32 = ctypes.windll.kernel32
+k32 = ctypes.windll.kernel32 if hasattr(ctypes, 'windll') else None  # None: a test importing this off Windows
 
 PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
 EXTENDED_STARTUPINFO_PRESENT = 0x00080000
@@ -190,13 +192,55 @@ def clock_offset(pb, target):
     return best[0] - best[2]
 
 
-def yes_count(pb, target):
-    out = subprocess.run([pb, 'exec', target, '--', 'sh', '-c', 'pgrep -x -c yes || true'], capture_output=True, text=True, timeout=60).stdout
-    return int(out.strip().splitlines()[-1] or 0)
+def watch_script(baseline):
+    """Run on the target: wait for a new `yes` and print "armed N", then wait for it to end and print the target's clock (nothing if it still
+    runs after about 90 s). It gives up after about 90 s if no `yes` appears."""
+    count = '$(pgrep -x -c yes || true)'
+    return ('i=0; while c=%s; [ "$c" -le %d ]; do i=$((i+1)); [ $i -lt 800 ] || exit 3; sleep 0.1; done; echo "armed $c"; '
+            'i=0; while c=%s; [ "$c" -gt %d ]; do i=$((i+1)); [ $i -lt 800 ] || exit 4; sleep 0.1; done; '
+            'python3 -c "import time;print(time.time())"') % (count, baseline, count, baseline)
+
+
+class YesWatcher:
+    """The flood's `yes` as the target sees it, through one `pb exec` that has seen it running before Ctrl-C is sent. An exec started later can
+    take longer to start than `yes` takes to end (4-9 s after Ctrl-C, measured through the controller's ssh hop), and then reports its own
+    start as the end."""
+
+    def __init__(self, argv):
+        self.lines = queue.Queue()
+        self.process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        for line in self.process.stdout:
+            self.lines.put(line.strip())
+        self.lines.put(None)
+
+    def _line(self, timeout):
+        try:
+            return self.lines.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def armed(self, timeout):
+        """The number of `yes` it saw once the flood started, or None."""
+        words = (self._line(timeout) or '').split()
+        return int(words[1]) if len(words) == 2 and words[0] == 'armed' and words[1].isdigit() else None
+
+    def gone(self, timeout):
+        """The target's clock when the flood's `yes` ended, or None."""
+        try:
+            return float(self._line(timeout) or '')
+        except ValueError:
+            return None
+
+    def close(self):
+        self.process.kill()
 
 
 def main(pb, target, session, baseline):
     s = ConPTYSession('"%s" connect %s --session %s --status-bar off' % (pb, target, session))
+    watcher = None
     try:
         # The marker is computed by the shell: the typed line holds "%s", so only the command's output holds the marker.
         ready = uuid.uuid4().hex
@@ -204,12 +248,13 @@ def main(pb, target, session, baseline):
         if not s.scan('PBRDY' + ready, 60):
             return emit(error='no shell answer in 60 s')
         offset = clock_offset(pb, target)
+        watcher = YesWatcher([pb, 'exec', target, '--', 'sh', '-c', watch_script(baseline)])
         s.write('yes\r')
         t0 = time.monotonic()
-        while yes_count(pb, target) <= baseline:
-            if time.monotonic() - t0 > 30:
-                return emit(error='yes did not start on the target in 30 s')
-        emit(flood=yes_count(pb, target))
+        flood = watcher.armed(60)
+        if flood is None:
+            return emit(error='the target watcher saw no new yes in 60 s')
+        emit(flood=flood)
         time.sleep(max(0, HOLD - (time.monotonic() - t0)))
         s.write(PASTE)
         s.write('\x03')
@@ -218,7 +263,10 @@ def main(pb, target, session, baseline):
         answer = uuid.uuid4().hex
         s.write("printf 'PBANS%%s\\n' %s\r" % answer)
         emit(answered=s.scan('PBANS' + answer, 15))
+        emit(gone=watcher.gone(90))
     finally:
+        if watcher:
+            watcher.close()
         s.close()
 
 

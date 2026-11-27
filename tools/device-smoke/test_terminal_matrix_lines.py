@@ -1,6 +1,12 @@
+import os
+import shlex
+import tempfile
+import time
 import unittest
+from pathlib import Path
 
 import terminal_matrix as matrix
+import terminal_matrix_conpty as conpty
 
 
 class Lines(unittest.TestCase):
@@ -27,9 +33,6 @@ class Lines(unittest.TestCase):
         self.assertEqual([], self.numbers(b'DR1\rDR2\r\n'))  # two lines run together by a lone CR are one non-line, not a pass
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 
 class WindowsClientCtrlC(unittest.TestCase):
     def test_events_ignore_everything_but_json_objects(self):
@@ -37,22 +40,56 @@ class WindowsClientCtrlC(unittest.TestCase):
         self.assertEqual(matrix.device_events(text), {'flood': 2, 'sent': 10.5, 'quiet': 0.2})
 
     def test_rows_pass_when_yes_ends_under_five_seconds_and_the_shell_answers(self):
-        events = {'flood': 2, 'sent': 100.0, 'quiet': 1.2, 'answered': True}
-        rows = matrix.device_rows(events, 1, 102.4)
+        events = {'flood': 2, 'sent': 100.0, 'quiet': 1.2, 'answered': True, 'gone': 102.4}
+        rows = matrix.device_rows(events, 1)
         self.assertEqual([ok for _, ok, _ in rows], [True, True, True, True])
         self.assertIn('2.4 s', rows[1][2])
 
     def test_rows_fail_when_yes_ends_late_or_never_and_keep_the_same_names(self):
         events = {'flood': 2, 'sent': 100.0, 'quiet': 1.0, 'answered': False}
-        late, never = matrix.device_rows(events, 1, 106.0), matrix.device_rows(events, 1, None)
+        late, never = matrix.device_rows(dict(events, gone=106.0), 1), matrix.device_rows(dict(events, gone=None), 1)
         self.assertEqual([ok for _, ok, _ in late], [True, False, True, False])
         self.assertFalse(never[1][1])
         self.assertEqual([n for n, _, _ in late], [n for n, _, _ in never])
 
     def test_a_driver_error_fails_every_row_with_its_reason(self):
-        rows = matrix.device_rows({'error': 'no shell answer in 60 s'}, 0, None)
+        rows = matrix.device_rows({'error': 'no shell answer in 60 s'}, 0)
         self.assertEqual(len(rows), 4)
         self.assertTrue(all(not ok and 'no shell answer' in detail for _, ok, detail in rows))
 
     def test_a_flood_that_never_started_fails_the_flood_row(self):
-        self.assertFalse(matrix.device_rows({'flood': 1}, 1, None)[0][1])
+        self.assertFalse(matrix.device_rows({'flood': 1}, 1)[0][1])
+
+    def test_a_yes_that_ended_before_ctrl_c_fails(self):
+        rows = matrix.device_rows({'flood': 2, 'sent': 100.0, 'quiet': 1.0, 'answered': True, 'gone': 97.0}, 1)
+        self.assertFalse(rows[1][1])
+        self.assertIn('before Ctrl-C', rows[1][2])
+
+
+@unittest.skipIf(os.name == 'nt', 'runs the target-side shell script with a fake pgrep')
+class TargetYesWatcher(unittest.TestCase):
+    def test_it_arms_on_the_flood_and_reports_the_end_only_when_yes_ends(self):
+        with tempfile.TemporaryDirectory() as work:
+            count = Path(work) / 'count'
+            count.write_text('1')  # one `yes` that was there before the flood
+            fake = Path(work) / 'pgrep'
+            fake.write_text('#!/bin/sh\ncat %s\n' % shlex.quote(str(count)))
+            fake.chmod(0o755)
+            path = work + os.pathsep + os.environ['PATH']
+            watcher = conpty.YesWatcher(['env', 'PATH=' + path, 'sh', '-c', conpty.watch_script(1)])
+            try:
+                self.assertIsNone(watcher._line(0.5))  # no new yes yet: neither armed nor an end time
+                count.write_text('2')
+                self.assertEqual(watcher.armed(10), 2)
+                self.assertIsNone(watcher._line(0.5))  # still running
+                before = time.time()
+                count.write_text('1')
+                gone = watcher.gone(10)
+                self.assertIsNotNone(gone)
+                self.assertGreaterEqual(gone, before)
+            finally:
+                watcher.close()
+
+
+if __name__ == '__main__':
+    unittest.main()

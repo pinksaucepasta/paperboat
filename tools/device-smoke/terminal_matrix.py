@@ -716,30 +716,6 @@ def daemon_restart_typing(a, sessions):
         c1.close()
 
 
-class YesWatcher:
-    """Sees on the target when the flood's `yes` ends, in a background `pb exec` (its own path, not the terminal under test): the target's
-    clock at that moment (0.1 s resolution), so the stop time does not depend on how slowly a Windows client's ssh -tt hop draws the buffered
-    output. It compares the target's clock with this machine's: both are NTP-synchronised hosts; an offset of a second would show in other rows."""
-
-    def __init__(self, target, baseline):
-        import threading
-        self.end = None
-        script = 'while [ "$(pgrep -x -c yes)" -gt %d ]; do sleep 0.1; done; python3 -c "import time;print(time.time())"' % baseline
-        self.thread = threading.Thread(target=self._run, args=(target, script), daemon=True)
-        self.thread.start()
-
-    def _run(self, target, script):
-        try:
-            out = winhost.run_pb(PB, ['exec', target, '--', 'sh', '-c', script], 90).stdout.decode(errors='replace').strip()
-            self.end = float(out.splitlines()[-1])
-        except (ValueError, IndexError, RuntimeError, OSError, subprocess.SubprocessError):
-            self.end = None
-
-    def gone_at(self, timeout):
-        self.thread.join(timeout)
-        return self.end
-
-
 def host_yes(target):
     """How many `yes` processes run on the target (a Windows client's view of whether the flood producer is gone)."""
     result = winhost.run_pb(PB, ['exec', target, '--', 'sh', '-c', 'pgrep -x -c yes || true'], 60)
@@ -757,15 +733,18 @@ def device_events(text):
     return events
 
 
-def device_rows(events, baseline, gone):
-    """The four N6 rows of a Windows client from the driver's events and the target-clock time the flood's `yes` ended (None: still running)."""
+def device_rows(events, baseline):
+    """The four N6 rows of a Windows client from the driver's events. `sent` and `gone` (the flood's `yes` ended; null: it still ran) are on the
+    target's clock, so the stop time does not depend on how slowly the client's ConPTY draws the buffered output."""
     why = events.get('error', 'the driver did not get that far')
-    flood, sent, quiet = events.get('flood'), events.get('sent'), events.get('quiet')
+    flood, sent, quiet, gone = (events.get(key) for key in ('flood', 'sent', 'quiet', 'gone'))
     rows = [('N6 the flood is running before Ctrl-C', flood is not None and flood > baseline, 'yes on the target' if flood is not None else why)]
-    if sent is None:
+    if sent is None or 'gone' not in events:
         rows.append(('N6 Ctrl-C stops yes promptly', False, why))
     elif gone is None:
-        rows.append(('N6 Ctrl-C stops yes promptly', False, 'yes still running on the target 60 s after Ctrl-C'))
+        rows.append(('N6 Ctrl-C stops yes promptly', False, 'the target watcher did not see yes end within 90 s'))
+    elif gone - sent < -1:  # the clock offset is good to well under a second
+        rows.append(('N6 Ctrl-C stops yes promptly', False, f'yes on the target ended {sent - gone:.1f} s before Ctrl-C was sent'))
     else:
         rows.append(('N6 Ctrl-C stops yes promptly', gone - sent < 5, f'yes on the target ended {gone - sent:.1f} s after Ctrl-C (target clock)'))
     rows.append(('N6 the output stops after Ctrl-C', quiet is not None, f'output stopped {quiet:.1f} s after Ctrl-C' if quiet is not None else 'output still flowing after Ctrl-C' if sent is not None else why))
@@ -777,7 +756,7 @@ def windows_client_ctrl_c(target, session):
     """The flood, paste and Ctrl-C of N6 for a Windows client, typed by terminal_matrix_conpty.py in a ConPTY on the device."""
     baseline = host_yes(target)
     python = winhost.which('python')
-    events, watcher = {}, None
+    events = {}
     if python is None:
         events['error'] = 'no python on the device (the Ctrl-C driver needs it)'
     else:
@@ -785,21 +764,18 @@ def windows_client_ctrl_c(target, session):
             (work / 'driver.py').write_bytes(Path(__file__).with_name('terminal_matrix_conpty.py').read_bytes())
             process = DEVICE.spawn([str(python), str(work / 'driver.py'), str(PB), target, session, str(baseline)], work)
             try:
-                deadline = time.monotonic() + 240
+                deadline = time.monotonic() + 360
                 while time.monotonic() < deadline:
                     done = process.returncode() is not None  # read the output after the exit code: nothing is written later
                     events = device_events(process.stdout().decode(errors='replace'))
-                    if 'flood' in events and watcher is None:
-                        watcher = YesWatcher(target, baseline)
-                    if done or 'error' in events or 'answered' in events:
+                    if done or 'error' in events or 'gone' in events:
                         break
                     time.sleep(1)
                 else:
-                    events.setdefault('error', 'the driver did not finish in 240 s')
+                    events.setdefault('error', 'the driver did not finish in 360 s')
             finally:
                 process.kill()
-    gone = watcher.gone_at(60) if watcher and 'sent' in events else None
-    for name_, ok, detail in device_rows(events, baseline, gone):
+    for name_, ok, detail in device_rows(events, baseline):
         row(name_, ok, detail)
 
 
