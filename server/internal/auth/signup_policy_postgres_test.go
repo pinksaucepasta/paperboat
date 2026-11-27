@@ -165,8 +165,10 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	}
 	unverified := *s
 	unverified.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "unverified", Email: canonical, EmailVerified: false}}
-	if _, _, err := unverified.VerifyCallback(ctx, CallbackInput{Code: "unverified-provider-code"}); err == nil {
-		t.Fatal("unverified new subject took over canonical account")
+	var taken *EmailAlreadyRegisteredError
+	var verification *WorkOSVerificationError
+	if _, _, err := unverified.VerifyCallback(ctx, CallbackInput{Code: "unverified-provider-code"}); errors.As(err, &taken) || !errors.As(err, &verification) || verification.Reason != "email_not_verified" {
+		t.Fatalf("unverified new subject: want email_not_verified and no account hint, got %v", err)
 	}
 }
 

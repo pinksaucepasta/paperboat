@@ -181,6 +181,14 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 			return mapIPBlocked(err)
 		}
 		canonical, accountID, err := resolveWorkOSIdentity(ctx, tx, profile)
+		var taken *EmailAlreadyRegisteredError
+		if errors.As(err, &taken) {
+			// A banned account stays banned for every new identity of its address.
+			if banErr := checkNotBanned(ctx, tx, accountID, canonical, profile.Subject); banErr != nil {
+				return banErr
+			}
+			return err
+		}
 		if err != nil {
 			return err
 		}

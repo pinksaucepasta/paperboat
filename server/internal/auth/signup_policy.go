@@ -48,5 +48,11 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 	if err != nil {
 		return "", "", err
 	}
-	return "", "", &EmailAlreadyRegisteredError{Canonical: canonical}
+	// An unverified address must not learn whether an account exists.
+	if !profile.EmailVerified {
+		return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
+	}
+	// The existing account's id is returned with the refusal so the caller can
+	// report a ban on it first; it is never used to sign in.
+	return canonical, id, &EmailAlreadyRegisteredError{Canonical: canonical}
 }
