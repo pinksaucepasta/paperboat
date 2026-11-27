@@ -64,6 +64,31 @@ func TestCoordinatorHostnameUnderWorkspaceDomainReusesItsCertificate(t *testing.
 	}
 }
 
+// A workspace-backed domain whose first certificate (the workspace wildcard) was activated but never recorded is
+// adopted on the next pass, and re-staged after a generation bump, instead of waiting as pending for the next
+// wildcard renewal weeks later.
+func TestCoordinatorWorkspaceDomainRecoversUnrecordedFirstCertificate(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	issuer := &testIssuer{bundle: testBundle(t, []string{"app.example.test"}, now, 60*24*time.Hour)}
+	coordinator, _, _, _ := coordinatorForTest(t, issuer)
+	coordinator.config.WorkspaceCertificates = &workspaceSource{bundle: testBundle(t, []string{"*.example.test", "example.test"}, now, 60*24*time.Hour)}
+	domain := testDomain("app.example.test", StrategyDelegatedDNS01)
+	domain.WorkspaceDomainID = "wsd_0123456789ab"
+	first, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adopted, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil || !adopted.Issued || adopted.Certificate.Reference != first.Certificate.Reference {
+		t.Fatalf("next pass for the unrecorded wildcard = %+v, %v; want it adopted", adopted, err)
+	}
+	domain.Generation++
+	restaged, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil || !restaged.Issued || restaged.Certificate.Reference == first.Certificate.Reference || len(issuer.seen) != 0 {
+		t.Fatalf("after a generation bump = %+v, %v, issuer calls %d; want the wildcard re-staged, no order", restaged, err, len(issuer.seen))
+	}
+}
+
 func TestWorkspaceChallengeTargetDependsOnWorkspaceAndHostnameOnly(t *testing.T) {
 	a, err := WorkspaceChallengeTarget("account:usr_1", "dev.example.com", "challenges.example.test")
 	if err != nil {

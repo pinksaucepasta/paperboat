@@ -132,6 +132,17 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 				workers.IterationFailure(ctx, "certificate_reconciliation", "worker_iteration_failed", ErrGenerationConflict)
 				continue
 			}
+			// A conflict (the domain's generation moved, or its create operation is gone) is per row: back it off
+			// and go on, so a conflict that never clears neither aborts the batch nor retries every tick.
+			if errors.Is(err, tunnelcert.ErrGenerationConflict) {
+				retryAt := certificateRetryAt(now, row.CertificateFailureAttempts+1, err)
+				if markErr := w.markDomainCertificateFailure(ctx, row, "certificate_issuance_failed", now, retryAt); markErr != nil && !isSolePostgresNoRows(markErr) {
+					return changed, errors.Join(err, markErr)
+				}
+				workers.IterationFailure(ctx, "certificate_reconciliation", "worker_iteration_failed", err)
+				changed++
+				continue
+			}
 			if err != nil {
 				return changed, err
 			}

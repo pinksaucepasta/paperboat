@@ -669,7 +669,10 @@ func (c *Coordinator) workspaceBundle(ctx context.Context, domain Domain, curren
 		wipeCertificateBundle(&bundle)
 		return CertificateBundle{}, err
 	}
-	if found && current.State == StateActive && current.ExpiresAt.After(now) && identity.Fingerprint == current.Fingerprint {
+	// An active copy the domain never recorded, of an older domain generation (its commit lost to a generation bump),
+	// is re-staged at the new generation rather than refused: the domain has no certificate to wait on.
+	if found && current.State == StateActive && current.ExpiresAt.After(now) && identity.Fingerprint == current.Fingerprint &&
+		(domain.CertificateReference != "" || current.DomainGeneration >= domain.Generation) {
 		wipeCertificateBundle(&bundle)
 		return CertificateBundle{}, ErrWorkspaceCertificatePending
 	}
@@ -718,7 +721,11 @@ func (c *Coordinator) recoverDistributionBundle(ctx context.Context, domain Doma
 	if err != nil || !found {
 		return CertificateBundle{}, err
 	}
-	if row.State != StateStaged {
+	// An active durable certificate the domain never recorded (its commit lost, and every failure mark bumps the
+	// domain generation) is re-staged from its own bundle at the new generation: ordering again on each retry would
+	// burn the CA's duplicate-certificate limit for a domain that already holds a good certificate.
+	unrecordedActive := row.State == StateActive && kind == TargetDurableRoute && domain.CertificateReference == ""
+	if row.State != StateStaged && !unrecordedActive {
 		if row.State != StateFailed {
 			return CertificateBundle{}, nil
 		}
@@ -798,13 +805,16 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 			return Result{}, ErrCertificateRevoked
 		}
 		if current.State == StateActive {
-			if domain.LeafHostname == "" && !activeCertificateMatchesDomain(current, domain) {
+			if domain.LeafHostname == "" && (domain.CertificateReference != "" || domain.Target().KindValue() != TargetDurableRoute) && !activeCertificateMatchesDomain(current, domain) {
 				// An active row whose reference no longer matches the current
 				// verified domain projection is a stale/partial publication. Do
 				// not mint another certificate over it or silently repair the
 				// projection from an untrusted row.
 				return Result{}, ErrGenerationConflict
 			}
+			// A domain that never recorded its certificate (the worker crashed, or its commit conflicted, between
+			// Activate and CommitDomainCertificateReady) is recovered under the lock below: refusing it here left
+			// the domain without a certificate and domain.create running for good.
 			// An exact on-demand leaf is a separate SNI product under a
 			// wildcard binding. Never reuse the wildcard parent certificate
 			// for that request, and never let a parent fast-path suppress the
@@ -873,6 +883,23 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	}
 	if found && current.DomainGeneration > domain.Generation {
 		return Result{}, ErrGenerationConflict
+	}
+	// An unrecorded certificate of this same domain generation is adopted, not issued again: finish its distribution
+	// and report it issued so the worker records it. Re-issuing would order from the CA on every retry, and a
+	// workspace-backed domain would be refused as pending (the same wildcard is already active).
+	if found && unrecordedActiveCertificate(current, domain, now) {
+		needed, err := c.activeDistributionNeeded(ctx, current, domain)
+		if err != nil {
+			return Result{}, err
+		}
+		result := Result{Certificate: current.View()}
+		if needed {
+			if result, err = c.reconcileActiveDistribution(ctx, current, domain, now); err != nil {
+				return Result{}, err
+			}
+		}
+		result.Issued = true
+		return result, nil
 	}
 	exactLeafMatches := activeCertificateMatchesDomain(current, domain)
 	if found && current.State == StateActive && current.DomainGeneration <= domain.Generation && exactLeafMatches && !domain.RenewalDue && current.ExpiresAt.After(now) {
@@ -1167,6 +1194,15 @@ func (c *Coordinator) currentCertificate(ctx context.Context, domain Domain) (St
 		return StoredCertificate{}, false, fmt.Errorf("%w: exact leaf store is unavailable", ErrDistributionUnavailable)
 	}
 	return store.CurrentForHostname(ctx, domain.ID, domain.LeafHostname)
+}
+
+// unrecordedActiveCertificate: the active durable certificate of this exact domain generation, target and hostname
+// that the domain has not recorded (tunnel_domains.certificate_reference is still NULL).
+func unrecordedActiveCertificate(certificate StoredCertificate, domain Domain, now time.Time) bool {
+	return domain.CertificateReference == "" && domain.LeafHostname == "" && domain.Target().KindValue() == TargetDurableRoute &&
+		certificate.State == StateActive && certificate.CertificateReference != "" && certificate.LeafHostname == "" &&
+		certificate.DomainGeneration == domain.Generation && certificate.Target().Key() == domain.Target().Key() &&
+		certificate.Hostname == domain.Hostname && certificate.ExpiresAt.After(now)
 }
 
 func activeCertificateMatchesDomain(certificate StoredCertificate, domain Domain) bool {

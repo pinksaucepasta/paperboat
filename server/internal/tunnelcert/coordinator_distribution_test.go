@@ -390,6 +390,56 @@ func TestCoordinatorActivatesReadyEdgesAroundAStraggler(t *testing.T) {
 	}
 }
 
+// A first certificate activated but never recorded on the domain (the worker crashed, or its commit conflicted, between
+// Activate and CommitDomainCertificateReady) must not leave the domain without one, and must never order from the CA
+// again: the next pass adopts it, and after domain generation bumps it is re-staged from its own bundle.
+func TestCoordinatorRecoversFirstCertificateNeverRecordedOnTheDomain(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	issuer := &testIssuer{bundle: testBundle(t, []string{"app.example.test"}, now, 60*24*time.Hour)}
+	coordinator, store, _, _ := coordinatorForTest(t, issuer)
+	coordinator.config.Distributor = newDistributionLedger()
+	domain := testDomain("app.example.test", StrategyDelegatedDNS01)
+	domain.RouteID = "route_001"
+	orphan, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil || orphan.Certificate.State != StateActive || len(issuer.seen) != 1 {
+		t.Fatalf("first issuance = %+v, %v, issuer calls %d", orphan.Certificate, err, len(issuer.seen))
+	}
+	// Crash here: the domain row still has no certificate reference. Meanwhile a third edge joined the route: the
+	// adopted certificate must reach it too.
+	ledger := coordinator.config.Distributor.(*distributionLedger)
+	joined := EdgeTarget{NodeID: "edge_c", ProcessEpoch: "epoch-0003", Generation: 3}
+	domain.EdgeTargets = append(domain.EdgeTargets, joined)
+	adopted, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil || !adopted.Issued || adopted.Certificate.Reference != orphan.Certificate.Reference || len(issuer.seen) != 1 {
+		t.Fatalf("next pass = %+v, %v, issuer calls %d; want the unrecorded certificate adopted as issued, no new order", adopted, err, len(issuer.seen))
+	}
+	if got := ledger.state(orphan.Certificate.Reference[len("tcert_"):], DistributionTarget(joined)); got != "active" {
+		t.Fatalf("adopted certificate on the edge that joined = %q, want active", got)
+	}
+	// Its commit kept losing and each failure mark bumped the domain generation: every bump re-stages the same
+	// certificate at the new generation, never a new CA order; a retry at one generation adopts again.
+	var reissued Result
+	for bump := 0; bump < 3; bump++ {
+		domain.Generation++
+		reissued, err = coordinator.Ensure(context.Background(), domain)
+		if err != nil || !reissued.Issued || reissued.Certificate.Reference == orphan.Certificate.Reference || reissued.Certificate.Fingerprint != orphan.Certificate.Fingerprint || len(issuer.seen) != 1 {
+			t.Fatalf("after generation bump %d = %+v, %v, issuer calls %d; want the same certificate re-staged, no order", bump+1, reissued, err, len(issuer.seen))
+		}
+	}
+	if again, err := coordinator.Ensure(context.Background(), domain); err != nil || again.Certificate.Reference != reissued.Certificate.Reference || len(issuer.seen) != 1 {
+		t.Fatalf("retry at the new generation = %+v, %v, issuer calls %d", again, err, len(issuer.seen))
+	}
+	current, found, err := store.Current(context.Background(), domain.ID)
+	if err != nil || !found || current.State != StateActive || current.CertificateReference != reissued.Certificate.Reference {
+		t.Fatalf("current = %+v found=%v err=%v", current, found, err)
+	}
+	// Once recorded, a mismatching active row is still refused (stale/partial publication).
+	domain.CertificateReference = "tcert_not_the_active_one"
+	if _, err := coordinator.Ensure(context.Background(), domain); !errors.Is(err, ErrGenerationConflict) {
+		t.Fatalf("recorded domain with a mismatching active row = %v, want ErrGenerationConflict", err)
+	}
+}
+
 // Every edge failing to answer is still a failed issuance: nothing is activated and the staged copies are rolled back.
 func TestCoordinatorFailsWhenNoEdgeIsReady(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
