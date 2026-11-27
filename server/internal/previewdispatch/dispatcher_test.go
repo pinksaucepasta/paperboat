@@ -496,3 +496,50 @@ func TestDispatchRequestDeadlineDuringDialStaysUncertain(t *testing.T) {
 		t.Fatalf("request deadline = %#v", err)
 	}
 }
+
+// A TLS handshake that stalls past the dispatch deadline may race the
+// deadline; it must stay an uncertain timeout, never machine_unreachable.
+func TestDispatchStalledHandshakePastDeadlineStaysUncertain(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close() // accept, never answer the ClientHello
+		}
+	}()
+	provider, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	dispatcher, err := New(Config{Resolver: &testRouteResolver{route: MachineRoute{EnvironmentID: "env_1", BaseURL: "https://" + listener.Addr().String()}}, Signer: provider, Issuer: "issuer", Client: &http.Client{}, Timeout: 50 * time.Millisecond, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = dispatcher.Dispatch(context.Background(), testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || !dispatchErr.Uncertain || dispatchErr.Code != "timeout" {
+		t.Fatalf("stalled handshake = %#v (%v)", err, err)
+	}
+	if dispatcher.client.Timeout != 0 {
+		t.Fatalf("client timeout duplicates the dispatch deadline: %v", dispatcher.client.Timeout)
+	}
+}
+
+func TestDispatchUnreachableCarriesTargetHost(t *testing.T) {
+	client := &http.Client{Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	}}}
+	_, err := l41Dispatcher(t, client, "https://machine.rt.example.test").Dispatch(context.Background(), testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || dispatchErr.Code != "machine_unreachable" || dispatchErr.TargetHost != "machine.rt.example.test" {
+		t.Fatalf("unreachable = %#v", err)
+	}
+}

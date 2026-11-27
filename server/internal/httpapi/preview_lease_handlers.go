@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdispatch"
@@ -605,6 +606,9 @@ func writePreviewDispatchError(w http.ResponseWriter, r *http.Request, err error
 		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The machine was moving to another edge and was not reached; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
 	case "machine_unreachable":
 		// Dial or TLS handshake failed before any request byte was sent (L41).
+		// 409 skips the 5xx capture; a bad TLS config or dead edge ingress
+		// would otherwise fail every preview silently.
+		captureSupportWarning(r, http.StatusConflict, dispatch.Code, sentry.NewStacktrace(), []any{"target_host", dispatch.TargetHost}, err)
 		w.Header().Set("Retry-After", "2")
 		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The preview request was not sent: the machine or its edge could not be reached; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
 	case "route_unavailable":

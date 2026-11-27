@@ -60,6 +60,20 @@ func captureSupportFailure(r *http.Request, status int, code string, stack *sent
 	if status < 500 || errors.Is(r.Context().Err(), context.Canceled) {
 		return
 	}
+	captureSupportFault(r, status, code, stack, false, nil, causes...)
+}
+
+// captureSupportWarning records a non-5xx failure that still points at a
+// server-side fault (L41: a dispatch that reached no machine or edge), at
+// warn level, with extra non-secret log attributes.
+func captureSupportWarning(r *http.Request, status int, code string, stack *sentry.Stacktrace, attrs []any, causes ...error) {
+	if errors.Is(r.Context().Err(), context.Canceled) {
+		return
+	}
+	captureSupportFault(r, status, code, stack, true, attrs, causes...)
+}
+
+func captureSupportFault(r *http.Request, status int, code string, stack *sentry.Stacktrace, warn bool, attrs []any, causes ...error) {
 	sc, _ := r.Context().Value(supportContextKey{}).(supportContext)
 	owner := ""
 	if sc.owner != nil {
@@ -86,12 +100,12 @@ func captureSupportFailure(r *http.Request, status int, code string, stack *sent
 	}
 	if sc.logger != nil {
 		level := slog.LevelError
-		if fault.Severity == "warning" {
+		if fault.Severity == "warning" || warn {
 			level = slog.LevelWarn
 		} else if fault.Severity == "info" {
 			level = slog.LevelInfo
 		}
-		serverdiagnostics.LoggerWithRequest(r.Context(), sc.logger).Log(r.Context(), level, "HTTP operation failed", fault.LogAttrs()...)
+		serverdiagnostics.LoggerWithRequest(r.Context(), sc.logger).Log(r.Context(), level, "HTTP operation failed", append(fault.LogAttrs(), attrs...)...)
 	}
 }
 

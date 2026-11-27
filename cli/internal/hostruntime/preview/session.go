@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -191,6 +193,67 @@ type SessionConfig struct {
 	Random              io.Reader
 	Now                 func() time.Time
 	OnRenew             func(Lease)
+	// Stderr receives one line per create retry; nil means os.Stderr.
+	Stderr io.Writer
+	// sleep waits between create retries; tests replace it.
+	sleep func(context.Context, time.Duration) bool
+}
+
+// L41: a create the server answered 409 machine_unreachable reached neither the
+// machine nor its edge and is marked failed, so it is retried a bounded number
+// of times, each with a new Idempotency-Key. Other codes (machine_route_moving
+// included) are returned unchanged, as before.
+const (
+	unreachableCreateAttempts = 3
+	unreachableCreateBudget   = 10 * time.Second
+	unreachableDefaultWait    = 2 * time.Second
+)
+
+func createLeaseRetryingUnreachable(ctx context.Context, config *SessionConfig, request *LeaseRequest) (Lease, error) {
+	stderr := config.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	sleep := config.sleep
+	if sleep == nil {
+		sleep = sleepWithContext
+	}
+	var waited time.Duration
+	for attempt := 1; ; attempt++ {
+		lease, err := config.LeaseClient.Create(ctx, *request)
+		var refused *api.APIError
+		if err == nil || attempt == unreachableCreateAttempts || !errors.As(err, &refused) || refused.Status != http.StatusConflict || refused.Code != "machine_unreachable" {
+			return lease, err
+		}
+		wait := refused.RetryAfter
+		if wait <= 0 {
+			wait = unreachableDefaultWait
+		}
+		if waited+wait > unreachableCreateBudget {
+			return lease, err
+		}
+		key, keyErr := newSessionIdempotencyKey(config.Random)
+		if keyErr != nil {
+			return lease, err
+		}
+		fmt.Fprintf(stderr, "Preview machine or its edge was not reachable; retrying in %s (attempt %d of %d)...\n", wait, attempt+1, unreachableCreateAttempts)
+		if !sleep(ctx, wait) {
+			return lease, err
+		}
+		waited += wait
+		request.IdempotencyKey, config.IdempotencyKey = key, key
+	}
+}
+
+func sleepWithContext(ctx context.Context, wait time.Duration) bool {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // Session owns the complete lifetime of one temporary preview lease. It has
@@ -256,7 +319,7 @@ func Start(ctx context.Context, config SessionConfig) (*Session, error) {
 		request.UserDeadline = &deadline
 		config.UserDeadline = &deadline
 	}
-	lease, err := config.LeaseClient.Create(ctx, request)
+	lease, err := createLeaseRetryingUnreachable(ctx, &config, &request)
 	if err != nil {
 		return nil, err
 	}

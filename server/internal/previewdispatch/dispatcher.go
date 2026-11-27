@@ -53,6 +53,9 @@ type DispatchError struct {
 	Uncertain bool
 	Retryable bool
 	Cause     error
+	// TargetHost is the runtime host dialled (no path, query or credential),
+	// set only when the dial or TLS handshake failed.
+	TargetHost string
 }
 
 func (e *DispatchError) Error() string {
@@ -138,7 +141,10 @@ func New(config Config) (*Dispatcher, error) {
 	// A redirect would forward a one-shot credential to an untrusted host.
 	// Clone the client so a caller's reusable client is not mutated.
 	transportClient := *client
-	transportClient.Timeout = timeout
+	// No client Timeout: requestCtx carries the dispatch deadline, so an
+	// overall timeout is always seen as the request context ending (uncertain
+	// "timeout"), never as a dial-phase machine_unreachable.
+	transportClient.Timeout = 0
 	transportClient.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return errors.New("preview dispatch redirect rejected")
 	}
@@ -240,7 +246,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, request previewv1.DispatchReq
 	response, err := d.client.Do(httpRequest)
 	if err != nil {
 		if !wroteRequest.Load() && requestCtx.Err() == nil && networkUnreached(err, tlsStarted.Load()) {
-			return previewv1.DispatchOutcome{}, &DispatchError{Code: "machine_unreachable", Retryable: true, Cause: err}
+			return previewv1.DispatchOutcome{}, &DispatchError{Code: "machine_unreachable", Retryable: true, Cause: err, TargetHost: httpRequest.URL.Hostname()}
 		}
 		return previewv1.DispatchOutcome{}, classifyTransportError(requestCtx, err)
 	}

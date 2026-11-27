@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -667,5 +668,22 @@ func TestPreviewDispatchUnreachedMachineIsNotAServerError(t *testing.T) {
 		if code == "machine_unreachable" && !strings.Contains(w.Body.String(), "the machine or its edge could not be reached") {
 			t.Fatalf("machine_unreachable message: %s", w.Body.String())
 		}
+	}
+}
+
+// L41: a 409 machine_unreachable is still logged (warn) with its cause chain
+// and target host, so a broken edge ingress or TLS config is not silent.
+func TestPreviewDispatchUnreachableIsLoggedAtWarn(t *testing.T) {
+	request, logs, _ := diagnosticRequest("/v1/previews")
+	cause := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	dispatch := &previewdispatch.DispatchError{Code: "machine_unreachable", Retryable: true, Cause: cause, TargetHost: "machine-1.rt.example.test"}
+	w := httptest.NewRecorder()
+	writePreviewDispatchError(w, request, dispatch, dispatch)
+	out := logs.String()
+	if w.Code != http.StatusConflict || !strings.Contains(out, `"level":"WARN"`) || !strings.Contains(out, "machine-1.rt.example.test") || !strings.Contains(out, "OpError") {
+		t.Fatalf("status=%d logs=%s", w.Code, out)
+	}
+	if strings.Contains(out, "Bearer") {
+		t.Fatalf("log leaked a credential: %s", out)
 	}
 }
