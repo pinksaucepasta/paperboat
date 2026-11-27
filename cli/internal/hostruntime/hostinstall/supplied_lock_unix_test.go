@@ -60,10 +60,17 @@ func TestSuppliedUpdateCommitSaysWhatItWaitsForAndIsBounded(t *testing.T) {
 		var output bytes.Buffer
 		suppliedWaitOutput = &output
 		deadline = time.Time{}
-		if _, err := lockSuppliedNative(context.Background(), t.TempDir(), operation, true); err != nil {
+		ctx, want := context.Background(), "at most 15 min)"
+		if operation == "rollback-supplied" {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 45*time.Second) // its caller's recovery bound
+			defer cancel()
+			want = "at most 1 min)"
+		}
+		if _, err := lockSuppliedNative(ctx, t.TempDir(), operation, true); err != nil {
 			t.Fatal(err)
 		}
-		if got := output.String(); strings.Count(got, "Waiting for another Paperboat update that is finishing") != 1 || !strings.Contains(got, "at most 11 minutes") {
+		if got := output.String(); strings.Count(got, "Waiting for another Paperboat update that is finishing") != 1 || !strings.Contains(got, want) {
 			t.Fatalf("%s printed %q", operation, got)
 		}
 		if deadline.IsZero() || time.Until(deadline) > suppliedCommitWait {

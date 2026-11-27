@@ -325,8 +325,8 @@ var (
 // been replaced (smoke 11-27 linuxpool-3, 5 of 10 same-version pb update --from).
 //
 // A commit or rollback that finds the lock held says once what it waits for, and waits at most one signed
-// activation (its 10 min stability window plus margin): a signed activation queued in the gap after a bound
-// install-supplied committed would otherwise hold pb update --from silent for up to 15 min.
+// activation attempt, or the caller's shorter deadline: a signed activation queued in the gap after a bound
+// install-supplied committed would otherwise hold pb update --from silent.
 func lockSuppliedNative(ctx context.Context, root, operation string, explicit bool) (io.Closer, error) {
 	if !explicit {
 		return lockNative(ctx, root)
@@ -342,15 +342,20 @@ func lockSuppliedNative(ctx context.Context, root, operation string, explicit bo
 	if candidate := updated.UnixActivationCandidate(root); candidate != "" {
 		update = "the Paperboat update to " + candidate
 	}
-	fmt.Fprintf(suppliedWaitOutput, "Waiting for %s that is finishing on this computer (at most %d minutes)...\n", update, int(suppliedCommitWait/time.Minute))
-	bounded, cancel := context.WithTimeout(ctx, suppliedCommitWait)
+	wait := suppliedCommitWait
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
+		wait = time.Until(deadline)
+	}
+	fmt.Fprintf(suppliedWaitOutput, "Waiting for %s that is finishing on this computer (at most %d min)...\n", update, int((wait+time.Minute-1)/time.Minute))
+	bounded, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	return lockNative(bounded, root)
 }
 
-// suppliedCommitWait bounds a commit or rollback waiting for a signed activation: its stability window
-// (releasepolicy, 10 min) plus the health watch's margin, rounded up.
-const suppliedCommitWait = 11 * time.Minute
+// suppliedCommitWait bounds a commit or rollback waiting for a signed activation: one whole helper attempt
+// (resolve, drain, canary, stability window, rollback, readiness) fits the update control bound, not the
+// 10 min window alone.
+const suppliedCommitWait = 15 * time.Minute
 
 // suppliedWaitOutput is the root step's stderr, which the invoking pb prints; tests replace it.
 var suppliedWaitOutput io.Writer = os.Stderr
