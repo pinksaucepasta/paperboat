@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
@@ -21,7 +22,7 @@ const serviceStartTimeoutWindow = 24 * time.Hour
 func probeDoctorServiceStart(ctx context.Context) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "local", Code: "local_daemon_service_start", Status: doctorpkg.StatusPass, Summary: "The local Paperboat service starts promptly."}
 	recorder := diagnostics.FromContext(ctx)
-	if recorder == nil {
+	if recorder == nil || runtime.GOOS != "windows" {
 		return check
 	}
 	tail, err := recorder.ReadDiskTail(ctx, 1<<20)

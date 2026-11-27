@@ -10,8 +10,14 @@ import (
 // that the local daemon service did not answer its start request in time.
 const ServiceStartTimeoutCode = "local_daemon_service_start_timeout"
 
-func recordServiceStartTimeout(ctx context.Context, service string) {
+// serviceStartTimeoutFields are the event's fields; every key must be one the
+// diagnostics event validator allows.
+func serviceStartTimeoutFields() map[string]string {
+	return map[string]string{"operation": "service_start", "outcome": "request_timeout"}
+}
+
+func recordServiceStartTimeout(ctx context.Context) {
 	if recorder := diagnostics.FromContext(ctx); recorder != nil {
-		_ = recorder.Record("local_daemon", ServiceStartTimeoutCode, "warning", map[string]string{"service": service})
+		_ = recorder.Record("local_daemon", ServiceStartTimeoutCode, "warning", serviceStartTimeoutFields())
 	}
 }
