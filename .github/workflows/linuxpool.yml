@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       slots:
-        description: Host numbers 1-12, comma separated (linuxpool.sh start picks free ones)
+        description: Host numbers 1-20, comma separated (linuxpool.sh start picks free ones)
         required: true
         default: "1"
       hours:
@@ -61,7 +61,7 @@ jobs:
           TUNNEL_KNOWN_HOSTS: ${{ secrets.WINPOOL_TUNNEL_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          [[ $SLOT =~ ^([1-9]|1[0-2])$ ]] || { echo 'slot must be 1-12'; exit 1; }
+          [[ $SLOT =~ ^([1-9]|1[0-9]|20)$ ]] || { echo 'slot must be 1-20'; exit 1; }
           [ -n "$CONTROLLER_PUBKEY" ] && [ -n "$TUNNEL_KEY" ] || { echo 'WINPOOL_CONTROLLER_PUBKEY or WINPOOL_TUNNEL_KEY is not set'; exit 1; }
           port=$((22400 + SLOT))
 

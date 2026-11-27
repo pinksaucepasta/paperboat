@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Temporary Linux test hosts on GitHub-hosted runners (.github/workflows/linuxpool.yml), see README.md.
-# Same design as winpool.sh (and the same controller key and tunnel secrets), on its own ports 22401-22412.
+# Same design as winpool.sh (and the same controller key and tunnel secrets), on its own ports 22401-22420.
 #
 #   linuxpool.sh start N [HOURS]   start N machines (HOURS 1-5, default 2), wait until SSH answers, print their targets
 #   linuxpool.sh list              machines whose tunnel is up, and who started them
@@ -18,7 +18,8 @@ set -euo pipefail
 
 JUMP=${WINPOOL_JUMP:-$(python3 "$(dirname "$0")/dev_targets.py" pool_jump)}
 [ -n "$JUMP" ] || { echo 'linuxpool: configure pool_jump in the local development targets' >&2; exit 2; }
-MAX=12
+MAX=20
+SLOT_RE='([1-9]|1[0-9]|20)' # 1-MAX
 CONF=$HOME/.ssh/linuxpool.conf
 KNOWN=$HOME/.ssh/linuxpool_known_hosts
 CLAIMS=$HOME/.ssh/linuxpool-claims # N: who started machine N
@@ -45,22 +46,22 @@ configure() {
 up() { # machine numbers whose tunnel port listens on the jump host
   local listening
   listening=$(ssh -o BatchMode=yes -o ConnectTimeout=15 "$JUMP" 'ss -ltnH') || die "cannot reach the jump host $JUMP"
-  grep -oE '127\.0\.0\.1:224(0[1-9]|1[0-2]) ' <<<"$listening" | sed -E 's/.*:224([0-9]{2}) /\1/; s/^0//' | sort -n || true
+  grep -oE '127\.0\.0\.1:224(0[1-9]|1[0-9]|20) ' <<<"$listening" | sed -E 's/.*:224([0-9]{2}) /\1/; s/^0//' | sort -n || true
 }
 
 answers() { ssh -o BatchMode=yes -o ConnectTimeout=15 "linuxpool-$1" true 2>/dev/null </dev/null; }
 
-slot() { [[ ${1:-} =~ ^([1-9]|1[0-2])$ ]] || die "machine number must be 1-$MAX"; }
+slot() { [[ ${1:-} =~ ^$SLOT_RE$ ]] || die "machine number must be 1-$MAX"; }
 
 start() {
   local count=${1:-} hours=${2:-2} busy free=() n deadline
-  [[ $count =~ ^([1-9]|1[0-2])$ ]] || die "usage: linuxpool.sh start N [HOURS] (N 1-$MAX)"
+  [[ $count =~ ^$SLOT_RE$ ]] || die "usage: linuxpool.sh start N [HOURS] (N 1-$MAX)"
   [[ $hours =~ ^[1-5]$ ]] || die "HOURS must be 1-5"
   # One start at a time on this controller, and a machine that was just started is taken before its tunnel is up:
   # two worktrees starting seconds apart otherwise pick the same numbers.
   mkdir -p "$CLAIMS"
   exec 9>"$CLAIMS/lock"; flock 9
-  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/([1-9]|1[0-2])' -mmin -15 -printf '%f\n')
+  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex ".*/$SLOT_RE" -mmin -15 -printf '%f\n')
   for n in $(seq "$MAX"); do grep -qx "$n" <<<"$busy" || free+=("$n"); done
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of $MAX machines are free (linuxpool.sh list)"
   free=("${free[@]:0:count}")
@@ -133,7 +134,7 @@ record() { # a machine id paired on a runner you hold
 sweep() { # runners that are not up (lease over) leave their machine records online until the heartbeat times out
   local busy dead=() n
   mkdir -p "$CLAIMS"
-  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/([1-9]|1[0-2])' -mmin -15 -printf '%f\n') # a runner still starting is not dead
+  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex ".*/$SLOT_RE" -mmin -15 -printf '%f\n') # a runner still starting is not dead
   for n in $(seq "$MAX"); do grep -qx "$n" <<<"$busy" || dead+=("$n"); done
   pool_revoke "${dead[@]}"
 }
