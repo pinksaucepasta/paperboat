@@ -103,7 +103,7 @@ func Validate(request Request, sudoUID int) error {
 		return hostInstallFailure("service PATH", ErrInvalidRequest)
 	}
 	if err := ValidateControlURL(request.ControlURL); err != nil {
-		return hostInstallFailure(err.Error(), ErrInvalidRequest, err)
+		return hostInstallFailure("invalid Paperboat server URL", ErrInvalidRequest, err)
 	}
 	parsed, err := url.Parse(request.ControlURL)
 	if err != nil {

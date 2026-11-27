@@ -42,7 +42,7 @@ def build(args):
     if manifest.exists():
         raise RuntimeError('committed build already exists; use its manifest instead of rebuilding')
     values = dict(Version=version, Commit=commit, ProtocolVersion='1',
-                  DefaultServerURL=args.server_url, DefaultReleaseURL=args.server_url)
+                  DefaultServerURL=args.server_url, DefaultReleaseURL='')
     flags = ' '.join('-X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.' + key + '=' + value
                      for key, value in values.items())
     with tempfile.TemporaryDirectory(prefix='paperboat-device-source-') as directory:

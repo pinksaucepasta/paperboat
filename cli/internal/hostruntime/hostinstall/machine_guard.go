@@ -201,7 +201,8 @@ func finishMachineGuard(ctx context.Context, undo guardUndo, installErr error) e
 	return nil
 }
 
-// machineGuardNotRunning reports a probe miss that only means no guard is serving yet.
+// machineGuardNotRunning reports a probe miss that only means no guard is serving yet. ECONNREFUSED is a
+// Unix socket with no listener; Windows' missing named pipe is covered by ErrNotExist.
 func machineGuardNotRunning(err error) bool {
 	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
 }

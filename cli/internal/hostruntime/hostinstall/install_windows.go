@@ -3151,7 +3151,7 @@ func Validate(request Request, _ int) error {
 		return hostInstallFailure("enrollment is pending", ErrInvalidRequest)
 	}
 	if err := ValidateControlURL(request.ControlURL); err != nil {
-		return hostInstallFailure(err.Error(), ErrInvalidRequest, err)
+		return hostInstallFailure("invalid Paperboat server URL", ErrInvalidRequest, err)
 	}
 	listenHost, listenPort, listenErr := net.SplitHostPort(request.HelperListenAddress)
 	if listenErr != nil || listenPort == "" || net.ParseIP(listenHost) == nil || !net.ParseIP(listenHost).IsLoopback() {

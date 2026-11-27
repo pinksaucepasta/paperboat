@@ -29,6 +29,9 @@ func platformInstallCommand() *cobra.Command {
 			if err := refuseRecipeInstallWithoutRoot(c); err != nil {
 				return err
 			}
+			if err := installPreflightServer(c); err != nil {
+				return err
+			}
 			executable, source, err := installDependenciesOf(c.Context()).runningSource()
 			if err != nil {
 				return err
