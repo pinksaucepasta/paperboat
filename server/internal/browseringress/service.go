@@ -215,7 +215,7 @@ WHERE p.id=$1 AND p.account_id=$2 AND a.route_id=$3 AND a.edge_node_id=$4 AND a.
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied'
  AND m.state NOT IN ('pending','revoked','deleted') AND m.public_identity_key=a.machine_identity_public_key
  AND identity.issued_at<=$6 AND identity.expires_at>$6
- AND n.state='ready' AND n.ready AND n.last_heartbeat_at>$6::timestamptz-interval '2 minutes'
+ AND ((n.state='ready' AND n.ready) OR (n.state='draining' AND n.drain_deadline>$6)) AND (n.drain_deadline IS NULL OR n.drain_deadline>$6) AND n.last_heartbeat_at>$6::timestamptz-interval '2 minutes'
 LIMIT 1`
 
 // refused logs which check refused a browser ingress decision (no credentials), then answers the

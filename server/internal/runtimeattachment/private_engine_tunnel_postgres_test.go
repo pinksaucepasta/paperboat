@@ -88,4 +88,32 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if err != nil || binding.ConnectorID != r.ConnectorID || binding.CarrierSessionID != r.CarrierSessionID || binding.Protocol != privateaccess.ProtocolHTTP || binding.AssignmentGeneration != r.AssignmentGeneration {
 		t.Fatalf("resolved binding = %+v, %v", binding, err)
 	}
+	// F1 follow-up: a draining edge keeps its tunnel route (resolver, discovery, admissions) until its drain deadline.
+	lookup := privateaccess.Lookup{AccountID: f.account, Request: q, Edge: privateaccess.EdgeIdentity{NodeID: f.node, ProcessEpoch: f.edge.ProcessEpoch}, Now: now}
+	served := func() (bool, int, int) {
+		_, resolveErr := resolver.ResolvePrivate(f.ctx, lookup)
+		found, err := repository.MachineRoutes(f.ctx, f.account, f.machine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, err := repository.EdgeAdmissions(f.ctx, f.node, f.edge.ProcessEpoch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resolveErr == nil, len(found), len(admitted)
+	}
+	for _, grace := range []time.Duration{10 * time.Minute, 90 * time.Second} {
+		f.exec(t, `UPDATE control_tunnel_nodes SET state='draining',ready=false,drain_deadline=$2 WHERE id=$1`, f.node, now.Add(grace))
+		if ok, n, a := served(); !ok || n != 1 || a != 1 {
+			t.Fatalf("draining edge (deadline in %s) dropped the tunnel: resolved=%v routes=%d admissions=%d", grace, ok, n, a)
+		}
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET drain_deadline=$2 WHERE id=$1`, f.node, now.Add(-time.Second))
+	if ok, n, a := served(); ok || n != 0 || a != 0 {
+		t.Fatalf("drained edge kept the tunnel after the deadline: resolved=%v routes=%d admissions=%d", ok, n, a)
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET state='ready',ready=true,drain_deadline=NULL WHERE id=$1`, f.node)
+	if ok, n, a := served(); !ok || n != 1 || a != 1 {
+		t.Fatalf("tunnel not restored after the edge returned to ready: resolved=%v routes=%d admissions=%d", ok, n, a)
+	}
 }

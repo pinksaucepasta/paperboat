@@ -157,8 +157,8 @@ WHERE t.account_id = $1
 	AND machine.online
 	AND machine.deleted_at IS NULL
 	AND machine.revoked_at IS NULL
-	AND edge_node.state = 'ready'
-	AND edge_node.ready = true
+	-- A draining edge keeps serving until its drain deadline (nodedrain; endpoints/edge.go).
+	AND ((edge_node.state='ready' AND edge_node.ready) OR (edge_node.state='draining' AND edge_node.drain_deadline>$6)) AND (edge_node.drain_deadline IS NULL OR edge_node.drain_deadline>$6)
 	AND edge_node.last_heartbeat_at IS NOT NULL
 	AND edge_node.last_heartbeat_at > $6::timestamptz - interval '2 minutes'
   AND (t.expires_at IS NULL OR t.expires_at > $6)

@@ -125,6 +125,39 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// F1 follow-up: a draining edge keeps its preview routes and admissions until its drain deadline.
+	drainCounts := func() (int, int) {
+		routes, err := repository.MachineRoutes(ctx, f.accountID, f.accessorID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admissions, err := repository.EdgeAdmissions(ctx, f.nodeID, f.epoch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(routes), len(admissions)
+	}
+	for _, grace := range []time.Duration{10 * time.Minute, 90 * time.Second} {
+		if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=$2 WHERE id=$1`, f.nodeID, now.Add(grace)); err != nil {
+			t.Fatal(err)
+		}
+		if r, a := drainCounts(); r != 1 || a != 2 {
+			t.Fatalf("draining edge (deadline in %s) dropped routes=%d admissions=%d before the deadline", grace, r, a)
+		}
+	}
+	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET drain_deadline=$2 WHERE id=$1`, f.nodeID, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if r, a := drainCounts(); r != 0 || a != 0 {
+		t.Fatalf("drained edge kept routes=%d admissions=%d after the drain deadline", r, a)
+	}
+	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='ready',ready=true,drain_deadline=NULL WHERE id=$1`, f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if r, a := drainCounts(); r != 1 || a != 2 {
+		t.Fatalf("routes=%d admissions=%d not restored after the edge returned to ready", r, a)
+	}
+
 	// One current route (the preview) multiplied by 4,097 current accessors (past the old limit) must come back
 	// whole: no count truncates or refuses a snapshot.
 	const accessors = 4097

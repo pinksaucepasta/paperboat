@@ -210,6 +210,36 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if err = database.SQL().QueryRowContext(ctx, `SELECT paperboat.node_preview_eligible($1,$2,$3)`, installed.NodeID, account, preview).Scan(&eligible); err != nil || !eligible {
 		t.Fatalf("verified preview eligible=%v err=%v", eligible, err)
 	}
+	// F1 follow-up: a draining self-hosted edge keeps its route and preview eligibility until the drain deadline
+	// (plain drain and a drain-move's 90 s alike) while DNS (publication_edge_nodes) already excludes it; after the
+	// deadline both are withdrawn; back to ready restores them.
+	drainCheck := func(label string, wantEligible, wantDNS bool) {
+		t.Helper()
+		var routeOK, previewOK, tunnelDNS, previewDNS bool
+		if err := database.SQL().QueryRowContext(ctx, `SELECT paperboat.node_route_eligible($1,$2,$3),paperboat.node_preview_eligible($1,$2,$4),
+ $1 IN(SELECT node_id FROM paperboat.publication_edge_nodes('tunnel',(SELECT tunnel_id FROM paperboat.tunnel_routes WHERE id=$3))),
+ $1 IN(SELECT node_id FROM paperboat.publication_edge_nodes('preview',$4))`, installed.NodeID, account, route, preview).Scan(&routeOK, &previewOK, &tunnelDNS, &previewDNS); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if routeOK != wantEligible || previewOK != wantEligible || tunnelDNS != wantDNS || previewDNS != wantDNS {
+			t.Fatalf("%s: route=%v preview=%v tunnelDNS=%v previewDNS=%v, want eligible=%v dns=%v", label, routeOK, previewOK, tunnelDNS, previewDNS, wantEligible, wantDNS)
+		}
+	}
+	drainCheck("ready", true, true)
+	for _, grace := range []string{"10 minutes", "90 seconds"} {
+		if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=now()+$2::interval WHERE id=$1`, installed.NodeID, grace); err != nil {
+			t.Fatal(err)
+		}
+		drainCheck("draining "+grace, true, false)
+	}
+	if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET drain_deadline=now()-interval '1 second' WHERE id=$1`, installed.NodeID); err != nil {
+		t.Fatal(err)
+	}
+	drainCheck("drain deadline passed", false, false)
+	if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='ready',ready=true,drain_deadline=NULL WHERE id=$1`, installed.NodeID); err != nil {
+		t.Fatal(err)
+	}
+	drainCheck("undrained", true, true)
 	ids := []string{installed.InstallationID}
 	for index := 0; index < 3; index++ {
 		extra := scopedInstallationFixture(t, database, "selfhost-topology-test-encryption-key", account, "tunnel")

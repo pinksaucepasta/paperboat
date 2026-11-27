@@ -151,6 +151,35 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 		return out
 	}
 	previewAccess, tunnelAccess := access("preview", lease, lease), access("tunnel", tunnel, route)
+	// F1 follow-up: a draining edge keeps resolving preview and tunnel inspect access until its drain deadline
+	// (plain drain and a drain-move's 90 s alike), refuses after it, and resolves again once back to ready.
+	resolveBoth := func() (error, error) {
+		t.Helper()
+		var errs [2]error
+		for i, k := range [][3]string{{"preview", lease, lease}, {"tunnel", tunnel, route}} {
+			credential, e := service.Issue(ctx, inspectaccess.IssueRequest{AccountID: owner, ResourceKind: k[0], ResourceID: k[1], RouteID: k[2], Action: "inspect", TTL: time.Minute})
+			if e != nil {
+				t.Fatal(e)
+			}
+			_, errs[i] = service.ResolveAccess(ctx, inspectaccess.AccessRequest{AccountID: owner, Token: credential.Token, ResourceKind: k[0], ResourceID: k[1], RouteID: k[2], Action: "inspect", Transport: "edge"})
+			_ = service.RevokeCredential(ctx, owner, credential.CredentialID)
+		}
+		return errs[0], errs[1]
+	}
+	for _, grace := range []string{"10 minutes", "90 seconds"} {
+		exec(`UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=now()+$2::interval,last_heartbeat_at=now() WHERE id=$1`, node, grace)
+		if pe, te := resolveBoth(); pe != nil || te != nil {
+			t.Fatalf("draining edge (deadline in %s) refused inspect access: preview=%v tunnel=%v", grace, pe, te)
+		}
+	}
+	exec(`UPDATE paperboat.control_tunnel_nodes SET drain_deadline=now()-interval '1 second' WHERE id=$1`, node)
+	if pe, te := resolveBoth(); pe == nil || te == nil {
+		t.Fatalf("drained edge resolved inspect access after the deadline: preview=%v tunnel=%v", pe, te)
+	}
+	exec(`UPDATE paperboat.control_tunnel_nodes SET state='ready',ready=true,drain_deadline=NULL,last_heartbeat_at=now() WHERE id=$1`, node)
+	if pe, te := resolveBoth(); pe != nil || te != nil {
+		t.Fatalf("inspect access not restored after the edge returned to ready: preview=%v tunnel=%v", pe, te)
+	}
 	lifetime, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

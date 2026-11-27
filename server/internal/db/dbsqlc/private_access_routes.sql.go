@@ -30,7 +30,7 @@ WITH private_routes AS (
   WHERE a.edge_node_id = $1 AND a.edge_process_epoch = $2
     AND p.access_mode = 'private' AND p.terminal_state = 'active' AND p.lease_deadline > $3
     AND a.state = 'ready' AND a.expires_at > $3
-    AND n.state = 'ready' AND n.ready = true
+    AND (((n.state='ready' AND n.ready) OR (n.state='draining' AND n.drain_deadline>$3)) AND (n.drain_deadline IS NULL OR n.drain_deadline>$3))
     AND n.last_heartbeat_at > $3 - interval '2 minutes'
   UNION ALL
   -- Tunnel routes ride the endpoint engine (PLAN 3a): the carrier is the agent's runtime carrier.
@@ -68,7 +68,7 @@ WITH private_routes AS (
     AND x.desired = 'active' AND x.observed_ready AND v.effective_access_mode = 'private'
     AND t.desired_state = 'active' AND t.deleted_at IS NULL AND r.desired_state = 'active' AND r.deleted_at IS NULL
     AND ra.expires_at > $3
-    AND n.state = 'ready' AND n.ready = true
+    AND (((n.state='ready' AND n.ready) OR (n.state='draining' AND n.drain_deadline>$3)) AND (n.drain_deadline IS NULL OR n.drain_deadline>$3))
     AND n.last_heartbeat_at > $3 - interval '2 minutes'
     AND n.carrier_endpoint_host IS NOT NULL
     AND n.carrier_endpoint_tcp_port IS NOT NULL
@@ -219,7 +219,7 @@ WITH private_routes AS (
     AND p.lease_deadline > $3
     AND a.state = 'ready'
     AND a.expires_at > $3
-    AND n.state = 'ready' AND n.ready = true
+    AND (((n.state='ready' AND n.ready) OR (n.state='draining' AND n.drain_deadline>$3)) AND (n.drain_deadline IS NULL OR n.drain_deadline>$3))
     AND n.last_heartbeat_at > $3 - interval '2 minutes'
   UNION ALL
   -- Tunnel routes ride the endpoint engine (PLAN 3a): the carrier is the agent's runtime carrier.
@@ -257,7 +257,7 @@ WITH private_routes AS (
     AND x.desired = 'active' AND x.observed_ready AND v.effective_access_mode = 'private'
     AND t.desired_state = 'active' AND t.deleted_at IS NULL AND r.desired_state = 'active' AND r.deleted_at IS NULL
     AND ra.expires_at > $3
-    AND n.state = 'ready' AND n.ready = true
+    AND (((n.state='ready' AND n.ready) OR (n.state='draining' AND n.drain_deadline>$3)) AND (n.drain_deadline IS NULL OR n.drain_deadline>$3))
     AND n.last_heartbeat_at > $3 - interval '2 minutes'
     AND n.carrier_endpoint_host IS NOT NULL
     AND n.carrier_endpoint_tcp_port IS NOT NULL
