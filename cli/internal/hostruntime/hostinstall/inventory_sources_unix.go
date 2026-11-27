@@ -3,15 +3,18 @@
 package hostinstall
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
 )
@@ -56,6 +59,12 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 		return sources, err
 	}
 	sources.Active, sources.Activated = digest, activated
+	// A restore rewrites the slot (rollback stages the prior version again), so its time is when the rollback ran,
+	// not when that version was activated: a failed update's process that started in between passed as draining
+	// (device A/B 11-27: the rolled-back build's root service, inventory ok). The commit's own record is the time.
+	if recorded, ok := slotActivation(paths, digest); ok {
+		sources.Activated = recorded
+	}
 	request, err := loadInstallMetadata(paths.metadata, uid)
 	if installNotExistOnly(err) || err == nil && request.EnrollmentPending {
 		return sources, nil
@@ -82,6 +91,40 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 		}
 	}
 	return sources, err
+}
+
+// slotActivationRecord is when the fixed slot's bytes were committed. Only a commit writes it, so a failed update
+// and its rollback leave the prior version's record in place. A separate file, so older builds never read it.
+type slotActivationRecord struct {
+	SHA256      string    `json:"sha256"`
+	ActivatedAt time.Time `json:"activated_at"`
+}
+
+func slotActivationPath(paths installPaths) string { return paths.metadata + ".activated" }
+
+func recordSlotActivation(paths installPaths, digest string, at time.Time) error {
+	body, err := json.Marshal(slotActivationRecord{SHA256: digest, ActivatedAt: at.UTC()})
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(slotActivationPath(paths), body, atomicfile.Options{Mode: 0o600, OwnerUID: 0, OwnerGID: -1})
+}
+
+// slotActivation is the recorded commit time of the bytes digest names; false when none names them.
+func slotActivation(paths installPaths, digest string) (time.Time, bool) {
+	info, err := os.Lstat(slotActivationPath(paths))
+	if err != nil || !info.Mode().IsRegular() || ownerUID(info) != 0 || info.Size() > 4<<10 {
+		return time.Time{}, false
+	}
+	body, err := readProtectedInstallState(slotActivationPath(paths), 4<<10)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var record slotActivationRecord
+	if decodeInstallJSON(bytes.NewReader(body), &record, 4<<10) != nil || record.SHA256 != digest || record.ActivatedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return record.ActivatedAt, true
 }
 
 func fileDigest(path string) (string, time.Time, error) {

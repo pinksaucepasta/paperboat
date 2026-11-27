@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
@@ -77,6 +78,8 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 	if err := updated.CommitUnixNativeInstall(paths.updateState); err != nil {
 		return errors.Join(err, writeJournal(paths.journal, journal))
 	}
+	// Best effort: without it the inventory falls back to the slot's own time.
+	_ = recordSlotActivation(paths, journal.Source.SHA256, time.Now())
 	return removeInstallFile(paths.workerRollback)
 }
 
