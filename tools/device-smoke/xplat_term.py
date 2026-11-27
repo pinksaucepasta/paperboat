@@ -12,6 +12,7 @@ from dev_targets import get_setting
 import hashlib
 import json
 import os
+import shlex
 import re
 import sys
 import time
@@ -36,6 +37,8 @@ except ImportError:  # the env leg is optional
 def client_argv(src, tail):
     """The local command that opens a terminal on `src` and runs `tail` (a list) there."""
     if src.os == 'linux':
+        if os.environ.get('XPLAT_L_SSH') and src.prefix[0] == 'ssh' and 'exec' not in src.prefix:  # a runner paired directly
+            return ['ssh', '-tt', src.prefix[1], 'export XDG_RUNTIME_DIR=/run/user/$(id -u); TERM=xterm-256color ' + ' '.join(shlex.quote(part) for part in tail)]
         user, uid = os.environ.get('XPLAT_L_USER', 'tester'), os.environ.get('XPLAT_L_UID', '1001')
         return ['ssh', '-tt', fleet.L_HOST, *os.environ.get('XPLAT_L_DOCKER', 'docker').split(), 'exec', '-it', '-u', user, '-e', 'HOME=/home/' + user,
                 '-e', 'XDG_RUNTIME_DIR=/run/user/' + uid, '-e', 'TERM=xterm-256color', fleet.L_CT, *tail]

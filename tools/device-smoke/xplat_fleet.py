@@ -5,7 +5,7 @@
   xplat_fleet.py status  pb version and machine state per device
   xplat_fleet.py down    revoke the three machines by exact id and uninstall
 
-Devices (override with env): L = Docker container XPLAT_L_CT on XPLAT_L_HOST (user XPLAT_L_USER, default tester; XPLAT_L_UID, XPLAT_L_DOCKER), M = the Mac VM's `admin` user
+Devices (override with env): L = the SSH host XPLAT_L_SSH, or else the Docker container XPLAT_L_CT on XPLAT_L_HOST (user XPLAT_L_USER, default tester; XPLAT_L_UID, XPLAT_L_DOCKER), M = the Mac VM's `admin` user
 (the configured macOS machine, GUI session, keychain unlocked per command from the configured macOS fixture directory), or with XPLAT_MAC_SSH=macpool-N a hosted macOS runner (machine `<prefix>-m`), W = winpool runner
 SMOKE_WINDOWS_SSH. L and W are named `<XPLAT_PREFIX>-l|-w`. The account is the Mac user's: enrollment tokens are minted by
 the Mac's own signed-in pb, so the three machines share one account. No secret is printed.
@@ -137,6 +137,11 @@ class Windows:
 
 
 def linux(name=None, ct=None):
+    host = os.environ.get('XPLAT_L_SSH')  # a Linux runner paired directly (user with passwordless sudo), instead of a container
+    if host and not ct:
+        user = os.environ.get('XPLAT_L_USER', 'runner')
+        return Unix(name or os.environ.get('XPLAT_L_NAME') or PREFIX + '-l', 'linux', ['ssh', host], '/home/' + user,
+                    '/home/%s/.local/bin/pb' % user, pre='export XDG_RUNTIME_DIR=/run/user/$(id -u); ')
     if not (ct or L_CT):
         raise SystemExit('XPLAT_L_CT is not set: name the Linux container of this run')
     user, uid = os.environ.get('XPLAT_L_USER', 'tester'), os.environ.get('XPLAT_L_UID', '1001')
@@ -154,7 +159,7 @@ def mac_unlock():
 def mac(name=None):
     host = os.environ.get('XPLAT_MAC_SSH')  # a macpool-N runner instead of the Mac VM (its logins run in the GUI session)
     if host:
-        return Unix(name or PREFIX + '-m', 'darwin', ['ssh', host], '/Users/runner', '/Users/runner/.local/bin/pb')
+        return Unix(name or os.environ.get('XPLAT_M_NAME') or PREFIX + '-m', 'darwin', ['ssh', host], '/Users/runner', '/Users/runner/.local/bin/pb')
     if os.environ.get('XPLAT_ALLOW_FLEET_MAC') != '1':  # an empty XPLAT_MAC_SSH once sent an X-41 run to the fleet Mac (test-m)
         raise SystemExit('XPLAT_MAC_SSH is not set: refusing to use the fleet Mac VM (set XPLAT_ALLOW_FLEET_MAC=1 only for the fleet owner)')
     return Unix(name or M_NAME, 'darwin', [MAC_SSH, 'vm'], '/Users/admin', '/Users/admin/.local/bin/pb', pre=mac_unlock())
@@ -164,8 +169,12 @@ def windows(name=None):
     return Windows(name or os.environ.get('XPLAT_W_NAME') or PREFIX + '-w')  # XPLAT_W_NAME: a runner paired next to the fleet's Windows test machine record
 
 
-def fleet(keys=('L', 'M', 'W')):
-    """Only the requested devices are contacted: a dead runner must not stop a run that never uses it."""
+def fleet(keys=None):
+    """Only the requested devices are contacted: a dead runner must not stop a run that never uses it. Without `keys`, a
+    run's own `--devices L,M` (or XPLAT_DEVICES) names them, so a two-OS pair run needs no third machine."""
+    if keys is None:
+        named = sys.argv[sys.argv.index('--devices') + 1] if '--devices' in sys.argv[:-1] else os.environ.get('XPLAT_DEVICES', '')
+        keys = tuple(named.split(',')) if named else ('L', 'M', 'W')
     builders = {'L': linux, 'M': mac, 'W': windows}
     return {k: builders[k]() for k in keys}
 
@@ -302,7 +311,7 @@ def up(devices):
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else 'status'
     keys = sys.argv[sys.argv.index('--devices') + 1].split(',') if '--devices' in sys.argv else ['L', 'M', 'W']
-    devices = {k: d for k, d in fleet().items() if k in keys}
+    devices = fleet(tuple(keys))  # only the requested devices are contacted
     if action == 'up':
         return up(devices)
     if action == 'status':

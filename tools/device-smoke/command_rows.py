@@ -178,7 +178,9 @@ def rows(args):
     out.append(r)
 
     r = Row('C159', 'env vault'); r.help(); r.invalid('bogus')
-    d = r.json_ok(); r.expect(d and len(d.get('commands', [])) >= 8, 'env vault --json misses subcommands')
+    d = r.json_ok()
+    listed = {c.get('command') for c in (d or {}).get('commands', [])} if isinstance(d, dict) else set()
+    r.expect(listed >= {'pb env vault ' + x for x in ('create', 'delete', 'list')}, 'env vault --json misses subcommands: %s' % sorted(listed))
     out.append(r)
 
     r = Row('C216', 'update'); r.help()

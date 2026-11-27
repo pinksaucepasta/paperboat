@@ -93,7 +93,9 @@ def t_env_streams(src, dst):
     done = run(src, dst, [python(dst), '-c', code], flags=['--env', 'XP_A=' + a, '--env', 'XP_B=' + b])
     assert done.rc == 0, done.errtext
     assert done.text == a.encode().hex() + '|' + b.encode().hex(), done.text
-    assert done.errtext.strip() == 'err-text', 'stderr was not kept apart: %r / %r' % (done.errtext, done.text)
+    # a machine whose ENV is still pending adds pb's own documented warning line to stderr (cli/cmd/pb/launch_warning.go)
+    errtext = ''.join(line for line in done.errtext.splitlines(True) if not line.startswith('Paperboat ENV not applied:'))
+    assert errtext.strip() == 'err-text', 'stderr was not kept apart: %r / %r' % (done.errtext, done.text)
     return '--env arrives byte for byte; stdout and stderr stay separate'
 
 
@@ -151,7 +153,12 @@ def t_offline(devices):
     offline, the others exec into it, then it is thawed and waited for."""
     import subprocess
     target = devices['L']
-    subprocess.run(['ssh', fleet.L_HOST, 'docker', 'pause', fleet.L_CT], check=True, capture_output=True, timeout=60)
+    plain = bool(os.environ.get('XPLAT_L_SSH'))  # a runner paired directly has no container to freeze: its service stops
+    if plain:
+        stopped = target.pb('service', 'stop', timeout=90)
+        assert stopped.rc == 0, 'pb service stop on L failed: ' + stopped.errtext[-300:]
+    else:
+        subprocess.run(['ssh', fleet.L_HOST, 'docker', 'pause', fleet.L_CT], check=True, capture_output=True, timeout=60)
     try:
         for key, src in devices.items():
             if key == 'L':
@@ -169,7 +176,10 @@ def t_offline(devices):
                 time.sleep(10)
             check('offline', '%s>L' % key, lambda: _offline_message(done) + ' (attempt %d)' % attempt)
     finally:
-        subprocess.run(['ssh', fleet.L_HOST, 'docker', 'unpause', fleet.L_CT], capture_output=True, timeout=60)
+        if plain:
+            target.pb('service', 'start', timeout=90)
+        else:
+            subprocess.run(['ssh', fleet.L_HOST, 'docker', 'unpause', fleet.L_CT], capture_output=True, timeout=60)
         for _ in range(60):
             listed = fleet.json_pb(next(iter(devices.values())), 'machine', 'list', '--q', target.alias)
             if any(m['alias'] == target.alias and m['state'] == 'online' for m in listed['machines']):
