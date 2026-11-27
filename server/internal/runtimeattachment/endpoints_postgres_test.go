@@ -306,6 +306,18 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := assignments(); got[node] != "active/true" {
 		t.Fatalf("route after its carrier is back = %v, want ready", got)
 	}
+	// The edge's report of a ready carrier marks it ever ready (migration 528); the other edge never reported one.
+	everReady := func(edgeNode string) bool {
+		t.Helper()
+		var v bool
+		if err := database.SQL().QueryRowContext(ctx, `SELECT ever_ready FROM runtime_carrier_attachments WHERE machine_id=$1 AND edge_node_id=$2`, f.machine, edgeNode).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if !everReady(node) || everReady(backupNode) {
+		t.Fatalf("ever_ready after reports = %v/%v, want true/false", everReady(node), everReady(backupNode))
+	}
 	// An endpoint route's readiness never rests on observed_at alone: with the edge's heartbeat stale the route
 	// is not served even though its observation is fresh (migration 188).
 	if got := served(); len(got) == 0 {
@@ -341,12 +353,32 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if err := gate(); err != nil {
 		t.Fatalf("readiness waited for an edge the machine never reached: %v", err)
 	}
+	// An edge whose carrier was ready and then dropped (a flap or reconnect on the same admission keeps attached_at)
+	// is still waited for past the window: it answers 404/502 until it serves again (migration 528).
+	exec(`UPDATE runtime_carrier_attachments SET ever_ready=true WHERE machine_id=$1 AND edge_node_id=$2`, f.machine, backupNode)
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness with a once-ready edge reconnecting = %v, want not serving", err)
+	}
+	// The attach window runs on the database clock: a caller whose clock is a minute ahead must not close the
+	// window of a carrier that has only just been assigned.
+	exec(`UPDATE runtime_carrier_attachments SET ever_ready=false,attached_at=now() WHERE machine_id=$1 AND edge_node_id=$2`, f.machine, backupNode)
+	var skewedReady bool
+	if err := database.SQL().QueryRowContext(ctx, `SELECT paperboat.endpoint_route_ready(er.id,now()+interval '1 minute',true) FROM endpoint_routes er WHERE er.endpoint_id=$1`, lease).Scan(&skewedReady); err != nil {
+		t.Fatal(err)
+	}
+	if skewedReady {
+		t.Fatal("an app clock a minute ahead closed the attach window of a just-assigned carrier")
+	}
+	exec(`UPDATE runtime_carrier_attachments SET attached_at=now()-interval '1 minute' WHERE machine_id=$1 AND edge_node_id=$2`, f.machine, backupNode)
 	// No carrier up anywhere past the window (no edge counts): not ready, never vacuously ready.
+	// (A carrier going down clears its routes' observed_ready, as Observe does.)
 	exec(`UPDATE runtime_carrier_attachments SET ready=false,attached_at=now()-interval '1 minute' WHERE machine_id=$1`, f.machine)
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=false WHERE endpoint_id=$1`, lease)
 	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
 		t.Fatalf("readiness with no carrier up = %v, want not serving", err)
 	}
 	exec(`UPDATE runtime_carrier_attachments SET ready=true,attached_at=now() WHERE machine_id=$1`, f.machine)
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, node)
 	exec(`UPDATE control_tunnel_nodes SET drain_deadline=now()+interval '1 hour' WHERE id=$1`, backupNode)
 	if err := gate(); err != nil {
 		t.Fatalf("readiness waited for a draining edge: %v", err)

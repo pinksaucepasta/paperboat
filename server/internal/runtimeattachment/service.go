@@ -320,7 +320,7 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 			}
 			_, err = tx.Exec(ctx, `INSERT INTO runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,agent_capabilities)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17)
-ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,process_id=EXCLUDED.process_id,generation=EXCLUDED.generation,edge_process_epoch=EXCLUDED.edge_process_epoch,public_identity_key=EXCLUDED.public_identity_key,route_revision=EXCLUDED.route_revision,session_id=EXCLUDED.session_id,preview_session_id=EXCLUDED.preview_session_id,admission=EXCLUDED.admission,expires_at=EXCLUDED.expires_at,agent_capabilities=EXCLUDED.agent_capabilities,ready=CASE WHEN $16 THEN runtime_carrier_attachments.ready ELSE false END,observed_at=CASE WHEN $16 THEN runtime_carrier_attachments.observed_at ELSE NULL END,attached_at=CASE WHEN $16 THEN runtime_carrier_attachments.attached_at ELSE now() END,
+ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,process_id=EXCLUDED.process_id,generation=EXCLUDED.generation,edge_process_epoch=EXCLUDED.edge_process_epoch,public_identity_key=EXCLUDED.public_identity_key,route_revision=EXCLUDED.route_revision,session_id=EXCLUDED.session_id,preview_session_id=EXCLUDED.preview_session_id,admission=EXCLUDED.admission,expires_at=EXCLUDED.expires_at,agent_capabilities=EXCLUDED.agent_capabilities,ready=CASE WHEN $16 THEN runtime_carrier_attachments.ready ELSE false END,observed_at=CASE WHEN $16 THEN runtime_carrier_attachments.observed_at ELSE NULL END,attached_at=CASE WHEN $16 THEN runtime_carrier_attachments.attached_at ELSE now() END,ever_ready=CASE WHEN $16 THEN runtime_carrier_attachments.ever_ready ELSE false END,
 previous_admission=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.session_id AND runtime_carrier_attachments.ready AND runtime_carrier_attachments.expires_at>now() AND runtime_carrier_attachments.edge_process_epoch=EXCLUDED.edge_process_epoch AND runtime_carrier_attachments.public_identity_key=EXCLUDED.public_identity_key AND runtime_carrier_attachments.installation_generation=EXCLUDED.installation_generation THEN runtime_carrier_attachments.admission ELSE runtime_carrier_attachments.previous_admission END,
 previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.session_id AND runtime_carrier_attachments.ready AND runtime_carrier_attachments.expires_at>now() AND runtime_carrier_attachments.edge_process_epoch=EXCLUDED.edge_process_epoch AND runtime_carrier_attachments.public_identity_key=EXCLUDED.public_identity_key AND runtime_carrier_attachments.installation_generation=EXCLUDED.installation_generation THEN LEAST(runtime_carrier_attachments.expires_at,now()+$18::interval) ELSE runtime_carrier_attachments.previous_until END`, route, proof.MachineID, proof.UserID, request.InstallationGeneration, request.WorkerGeneration, request.ProcessID, rowGeneration, edge.node, edge.epoch, publicKey, revision, binding.SessionID, previewSessionID, encoded, admission.ExpiresAt, same, capabilities, previousCarrierGrace.String())
 			if err != nil {
@@ -742,9 +742,9 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 				stale = true
 				continue
 			}
-			active, unchanged, current := state.active, state.set && state.ready == o.Ready, state.current
+			active, unchanged, current := state.active, state.set && state.ready == o.Ready && (!o.Ready || state.everReady), state.current
 			if !(unchanged && current) {
-				err := tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
+				err := tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,ever_ready=ever_ready OR $6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
 				if errors.Is(err, pgx.ErrNoRows) {
 					stale = true
 					continue
@@ -787,7 +787,7 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 	return err
 }
 
-type carrierState struct{ active, ready, set, current bool }
+type carrierState struct{ active, ready, set, current, everReady bool }
 
 func endpointRouteSet(ctx context.Context, tx *db.Tx, ids []string) (map[string]bool, error) {
 	rows, err := tx.Query(ctx, `SELECT id FROM endpoint_routes WHERE id=ANY($1::text[])`, ids)
@@ -808,7 +808,7 @@ func endpointRouteSet(ctx context.Context, tx *db.Tx, ids []string) (map[string]
 
 // carrierStates reads the stored state of every reported carrier; a missing route is stale.
 func carrierStates(ctx context.Context, tx *db.Tx, edge previewattachment.PreviewEdgeIdentity, ids []string, generations []int64, sessions []string) (map[string]carrierState, error) {
-	rows, err := tx.Query(ctx, `SELECT a.route_id,a.active,coalesce(a.ready,false),a.ready IS NOT NULL,COALESCE(a.observed_at>now()-$6::interval,false)
+	rows, err := tx.Query(ctx, `SELECT a.route_id,a.active,coalesce(a.ready,false),a.ready IS NOT NULL,COALESCE(a.observed_at>now()-$6::interval,false),a.ever_ready
 FROM unnest($1::text[],$2::bigint[],$3::text[]) o(route_id,generation,session_id)
 JOIN runtime_carrier_attachments a ON a.route_id=o.route_id AND a.generation=o.generation AND a.session_id=o.session_id AND a.edge_node_id=$4 AND a.edge_process_epoch=$5`, ids, generations, sessions, edge.NodeID, edge.ProcessEpoch, observationRefresh.String())
 	if err != nil {
@@ -819,7 +819,7 @@ JOIN runtime_carrier_attachments a ON a.route_id=o.route_id AND a.generation=o.g
 	for rows.Next() {
 		var id string
 		var st carrierState
-		if err := rows.Scan(&id, &st.active, &st.ready, &st.set, &st.current); err != nil {
+		if err := rows.Scan(&id, &st.active, &st.ready, &st.set, &st.current, &st.everReady); err != nil {
 			return nil, err
 		}
 		out[id] = st
