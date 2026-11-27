@@ -13,6 +13,7 @@ control_url is that API. The cut is DROP rules on the control port inside the ed
 traffic still arrives), tagged with this run's id; a timer on the staging host removes them even if this process dies.
 One run at a time (a lock directory on the staging host). The tunnel and preview also expire by themselves.
 """
+import datetime
 import http.client
 import json
 import re
@@ -21,6 +22,7 @@ import shlex
 import socket
 import ssl
 import subprocess
+import sys
 import time
 import urllib.parse
 
@@ -196,11 +198,18 @@ class Run:
     def __init__(self, staging, marker, sleep=time.sleep, clock=time.monotonic, fetch=fetch):
         self.s, self.marker, self.sleep, self.clock, self.fetch = staging, marker, sleep, clock, fetch
         self.lines, self.failed = [], 0
+        self.names = {}  # url -> 'preview on EDGE', for the timeline
+        self.samples = []  # the raw timeline: UTC time, URL key, HTTP status, served, body of an answer that was not the marker
+
+    def stamp(self, what, status='', ok='', body=''):
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds')
+        self.samples.append('\t'.join((now, what, str(status), str(ok), ' '.join(body.split())[:200])))
 
     def log(self, ok, step, detail=''):
         self.failed += not ok
         line = '%s  %s%s' % ('PASS' if ok else 'FAIL', step, '  (%s)' % detail if detail else '')
         self.lines.append(line)
+        self.stamp('step: ' + line)
         print(line, flush=True)
         return ok
 
@@ -214,7 +223,9 @@ class Run:
 
     def served(self, url):
         status, body = self.fetch(url)
-        return status, status == 200 and self.marker in body
+        ok = status == 200 and self.marker in body
+        self.stamp(self.names.get(url, url), status, ok, '' if ok else body)
+        return status, ok
 
     def until_served(self, urls, seconds):
         deadline, last = self.clock() + seconds, {}
@@ -306,6 +317,7 @@ def drill(run, tag, leftovers):
         made['preview'] = (preview['id'], preview['endpoint'])
         urls = {kind: {'%s on %s' % (kind, edge): url for edge, url in run.addresses(made[kind][1])} for kind in ('preview', 'tunnel')}
         both = {**urls['preview'], **urls['tunnel']}
+        run.names.update({url: key for key, url in both.items()})
         up = run.until_served(both, 180)
         for key, (status, ok) in up.items():
             run.log(ok, '%s serves before the cut' % key, 'HTTP %d' % status)
@@ -332,6 +344,7 @@ def drill(run, tag, leftovers):
             _, age = s.heartbeat_age(node)
             run.log(packets > 0 and age >= STALE_AT_CUT_END, 'the cut of %s was real' % container,
                     '%d packets dropped; the server last heard from it %d s ago after %d s' % (packets, age, round(run.clock() - cut_at)))
+        run.stamp('restoring: removing the DROP rules')
         restore(s, netns, undo, tag)
         undo.clear()
         run.log(True, 'the control connection is restored')
@@ -430,4 +443,11 @@ def check(m):
         drill(run, tag, m.leftovers)
     except Exception as error:  # noqa: BLE001 a FAIL with the reason, after the drill's own cleanup
         run.log(False, 'the drill stopped', '%s: %s' % (type(error).__name__, str(error)[:200]))
+    from results_dir import results_dir
+    folder = results_dir(__file__) / 'fixture-checks'
+    folder.mkdir(parents=True, exist_ok=True)
+    timeline = folder / ('staging-edge-outage-%s-%s.tsv' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), tag))
+    timeline.write_text('\n'.join(run.samples) + '\n')
+    timeline.chmod(0o600)
+    print('timeline: %s' % timeline, file=sys.stderr, flush=True)
     return console_rows.verdict('staging-edge-outage', [('staging-edge-outage', 1 if run.failed else 0, '\n'.join(run.lines))])
