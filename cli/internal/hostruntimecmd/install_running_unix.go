@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -144,11 +143,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if err != nil {
 		return "", err
 	}
-	// childStarted and childKilled describe the last privileged step: whether its root child said it began (sudo may
-	// still have been asking for a password) and whether pb's bound killed it rather than it exiting by itself.
-	var childStarted, childKilled bool
 	invoke := func(callCtx context.Context, operation string) error {
-		childStarted, childKilled = false, false
 		body, err := json.Marshal(request)
 		if err != nil {
 			return err
@@ -158,19 +153,11 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		// Its reason is also kept (bounded) in the error: scrollback was the only copy, and the local failure record
 		// held just "exit status 1" (macOS in-place upgrade, L337).
 		reason := &tailBuffer{limit: 2048}
-		started := &lineSeen{want: []byte(privilegedRollbackStarted)}
-		command.Stdout, command.Stderr = os.Stderr, io.MultiWriter(os.Stderr, reason, started)
+		command.Stdout, command.Stderr = os.Stderr, io.MultiWriter(os.Stderr, reason)
 		// The root child outlives a killed sudo and keeps the stderr pipe open; Run must still return at the bound.
 		command.WaitDelay = privilegedPipeWaitDelay
 		if err = command.Run(); errors.Is(err, exec.ErrWaitDelay) {
 			err = nil // exited 0; a service it started kept the pipe
-		}
-		childStarted = started.seen
-		if command.ProcessState != nil {
-			if status, ok := command.ProcessState.Sys().(syscall.WaitStatus); ok {
-				// Only through sudo does a root child outlive the kill: as root, /usr/bin/env execs pb itself.
-				childKilled = status.Signaled() && callCtx.Err() != nil && os.Geteuid() != 0
-			}
 		}
 		if err != nil {
 			var exitErr *exec.ExitError
@@ -264,23 +251,17 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	link, err := installWorkerCommand(directory, layout.Binary)
 	var restoreService func(context.Context) error
 	rollback := func(cause error) (string, error) {
-		// Each recovery step has its own budget. rollback-supplied may wait for the activation lock and restarts the
-		// services; sharing one 45 s with it left the user service restore and the inventory an expired context.
-		rollbackCtx, cancelRollback := context.WithTimeout(context.WithoutCancel(ctx), suppliedRollbackBound)
-		binaryErr := invoke(rollbackCtx, "rollback-supplied")
-		rollbackEnded := rollbackCtx.Err() != nil
-		cancelRollback()
-		if binaryErr != nil && rollbackEnded && childStarted && childKilled {
-			// The root child began restoring and outlives its killed sudo: running the user service restore and the
-			// inventory now would make two processes restore one installation. Leave it the installation; only the
-			// user's own command link (no root state) is put back. A sudo still asking for a password started
-			// nothing, so that failure takes the normal recovery below.
-			var linkErr error
-			if link != nil {
-				linkErr = link.Rollback()
-			}
-			return "", StillFinishingFailure(fmt.Sprintf("The update failed and Paperboat is still restoring the previous version in the background after %s. Wait a few minutes for it to finish, then run `pb install` to make sure the previous version is fully restored.", suppliedRollbackBound), cause, binaryErr, linkErr)
-		}
+		// rollback-supplied is never cut off. Killing its sudo at a bound either left the root child restoring
+		// while pb restored over it, or, from a terminal, made sudo hang up the child mid-restore (device check
+		// 11-27: sudo sends SIGHUP/SIGTERM to a child on its terminal), leaving the failed build and its journal.
+		// It is waited for like a package manager's own rollback; past suppliedRollbackNotice pb says so once.
+		// Ctrl-C still reaches it through the terminal's process group.
+		notice := time.AfterFunc(suppliedRollbackNotice, func() {
+			fmt.Fprintln(os.Stderr, "Still restoring the previous Paperboat version; waiting for it to finish...")
+		})
+		binaryErr := invoke(context.WithoutCancel(ctx), "rollback-supplied")
+		notice.Stop()
+		// The steps after it have their own budget: sharing one 45 s with it left them an expired context.
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), suppliedRecoveryBound)
 		defer cancel()
 		if errors.Is(binaryErr, hostinstall.ErrNoPendingInstallation) {
@@ -382,32 +363,12 @@ func suppliedCommitRequest(request hostinstall.Request, installed installsource.
 // unit stops and a TERM/KILL wait, far below it.
 const installInventoryTimeout = 2 * time.Minute
 
-// privilegedRollbackStarted is the first line rollback-supplied's root child prints: pb knows the restore began.
-const privilegedRollbackStarted = "Restoring the previous Paperboat installation..."
-
-// lineSeen records whether its output contained want.
-type lineSeen struct {
-	want []byte
-	tail []byte
-	seen bool
-}
-
-func (l *lineSeen) Write(p []byte) (int, error) {
-	if !l.seen {
-		l.tail = append(l.tail, p...)
-		l.seen = bytes.Contains(l.tail, l.want)
-		if keep := len(l.want); len(l.tail) > keep {
-			l.tail = l.tail[len(l.tail)-keep:]
-		}
-	}
-	return len(p), nil
-}
-
-// suppliedRollbackBound bounds rollback-supplied (an activation lock wait, then stopping and restarting the prior
-// services); suppliedRecoveryBound bounds the user service restore after it. Variables so tests can shorten them.
+// suppliedRollbackNotice is when pb says it is still waiting for rollback-supplied (an activation lock wait, then
+// stopping and restarting the prior services); suppliedRecoveryBound bounds the user service restore after it.
+// Variables so tests can shorten them.
 var (
-	suppliedRollbackBound = 2 * time.Minute
-	suppliedRecoveryBound = 45 * time.Second
+	suppliedRollbackNotice = 2 * time.Minute
+	suppliedRecoveryBound  = 45 * time.Second
 )
 
 // yieldInstallIO marks an update's context: its privileged children run at idle I/O and nice 10 (e4586fcee).

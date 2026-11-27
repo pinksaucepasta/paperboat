@@ -312,13 +312,10 @@ func TestUnfinishedRestoreIsReportedAndRunsNoInventory(t *testing.T) {
 	}
 }
 
-// A rollback-supplied still running at its bound (a slow restore) is left the installation: its root child outlives the
-// killed sudo, and the user service restore and inventory pb ran next made two processes restore one installation.
-// The user is told it is still finishing; nothing else runs over it.
-func TestRollbackStillRunningAtItsBoundIsLeftToFinish(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("as root no sudo hop is left to outlive the kill: the step ends with it (install_running_unix.go)")
-	}
+// A slow rollback-supplied (past the notice) is waited for, never cut off: killing its sudo either left the root child
+// restoring while pb restored over it, or, from a terminal, made sudo hang the child up mid-restore (device check
+// 11-27). pb says once that it is still waiting, then runs the normal recovery with its own live budget.
+func TestASlowRollbackIsWaitedForNotCutOff(t *testing.T) {
 	executable, source, home := suppliedInstallFixture(t)
 	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
 	if err != nil {
@@ -327,72 +324,39 @@ func TestRollbackStillRunningAtItsBoundIsLeftToFinish(t *testing.T) {
 	if _, err := os.Lstat(layout.Binary); err == nil {
 		t.Skip("a Paperboat installation exists on this machine; the test must not touch its services")
 	}
-	previousRollback := suppliedRollbackBound
-	t.Cleanup(func() { suppliedRollbackBound = previousRollback })
-	suppliedRollbackBound = 300 * time.Millisecond
+	previousNotice := suppliedRollbackNotice
+	t.Cleanup(func() { suppliedRollbackNotice = previousNotice })
+	suppliedRollbackNotice = 200 * time.Millisecond
 	original := privilegedInstallCommand
 	t.Cleanup(func() { privilegedInstallCommand = original })
 	var operations []string
-	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
-		operation := arguments[len(arguments)-1]
-		operations = append(operations, operation)
-		if operation == "rollback-supplied" {
-			return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null; echo '"+privilegedRollbackStarted+"' >&2; exec sleep 5")
-		}
-		return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null")
-	}
-	_, err = InstallRunningBinary(t.Context(), executable, source, filepath.Join(home, "bin"), "")
-	var failure *CommandFailure
-	if !errors.As(err, &failure) || !failure.StillFinishing() || !strings.Contains(err.Error(), "still restoring the previous version") {
-		t.Fatalf("rollback past its bound = %v, want a still-finishing failure", err)
-	}
-	if want := []string{"install-supplied", "rollback-supplied"}; !reflect.DeepEqual(operations, want) {
-		t.Fatalf("privileged steps = %v, want nothing after the unfinished rollback %v", operations, want)
-	}
-	// The user's own command link is put back: no backup of it is left beside it.
-	if leftovers, _ := filepath.Glob(filepath.Join(home, "bin", ".pb-backup-*")); len(leftovers) != 0 {
-		t.Fatalf("the pb command link was not put back: %v", leftovers)
-	}
-}
-
-// A rollback-supplied that never began (sudo still asking for a password when pb's bound ended) restored nothing: it
-// is not reported as "still restoring", and the normal recovery (link, inventory) runs.
-func TestRollbackThatNeverStartedTakesTheNormalRecovery(t *testing.T) {
-	executable, source, home := suppliedInstallFixture(t)
-	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(layout.Binary); err == nil {
-		t.Skip("a Paperboat installation exists on this machine; the test must not touch its services")
-	}
-	previousRollback := suppliedRollbackBound
-	t.Cleanup(func() { suppliedRollbackBound = previousRollback })
-	suppliedRollbackBound = 300 * time.Millisecond
-	original := privilegedInstallCommand
-	t.Cleanup(func() { privilegedInstallCommand = original })
-	var operations []string
+	var rollbackDone time.Time
 	var inventoryErr error
+	var inventoryAt time.Time
 	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
 		operation := arguments[len(arguments)-1]
 		operations = append(operations, operation)
-		if operation == "rollback-supplied" {
-			return exec.CommandContext(ctx, "/bin/sh", "-c", "exec sleep 5") // a password prompt nobody answers
-		}
-		if operation == "inventory" {
-			inventoryErr = ctx.Err()
+		switch operation {
+		case "rollback-supplied":
+			rollbackDone = time.Now().Add(time.Second)
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null; sleep 1")
+		case "inventory":
+			inventoryErr, inventoryAt = ctx.Err(), time.Now()
 		}
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null")
 	}
 	_, err = InstallRunningBinary(t.Context(), executable, source, filepath.Join(home, "bin"), "")
 	var failure *CommandFailure
 	if errors.As(err, &failure) && failure.StillFinishing() {
-		t.Fatalf("a rollback that never began was reported as still restoring: %v", err)
+		t.Fatalf("a slow rollback was left running in the background: %v", err)
 	}
 	if want := []string{"install-supplied", "rollback-supplied", "inventory"}; !reflect.DeepEqual(operations, want) {
-		t.Fatalf("privileged steps = %v, want the normal recovery %v", operations, want)
+		t.Fatalf("privileged steps = %v, want %v", operations, want)
 	}
-	if inventoryErr != nil {
-		t.Fatalf("the inventory after a rollback that used its bound started with %v, want its own live context", inventoryErr)
+	if inventoryErr != nil || inventoryAt.Before(rollbackDone) {
+		t.Fatalf("the inventory ran at %v (context %v), want after the rollback finished (%v) with a live context", inventoryAt, inventoryErr, rollbackDone)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(home, "bin", ".pb-backup-*")); len(leftovers) != 0 {
+		t.Fatalf("the pb command link was not put back: %v", leftovers)
 	}
 }

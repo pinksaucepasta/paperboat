@@ -129,9 +129,6 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 				return stage, validate
 			}
 		}
-		if args[0] == "rollback-supplied" {
-			fmt.Fprintln(os.Stderr, privilegedRollbackStarted) // pb tells a running restore from a sudo still asking
-		}
 		err := hostinstall.SuppliedBinary(ctx, request, args[0], hooks)
 		if err != nil && recover != nil {
 			err = errors.Join(err, recover(context.WithoutCancel(ctx)))
