@@ -33,6 +33,9 @@ class Fake:
     def present(self):
         return self.found
 
+    def hooks(self):
+        return []
+
     def write(self, filename, text):
         self.calls.append(('write', filename, text))
         return '/w/' + filename
@@ -160,6 +163,15 @@ class NeverTouchesAMachineWithPaperboat(unittest.TestCase):
                           ({'SMOKE_RECIPE_WINDOWS_SSH': 'someone@victus'}, 'personal computer'), ({}, 'is not set')):
             with patch.dict(rc.f.ENV, env, clear=True), self.assertRaisesRegex(AssertionError, text):
                 rc.target_device(check, 'windows')
+
+    def test_a_leftover_shell_hook_is_not_a_clean_machine(self):
+        check = check_of(Fake(), 'recipe-install:linux')
+        target = Fake()
+        target.hooks = lambda: ['/home/u/.bashrc']
+        with patch.object(rc, 'target_device', return_value=('m', target)), contextlib.redirect_stderr(io.StringIO()):
+            rc.check_install(check, 'linux')
+        self.assertIn('target-has-no-paperboat', check.steps.result()[1])
+        self.assertEqual([], target.calls)
 
     def test_present_needs_the_whole_answer(self):
         with patch.object(rd, 'spawn', return_value=rd.Result(255, '', 'ssh: no route')):

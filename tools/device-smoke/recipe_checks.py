@@ -39,7 +39,8 @@ PLATFORMS = ('container', 'linux', 'macos', 'windows')
 CHECKS = ('recipe-lifecycle', 'recipe-errors', 'recipe-vaults', 'recipe-lifetimes', 'recipe-api-tokens') + tuple('recipe-install:' + p for p in PLATFORMS)
 SSH_SETTING = {p: 'SMOKE_RECIPE_%s_SSH' % p.upper() for p in ('linux', 'macos', 'windows')}
 # the paired smoke machines: a recipe check installs and uninstalls Paperboat, so it never runs on one of them
-PAIRED = ('SMOKE_LINUX_SSH', 'SMOKE_LINUX_PEER_SSH', 'SMOKE_MACOS_SSH', 'SMOKE_WINDOWS_SSH', 'SMOKE_MEMBER_SSH')
+PAIRED = ('SMOKE_LINUX_SSH', 'SMOKE_LINUX_PEER_SSH', 'SMOKE_MACOS_SSH', 'SMOKE_MACOS_VM_SSH', 'SMOKE_WINDOWS_SSH', 'SMOKE_MEMBER_SSH',
+          'SMOKE_FIXTURE_HOST', 'SMOKE_AU4_HOST')
 RELEASE = re.compile(r'20\d\d\.\d\d\.\d\d\.\d+')
 NOT_REACHED = "This machine's recipe does not reach that machine or action"
 SHORT_TOKEN = 'pbr_short'
@@ -275,13 +276,14 @@ class Check:
         finally:
             f.remote('%s unpause %s >/dev/null' % (f.DOCKER, self.s.creator_name))
 
-    def install(self, device, url, token, name):
-        """The printed one-liner on a clean or unpaired device; returns the machine id it set up."""
+    def install(self, device, url, token, name, any_name=False):
+        """The printed one-liner on a clean or unpaired device; returns the machine id it set up. any_name: return
+        (machine id, the name it got) and leave judging the name to the caller."""
         result = ok(device.one_liner(url, 'PB_RECIPE', token, name, self.pin), 'the recipe one-liner', 'Pairing this machine from recipe ')
         need('Waiting for approval' not in result.text and 'sign in and approve' not in result.text, 'the recipe install asked for a sign-in: ' + result.tail())
         found = SET_UP.search(result.text)
-        need(found and found.group(1) == name, 'no "Set up %s (machine_…)" line: %s' % (name, result.tail()))
-        return found.group(2)
+        need(found and (any_name or found.group(1) == name), 'no "Set up %s (machine_…)" line: %s' % (name, result.tail()))
+        return (found.group(2), found.group(1)) if any_name else found.group(2)
 
     def refuse_install(self, device, url, token, name, *texts):
         return refused(device.one_liner(url, 'PB_RECIPE', token, name, self.pin), 'the recipe one-liner', list(texts))
@@ -611,8 +613,10 @@ def target_device(check, platform):
         return check.bare('target')
     host = f.ENV.get(SSH_SETTING[platform], '')
     need(host, '%s is not set (a throwaway %s machine with no Paperboat)' % (SSH_SETTING[platform], platform))
+    def machine(login):
+        return login.rpartition('@')[2].lower()
     for key in PAIRED:
-        need(f.ENV.get(key, '') != host, '%s is the paired smoke machine of %s: a recipe check never runs there' % (SSH_SETTING[platform], key))
+        need(machine(f.ENV.get(key, '')) != machine(host), '%s is the paired smoke machine or fixture host of %s: a recipe check never runs there' % (SSH_SETTING[platform], key))
     need('victus' not in host.lower(), 'a personal computer is never a recipe test machine')
     device = rd.Windows(host) if platform == 'windows' else rd.Posix(platform, host)
     return check.s.name(platform[:3]), device
@@ -626,11 +630,14 @@ def check_install(check, platform):
     name, target = None, None
     with steps.step('target-has-no-paperboat'):
         candidate_name, candidate = target_device(check, platform)
-        found = candidate.present()
+        found = candidate.present() + candidate.hooks()
         need(not found, 'the %s machine already has Paperboat (%s): it is not touched; use a fresh runner' % (platform, ', '.join(found)[:200]))
         name, target = candidate_name, candidate
     if target is None:
         return  # nothing may run on a machine that is not a clean one
+    # it was clean: whatever the installer leaves there is taken off again on every exit path (a container just goes)
+    if platform != 'container':
+        check.stack.callback(uninstall, steps, target)
     spec = {'tags': [tag], 'reach': [{'dst': ['tag:' + tag], 'allow': ['exec']}], 'env': {'vaults': [s.vault]}, 'max_machines': 3, 'expires': '1d'}
     recipe = {}
     with steps.step('recipe-create'):
@@ -641,9 +648,6 @@ def check_install(check, platform):
     with steps.step('malformed-token-stops'):
         result = refused(target.one_liner(recipe['url'], 'PB_RECIPE', SHORT_TOKEN, name), 'a malformed PB_RECIPE', MALFORMED)
         need(not target.present(), 'a malformed token left something installed: ' + result.tail())
-    # from here the machine gets Paperboat: take it off again on every exit path (a container just goes)
-    if platform != 'container':
-        check.stack.callback(uninstall, steps, target)
     ids, peer = {}, {}
     with steps.step('lock-creator-keys'):
         ok(creator.pb('env', 'lock'), 'pb env lock')
@@ -651,8 +655,13 @@ def check_install(check, platform):
         with steps.step('peer-one-liner'):
             peer['name'], peer['device'] = check.bare('peer')
             ids[peer['name']] = check.install(peer['device'], recipe['linux'], recipe['token'], peer['name'])
+        wanted, got_name = name, None
         with steps.step('one-liner-no-prompt'):
-            ids[name] = check.install(target, recipe['url'], recipe['token'], name)
+            machine_id, got_name = check.install(target, recipe['url'], recipe['token'], name, any_name=True)
+            name = got_name  # the later steps follow the machine by the name it has
+            ids[name] = machine_id
+        with steps.step('machine-named-from-PB_NAME'):
+            need(got_name and got_name.lower() == wanted.lower(), 'the installer was given PB_NAME=%s and set up %s' % (wanted, got_name))
         with steps.step('version'):
             version = json.loads(ok(target.pb('--version', '--json'), 'pb --version').out.strip().splitlines()[-1])
             version = (version.get('data') or version)['version']
@@ -693,9 +702,9 @@ def check_install(check, platform):
         check.exec_refused(target, s.creator_name, seconds=60)
     with steps.step('reach-refuses-other-action'):
         need(names, 'no reach to compare with')
-        result = target.pb('ssh', '--user', 'pbt', peer['name'], '--', 'hostname', timeout=120)
-        need(result.code != 0 and names['peer'] not in result.out.split(), 'ssh is not in allow, and it ran: ' + result.tail())
-        need('SSH access' in result.text or NOT_REACHED in result.text, 'ssh refusal does not give its reason: ' + result.tail())
+        # the same peer that just answered exec: a file (action "files") is not in allow
+        path = target.write('not-allowed.txt', 'not allowed by the reach\n')
+        refused(target.pb('send', path, '--to', peer['name'], timeout=150), 'pb send, an action the reach does not allow', NOT_REACHED)
     with steps.step('reach-update-refuses-then-allows'):
         need(names, 'no reach to compare with')
         s.unlock()
@@ -720,6 +729,12 @@ def check_install(check, platform):
         check.unreadable(target, s.marker)
     with steps.step('removed-machine-rerun-says-why'):
         check.refuse_install(target, recipe['url'], recipe['token'], name, REMOVED)
+    with steps.step('uninstall-removes-the-install'):
+        target.uninstall()
+        need(not target.present(), 'pb uninstall left behind: %s' % ', '.join(target.present())[:300])
+    with steps.step('uninstall-removes-the-shell-hook'):
+        left = target.hooks()
+        need(not left, 'pb uninstall left the ENV hook line (a pb() shell function for the deleted binary) in %s' % ', '.join(left)[:300])
     if platform in ('macos', 'windows'):
         reverse(check, platform, name, target, recipe['url'])
 
@@ -729,6 +744,7 @@ def uninstall(steps, device):
         device.uninstall()
         left = device.present()
         need(not left, 'Paperboat is left on the machine: %s' % ', '.join(left)[:200])
+        device.drop_hooks()
     except Exception as error:  # noqa: BLE001 recorded as a failure of the check, the other cleanups still run
         steps.failed.append(('uninstall', rd.redact(str(error))[:300]))
 
@@ -739,8 +755,9 @@ def reverse(check, platform, name, target, url):
     made, value = {}, s.marker + platform
     key = 'RCP_FROM_' + platform.upper()
     with steps.step('creator-here:pair'):
-        target.uninstall()
-        need(not target.present(), 'pb uninstall left Paperboat behind')
+        target.drop_hooks()  # judged above; the next install starts on a clean machine
+        left = target.present()
+        need(not left, 'Paperboat is still on the machine: %s' % ', '.join(left)[:300])
         ok(target.one_liner(url, 'PB_TOKEN', s.enrollment_token(), name + '-c', check.pin), 'the enrollment one-liner')
         made['paired'] = True
     if not made:

@@ -5,6 +5,7 @@ import json
 import re
 import shlex
 import subprocess
+import time
 
 import ct_env
 
@@ -61,7 +62,10 @@ PB_FIND = ('P=; for c in "$HOME/.local/bin/pb" "/Library/PrivilegedHelperTools/P
 POSIX_PRESENT = ('for p in "$HOME/.local/bin/pb" "/usr/local/libexec/paperboat/users/u$(id -u)" '
                  '"/Library/PrivilegedHelperTools/Paperboat/users/u$(id -u)" "$HOME/.config/paperboat/config.json" '
                  '"$HOME/Library/Application Support/paperboat/config.json"; do [ -e "$p" ] && echo "$p"; done; '
-                 'command -v pb; echo END')
+                 'command -v pb | grep /; echo END')
+# the line `pb env hook` (installed by pairing) adds to a shell startup file
+HOOK_MARK = '# paperboat-env-hook'
+HOOK_FILES = ' '.join('"$HOME/%s"' % name for name in ('.bashrc', '.bash_profile', '.bash_login', '.profile', '.zshrc', '.zshenv', '.zprofile', '.config/fish/config.fish'))
 
 
 class Posix:
@@ -76,7 +80,8 @@ class Posix:
         if self.kind == 'container':
             who = '-u %s -e HOME=/home/%s -w /home/%s' % (self.user, self.user, self.user) if self.user else ct_env.CT_EXEC + ' -w ' + ct_env.CT_HOME
             run = '%s exec -i %s %s %s' % (ct_env.CT_DOCKER, who, self.name, run)
-        return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=30', self.host, run]
+        return ['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=20',
+                '-o', 'ServerAliveInterval=30', self.host, run]
 
     def sh(self, script, stdin=None, timeout=300):
         return spawn(self.argv(script), stdin, timeout)
@@ -91,6 +96,20 @@ class Posix:
         if done.code or not lines or lines[-1] != 'END':
             raise AssertionError('cannot look for Paperboat on the %s machine: %s' % (self.kind, done.tail()))
         return lines[:-1]
+
+    def hooks(self):
+        """Shell startup files that carry Paperboat's ENV hook line."""
+        done = self.sh('grep -l %s %s 2>/dev/null; echo END' % (shlex.quote(HOOK_MARK), HOOK_FILES), timeout=90)
+        lines = done.out.split('\n')
+        lines = [line.strip() for line in lines if line.strip()]
+        if done.code or not lines or lines[-1] != 'END':
+            raise AssertionError('cannot read the shell startup files: ' + done.tail())
+        return lines[:-1]
+
+    def drop_hooks(self):
+        """Runner hygiene after the check judged the uninstall: take any hook line out."""
+        self.sh('for f in %s; do [ -f "$f" ] && grep -q %s "$f" && { grep -v %s "$f" > "$f.rcp" ; cat "$f.rcp" > "$f"; rm -f "$f.rcp"; }; done; true'
+                % (HOOK_FILES, shlex.quote(HOOK_MARK), shlex.quote(HOOK_MARK)), timeout=90)
 
     def one_liner_script(self, url, variable, name, version=None, extra=''):
         if variable not in VARIABLES:
@@ -120,7 +139,7 @@ class Posix:
         return done.out.strip().splitlines()[-1]
 
     def uninstall(self):
-        done = self.sh(PB_FIND + '"$P" uninstall --confirmation "UNINSTALL PAPERBOAT" --hostname "$(hostname)" 2>&1; rm -rf "$HOME/rcp-work"', timeout=420)
+        done = self.sh(PB_FIND + '"$P" uninstall --confirmation "UNINSTALL PAPERBOAT" --hostname "$(hostname)" 2>&1; rc=$?; rm -rf "$HOME/rcp-work"; exit $rc', timeout=420)
         if done.code and 'pb is not installed' not in done.text:
             raise AssertionError('pb uninstall: ' + done.tail())
 
@@ -137,7 +156,10 @@ exit $LASTEXITCODE
 '''
 WINDOWS_PRESENT = r'''
 foreach ($p in 'C:\Program Files\Paperboat\users', (Join-Path $env:APPDATA 'paperboat\config.json'), (Join-Path $env:USERPROFILE '.config\paperboat\config.json')) {
-  if (Test-Path -LiteralPath $p) { if ((Get-Item -LiteralPath $p).PSIsContainer) { Get-ChildItem -LiteralPath $p -Recurse -Filter pb.exe | ForEach-Object FullName } else { $p } }
+  if (Test-Path -LiteralPath $p) {
+    if (-not (Get-Item -LiteralPath $p).PSIsContainer) { $p }
+    else { try { Get-ChildItem -LiteralPath $p -Recurse -Filter pb.exe -ErrorAction Stop | ForEach-Object FullName } catch { $p } }
+  }
 }
 Get-Service -Name 'Paperboat*' -ErrorAction SilentlyContinue | ForEach-Object Name
 'END'
@@ -179,6 +201,12 @@ class Windows:
             raise AssertionError('cannot look for Paperboat on the Windows machine')
         return lines[:-1]
 
+    def hooks(self):
+        return []  # pb installs no shell hook through these checks on Windows
+
+    def drop_hooks(self):
+        pass
+
     def one_liner(self, url, variable, value, name, version=None, timeout=900):
         if variable not in VARIABLES:
             raise ValueError('unknown installer variable ' + variable)
@@ -204,14 +232,29 @@ class Windows:
         self.device.write_bytes(path, text.encode())
         return path
 
-    def uninstall(self):
+    def uninstall(self, wait=360):
+        if self._work:
+            self.device.ps('remove the work directory', 'Remove-Item -LiteralPath $req.path -Recurse -Force -ErrorAction SilentlyContinue', path=self._work, timeout=90)
+            self._work = None
         if not self.present():
             return
-        # run from outside the install directory; the host name is the one pb compares
-        done = self.pb('uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', self.hostname(), timeout=420)
+        # the host name is the one pb compares
+        done = self.pb('uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', self.hostname(), '--json', timeout=420)
         self._pb = None
-        if done.code:
-            raise AssertionError('pb uninstall: ' + done.tail())
+        receipt = json_data(done)
+        # Windows ends the uninstall in a helper after the command returned: wait for its status before looking or reinstalling
+        path = receipt.get('completion_status_path') if isinstance(receipt, dict) else None
+        deadline, state = time.monotonic() + wait, None
+        while path:
+            try:
+                state = json.loads(self.device.read_bytes(path).decode('utf-8-sig')).get('state')
+            except Exception:  # noqa: BLE001 not written yet, or being replaced
+                state = None
+            if state == 'completed':
+                return
+            if state in ('failed', 'timed_out') or time.monotonic() >= deadline:
+                raise AssertionError('the Windows uninstall helper did not complete: %s' % (state or 'no status'))
+            time.sleep(3)
 
 
 def json_data(result):
