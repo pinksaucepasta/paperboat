@@ -33,6 +33,7 @@ NEEDS = {
     'console-team-admin': ['console_tools', 'operator_session', 'team_admin'],
     'console-signout-switch': ['console_tools', 'operator_session', 'operator_password', 'team_admin'],
     'console-invite-mail': ['console_tools', 'operator_session', 'team_admin'],
+    'console-recording-replay': ['console_tools', 'fixture_host'],
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
 NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],

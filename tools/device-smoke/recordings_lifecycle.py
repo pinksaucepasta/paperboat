@@ -202,8 +202,8 @@ def phase_manual(team, target, directory, replay=True):
         cleanup(PB, target, name)
 
 
-def phase_long(team, target, directory, replay=True):
-    """F25-04: a long recording (about 8 MB of terminal output, many segments) streams to the end and verifies."""
+def phase_long(team, target, directory, replay=True, size=6_000_000):
+    """F25-04: a long recording (about 8 MB of terminal output, many segments; `size` random bytes on Unix) streams to the end and verifies."""
     before = {r['id'] for r in listing(team)}
     name = 'smoke-rec-' + uuid.uuid4().hex[:10]
     session = Session(target, name)
@@ -216,7 +216,7 @@ def phase_long(team, target, directory, replay=True):
             session.terminal.send('powershell -NoProfile -Command "$b=New-Object byte[] 4500000;(New-Object Random).NextBytes($b);$s=[Convert]::ToBase64String($b);'
                                   'for($i=0;$i -lt $s.Length;$i+=120){$s.Substring($i,[Math]::Min(120,$s.Length-$i))};(\'PB_LONGDONE_\'+\'' + done.split('_')[-1] + '\')"\r')
         else:
-            session.terminal.send("head -c 6000000 /dev/urandom | base64 | fold -w 120; printf 'PB_LONGDONE_%s\\n' " + done.split('_')[-1] + '\r')
+            session.terminal.send("head -c %d /dev/urandom | base64 | fold -w 120; printf 'PB_LONGDONE_%%s\\n' " % size + done.split('_')[-1] + '\r')
         tail, seen, quiet_since = b'', 0, time.monotonic()
         deadline = time.monotonic() + 600
         while done.encode() not in tail:

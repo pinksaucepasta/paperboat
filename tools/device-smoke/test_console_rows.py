@@ -54,6 +54,47 @@ class Skips(unittest.TestCase):
         self.assertEqual((1, []), rows.steps('r', 0, 'PASS  one\nSKIP  offline machine state  (OFFLINE_RECORDING not set)\n'))
 
 
+class Replay(unittest.TestCase):
+    def run_check(self, recordings):
+        seen = {}
+
+        def script(m, label, name, *args, state, env=None, timeout=0):
+            secret = Path(env['VAULT_PASSWORD_FILE'])
+            seen.update(env, mode=secret.stat().st_mode & 0o777, secret=secret.read_text(), path=secret)
+            return label, 0, 'PASS  the recording loads and decrypts\n'
+
+        m = Cleanup().machines()
+        with mock.patch.object(rows, 'script', script), mock.patch.object(fixture_checks, 'ENV', {'SMOKE_PW_CHROMIUM': '/c', 'SMOKE_CONSOLE_ORIGIN': 'https://console.test'}):
+            with m:
+                results = rows.replay_check(m, '/s', 'team', 'machine_1', recordings, 'secret-pw')
+        return seen, results
+
+    def test_the_password_file_is_private_and_removed(self):
+        seen, results = self.run_check({'normal': 'rec_1', 'tiny': 'rec_2', 'long': 'rec_3'})
+        self.assertEqual((0o600, 'secret-pw'), (seen['mode'], seen['secret']))
+        self.assertFalse(seen['path'].exists())
+        self.assertEqual(('rec_1', 'rec_2', 'rec_3'), (seen['RECORDING'], seen['TINY_RECORDING'], seen['LONG_RECORDING']))
+        self.assertEqual(1, len(results))
+
+    def test_a_recording_that_was_not_made_fails_by_name(self):
+        seen, results = self.run_check({'normal': 'rec_1'})
+        self.assertNotIn('LONG_RECORDING', seen)
+        self.assertEqual(('recordings', 1, 'FAIL  not made: tiny, long'), results[-1])
+
+
+class RecordForReplay(unittest.TestCase):
+    def test_one_recording_failing_still_makes_the_others_and_restores_the_control(self):
+        import record_for_replay as made
+        real = made.rec.recording_control
+        with mock.patch.object(made, 'record', side_effect=[RuntimeError('no REC'), 'rec_tiny']), \
+                mock.patch.object(made.rec, 'phase_long', return_value='rec_long') as long:
+            receipt = made.run('team', 'target', Path('/tmp'), 'cmd')
+        self.assertEqual(('FAIL', {'tiny': 'rec_tiny', 'long': 'rec_long'}, ['normal: no REC']),
+                         (receipt['status'], receipt['recordings'], receipt['errors']))
+        self.assertEqual(made.LONG_BYTES, long.call_args.kwargs['size'])
+        self.assertIs(real, made.rec.recording_control)
+
+
 class Cleanup(unittest.TestCase):
     def machines(self):
         m = fixture_checks.Machines.__new__(fixture_checks.Machines)

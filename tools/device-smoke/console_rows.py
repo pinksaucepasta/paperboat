@@ -10,6 +10,10 @@
   console-invite-mail   F12-02-mail-live: console_invite_mail.mjs invites a disposable inbox of this run to the smoke team,
                         reads the mail, resends from the console, opens the link signed out and signs up; the invitation is
                         cancelled by its id and the throwaway account deleted.
+  console-recording-replay  F25-05: the recording-key-rotation fixture without the member (throwaway owner, team paid in
+                        Stripe's sandbox, two machines on SMOKE_FIXTURE_HOST); record_for_replay.py makes three recordings on
+                        the team machine and console/scripts/check-recordings.mjs replays them in the browser, ending with the
+                        replay rules removed while the long one downloads. All of it is removed with the account.
 Each returns (ok, detail) like the other fixture checks; the full output is kept in results/fixture-checks.
 """
 import hashlib
@@ -17,6 +21,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import tempfile
 
@@ -158,4 +163,53 @@ def remove_invitee(m, directory, state, team):
             m.leftovers.append('throwaway account NOT deleted, its login stays in %s: %s' % (kept, redact(deleted[2][-150:].strip())))
 
 
-CHECKS = {'console-team-admin': console_team_admin, 'console-signout-switch': console_signout_switch, 'console-invite-mail': console_invite_mail}
+# two rules on purpose: check-recordings.mjs removes every replay rule, and the owner keeps the rule that gives access
+REPLAY_POLICY = {'rules': [{'src': ['*'], 'dst': ['machine:*'], 'allow': ['*']}, {'src': ['*'], 'dst': ['machine:*'], 'allow': ['recording_view']}]}
+
+
+def replay_check(m, state, team, machine_id, recordings, password):
+    """check-recordings.mjs against the three recordings; one that was not made fails by name (its steps would skip)."""
+    secret = os.path.join(private_directory(m, 'console-replay-'), 'vault.pw')
+    with open(os.open(secret, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as handle:
+        handle.write(password)
+    env = {'CHROME': fx().path('SMOKE_PW_CHROMIUM'), 'CONSOLE_ORIGIN': fx().ENV['SMOKE_CONSOLE_ORIGIN'], 'TEAM': team, 'MACHINE': machine_id,
+           'VAULT_PASSWORD_FILE': secret}
+    env.update({variable: recordings[name] for name, variable in (('normal', 'RECORDING'), ('tiny', 'TINY_RECORDING'), ('long', 'LONG_RECORDING'))
+                if recordings.get(name)})
+    results = [script(m, 'check-recordings', '../../console/scripts/check-recordings.mjs', state=state, env=env, timeout=1200)]
+    missing = [name for name in ('normal', 'tiny', 'long') if not recordings.get(name)]
+    if missing:
+        results.append(('recordings', 1, 'FAIL  not made: %s' % ', '.join(missing)))
+    return results
+
+
+def console_recording_replay(m):
+    f = fx()
+    _, owner_state = m.account('owner')
+    name, _, prefix = m.machine('own', state=owner_state)  # runs pb as the team owner
+    target, target_id, _ = m.machine('tgt', state=owner_state)  # the team machine that records and serves the replay
+    f.stage(prefix)
+    f.ready(prefix, name)
+    f.ready(prefix, target)
+    team = f.paid_team(m, prefix)
+    password = f.secret_file(m, prefix, 'owner.pw')
+    m.at(prefix, '%s env init --password-stdin' % f.PB, stdin=password)
+    m.at(prefix, 'echo %s > policy.json && %s policy set policy.json --workspace %s --yes --message console-recording-replay && rm policy.json'
+         % (shlex.quote(json.dumps(REPLAY_POLICY)), f.PB, team))
+    m.at(prefix, '%s team machine transfer-to-team %s %s --confirm %s --generation %s --json' % (f.PB, team, target_id, target_id, f.team_generation(m, prefix, team)))
+    m.callback(f.leave_team, m, prefix, team, target_id)
+    bridge = f.ConsoleStart(m, prefix, owner_state)
+    bridge.start()
+    m.callback(bridge.close)
+    code, out = f.on_machine(prefix, 'record_for_replay.py', [target, '--team', team, '--vault-password-file', f.HOME + '/owner.pw',
+                                                              '--console-start-cmd', 'python3 console_start_bridge.py'], 1500)
+    bridge.close()  # its browser is gone before the check's starts: one at a time
+    made = f.last_json(out)
+    results = replay_check(m, owner_state, team, target_id, made.get('recordings', {}), password)
+    if code or made.get('status') != 'PASS':
+        results.append(('record-for-replay', 1, 'FAIL  %s' % ('; '.join(made.get('errors', []) + bridge.refusals[:1]) or ' '.join(out.split())[-300:])))
+    return verdict('console-recording-replay', results)
+
+
+CHECKS = {'console-team-admin': console_team_admin, 'console-signout-switch': console_signout_switch, 'console-invite-mail': console_invite_mail,
+          'console-recording-replay': console_recording_replay}

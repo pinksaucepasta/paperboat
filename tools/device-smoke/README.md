@@ -52,8 +52,8 @@ with the credentials in `free-account/account.json` (Free account).
 
 ## Console rows (browser)
 
-`fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail` (called by `smoke.sh`, `console_rows.py`) drive the
-live console in headless Chromium on the controller. They need no machine. Run one browser at a time on the controller: the full
+`fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail|console-recording-replay` (called by `smoke.sh`,
+`console_rows.py`) drive the live console in headless Chromium on the controller. Only the replay row needs machines (`SMOKE_FIXTURE_HOST`). Run one browser at a time on the controller: the full
 E2E gives every shard with these rows the `browser` lock. Every row keeps its step list in `results/fixture-checks/`, addresses removed.
 
 | Row | Cell | What it does and what it leaves |
@@ -61,6 +61,7 @@ E2E gives every shard with these rows the `browser` lock. Every row keeps its st
 | `console-team-admin` | F19-13 | `check-f19.js` (roles, audit log filters, CSV export), `check-f19-security.js` and `check-audit-streams.js` on the smoke team with `SMOKE_OPERATOR_STATE`. Each export adds one `team.activity_exported` audit event (the log is append-only). A configured SSO connection, directory groups and the bypass log need an identity provider (`check-f19-sso-round.js`, by hand). |
 | `console-signout-switch` | F2-07 | signs the owner in anew for this run (`SMOKE_OPERATOR_PASSWORD_FILE`, default `~/.config/paperboat-dev/console-workos.password`, mode 600), runs `check-machines-paging.js`, pages the real machine table when the account has over 50 machines (`check-machines-paging-stub.js` stays by hand: its in-tab fake races the real server render and fails at random), switches Personal ↔ team and signs that session out. It refuses to sign out `SMOKE_OPERATOR_STATE` and proves it still works. |
 | `console-invite-mail` | F12-02-mail-live | invites a new disposable mail.tm inbox (only this run can read it; no other address is ever invited) to the smoke team, reads the mail, Resends from the console, opens the link signed out and signs up. `SMOKE_MAIL_CONSOLE_ORIGIN` is the console the server writes into mail links (default `SMOKE_CONSOLE_ORIGIN`); a link to another host fails and is not opened. The invitation is cancelled by its id and the account deleted. |
+| `console-recording-replay` | F25-05 | a throwaway owner and sandbox-paid team as in `recording-key-rotation`; `record_for_replay.py` makes a ticking, a tiny and a ~40 MB recording on the team machine and `check-recordings.mjs` replays them in the browser (decrypt, play, pause, seek, speed, unknown recording, REC in the web terminal, then every replay rule removed while the long one downloads). A skipped step fails the row (except the offline-machine state, not in the cell). Deleting the account deletes the team. Linux recordings only; Windows and macOS targets stay with X-33. |
 
 ## Extra Windows machines (winpool)
 

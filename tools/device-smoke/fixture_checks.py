@@ -2,7 +2,7 @@
 """The checks that need operator fixtures (README.md "Fixtures"): free-plan, config-team-default, team-business, recording-key-rotation.
 
 usage: fixture_checks.py free-plan|config-team-default|team-business|recording-key-rotation|fresh-install-window
-       fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail   (console_rows.py; no machine)
+       fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail|console-recording-replay   (console_rows.py)
 Each check makes its own throwaway machines in Docker containers on SMOKE_FIXTURE_HOST (fixture_machine.sh: paired as the
 account of a stored console session), runs the unchanged check script against them and revokes them on every exit path.
 Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"}; exit 0 only for PASS.
@@ -284,8 +284,8 @@ def team_generation(m, prefix, team):
     return (shown.get('data') or shown)['generation']
 
 
-def paid_team(m, prefix, member_email):
-    """A new paid team of the owner whose pb runs at `prefix`, the member (pb: ~/pbm there) an active member of it. Returns its id.
+def paid_team(m, prefix, member_email=None):
+    """A new paid team of the owner whose pb runs at `prefix`; with member_email, the member (pb: ~/pbm there) is an active member of it. Returns its id.
     The product's own path: `pb team create` prints the Checkout link, the sandbox payment makes the team. The member leaves at the end;
     deleting the owner's account (the last cleanup step) then deletes the team and cancels its subscription."""
     team = 'pbkey-' + m.run_id
@@ -296,6 +296,8 @@ def paid_team(m, prefix, member_email):
         if time.monotonic() > deadline:
             raise RuntimeError('team %s was not created within 180 s of the sandbox payment' % team)
         time.sleep(3)
+    if not member_email:
+        return team
     invitation = json.loads(m.at(prefix, '%s team invite %s %s --generation %s --json' % (PB, team, shlex.quote(member_email), team_generation(m, prefix, team))).stdout.strip().splitlines()[-1])
     m.at(prefix, '%s/pbm team accept %s --json' % (HOME, invitation['invitation_id']))
     m.callback(lambda: m.at(prefix, '%s/pbm team leave %s --generation %s --json' % (HOME, team, team_generation(m, prefix, team)), check=False))

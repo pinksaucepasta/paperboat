@@ -1,5 +1,5 @@
 // Teams session recordings in the console: settings, list, replay and the terminal's REC control.
-//   STATE=<storage state of a team owner> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> TEAM=<team workspace id>
+//   STATE=<storage state of a team owner> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> TEAM=<team workspace id> [PW_MODULE]
 //   [MACHINE=<team machine id, online, with a recording key set up>]  terminal rows: start, REC, stop
 //   [RECORDING=<recording id> VAULT_PASSWORD_FILE=<file holding the owner's vault password>]  replay rows
 //   [TINY_RECORDING=<id of a recording under a second long> VAULT_PASSWORD_FILE]  a few keystrokes still replay with a length
@@ -10,7 +10,9 @@
 //   node check-recordings.mjs
 // Rows without their variables are skipped and say so. Nothing secret is printed: no password, ticket or terminal text.
 import { readFileSync } from "node:fs"
-import { chromium } from "playwright-core"
+
+// ESM ignores NODE_PATH: PW_MODULE is the path of playwright-core's index.mjs when it is not installed next to this file.
+const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 
 const { STATE, CHROME, CONSOLE_ORIGIN: origin, TEAM: team, MACHINE: machine, RECORDING: recording } = process.env
 for (const [name, value] of Object.entries({ STATE, CHROME, CONSOLE_ORIGIN: origin, TEAM: team }))
