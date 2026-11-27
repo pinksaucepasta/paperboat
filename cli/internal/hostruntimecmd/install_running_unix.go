@@ -278,7 +278,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 			if link != nil {
 				linkErr = link.Rollback()
 			}
-			return "", StillFinishingFailure("The update failed and Paperboat is still restoring the previous version in the background. Wait for it to finish, then run `pb install` to make sure the previous version is fully restored.", cause, binaryErr, linkErr)
+			return "", StillFinishingFailure(stillRestoringMessage, cause, binaryErr, linkErr)
 		}
 		// The steps after it have their own budget: sharing one 45 s with it left them an expired context.
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), suppliedRecoveryBound)
@@ -335,7 +335,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		}
 		select {
 		case <-readyCtx.Done():
-			return rollback(runtimeFailure("installed Paperboat service did not become ready; attempting to restore the previous installation", runtimeContextFailure(readyCtx), lastProbeErr))
+			return restoreAfterNotReady(os.Stderr, rollback, runtimeContextFailure(readyCtx), lastProbeErr)
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
@@ -454,6 +454,18 @@ var systemctlPath = func() string {
 		}
 	}
 	return ""
+}
+
+// stillRestoringMessage is what pb says when it stops waiting for a background restore (Ctrl-C, or its bound). The
+// restore finishes on its own; `pb install` from this machine's ~/.local/bin/pb (already put back to the previous
+// version) repairs anything it could not, which `pb doctor` reports.
+const stillRestoringMessage = "The update failed and Paperboat is still restoring the previous version in the background. Run `pb status` to see when it is done, then `pb doctor`; if it reports a problem, run `pb install` to repair this computer's installation."
+
+// restoreAfterNotReady says the restore starts before running it: the failure printed after it named an "attempt"
+// that had already happened (L46).
+func restoreAfterNotReady(out io.Writer, rollback func(error) (string, error), causes ...error) (string, error) {
+	fmt.Fprintln(out, "The new Paperboat service did not become ready; restoring the previous installation...")
+	return rollback(runtimeFailure("installed Paperboat service did not become ready", causes...))
 }
 
 // errStepStillRunning: pb stopped waiting (its bound, or Ctrl-C ended systemd-run) while the step's service runs on.

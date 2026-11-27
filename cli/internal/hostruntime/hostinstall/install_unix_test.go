@@ -681,6 +681,62 @@ func TestUninstallRemovesTheInstalledCommandLinkOnly(t *testing.T) {
 	}
 }
 
+// L46: an interrupted command replacement left ~/.local/bin/.pb-backup-<n> -> worker behind every uninstall
+// (rollback device check 11-27, macOS). Only pb's own backup links go; the account's files stay.
+func TestUninstallRemovesPbBackupLinks(t *testing.T) {
+	home, system := t.TempDir(), t.TempDir()
+	worker := filepath.Join(system, "pb")
+	other := filepath.Join(system, "other")
+	for _, path := range []string{worker, other} {
+		if err := os.WriteFile(path, []byte("binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ours := filepath.Join(bin, ".pb-backup-1795776484307765000")
+	if err := os.Symlink(worker, ours); err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]func(string) error{
+		".pb-backup-2":       func(p string) error { return os.WriteFile(p, []byte("mine"), 0o755) }, // the account's own previous pb
+		".pb-backup-3":       func(p string) error { return os.Symlink(other, p) },
+		".pb-backup-x":       func(p string) error { return os.Symlink(worker, p) },
+		".pb-backup-4-other": func(p string) error { return os.Symlink(worker, p) },
+	}
+	for name, make := range kept {
+		if err := make(filepath.Join(bin, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := removeCommandLink(Request{Home: home, UID: os.Getuid()}, installPaths{worker: worker}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(ours); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pb's backup link remains: %v", err)
+	}
+	for name := range kept {
+		if _, err := os.Lstat(filepath.Join(bin, name)); err != nil {
+			t.Fatalf("%s was removed: %v", name, err)
+		}
+	}
+	if _, err := os.Lstat(worker); err != nil {
+		t.Fatalf("the backup's target was touched: %v", err)
+	}
+	// Another account's link of the same shape is not this account's.
+	if err := os.Symlink(worker, ours); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeCommandLink(Request{Home: home, UID: os.Getuid() + 1}, installPaths{worker: worker}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(ours); err != nil {
+		t.Fatalf("a link owned by another account was removed: %v", err)
+	}
+}
+
 // Regression (e33aec9f3): the root uninstall removed ~/.local/bin/pb even for `pb reset`, which keeps its CLI slot, so
 // the pairing that follows a reset found no `pb` (reset_lifecycle.py on a test VM: FileNotFoundError ~/.local/bin/pb).
 func TestResetKeepsTheCommandLinkOfTheRetainedCLI(t *testing.T) {

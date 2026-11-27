@@ -40,10 +40,11 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) (resultE
 	if err != nil {
 		return stagingFailure(err, err)
 	}
+	startStagedCleanup(directory) // removes it after pb exits once no step still reads it (L46)
 	defer func() {
 		// A root step still finishing in the background (an install or rollback past pb's bound) reads the staged
 		// update after pb exits: removing it made that step fail before it restored anything (device check 11-27).
-		// The system temporary directory's own cleanup removes it later.
+		// startStagedCleanup's helper removes it once that step ended.
 		if !stillFinishing(resultErr) {
 			_ = os.RemoveAll(directory)
 		}

@@ -458,6 +458,9 @@ recovery instructions before retrying an operation that may have created resourc
 	sshKnownHostsCommand.Flags().String("port", "", "")
 	sshKnownHostsCommand.Flags().Bool("alias-lines", false, "")
 	root.AddCommand(sshKnownHostsCommand)
+	if cleanup := stagedCleanupCobraCommand(); cleanup != nil {
+		root.AddCommand(cleanup)
+	}
 
 	root.AddCommand(environmentsCobraCommand())
 	root.AddCommand(workspaceSwitchCommand())

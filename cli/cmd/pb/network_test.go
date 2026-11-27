@@ -9,6 +9,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	startStagedCleanup = func(string) {} // the real one runs os.Executable(): the test binary itself
 	// Keep local test servers independent of the developer's system proxy settings.
 	if err := os.Setenv("NO_PROXY", "127.0.0.1,localhost,::1"); err != nil {
 		panic(err)

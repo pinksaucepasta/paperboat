@@ -7,6 +7,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
@@ -236,15 +238,49 @@ func removeCommandLink(request Request, paths installPaths) error {
 	if !filepath.IsAbs(request.Home) || paths.worker == "" {
 		return nil
 	}
-	link := filepath.Join(request.Home, ".local", "bin", "pb")
-	target, err := os.Readlink(link)
-	if err != nil || target != paths.worker {
-		return nil // absent, not a link, or not ours
+	bin := filepath.Join(request.Home, ".local", "bin")
+	link := filepath.Join(bin, "pb")
+	if target, err := os.Readlink(link); err == nil && target == paths.worker {
+		if err := os.Remove(link); err != nil && !installNotExistOnly(err) {
+			return err
+		}
 	}
-	if err := os.Remove(link); err != nil && !installNotExistOnly(err) {
-		return err
+	return removeCommandBackups(bin, request.UID, paths.worker)
+}
+
+// removeCommandBackups removes the .pb-backup-<n> links an interrupted command replacement left beside ~/.local/bin/pb
+// (installWorkerCommand): only a symlink of that exact name, owned by the account, pointing at this installation's
+// worker. A regular file there is the account's own previous pb and stays; a symlink is removed, never followed.
+func removeCommandBackups(bin string, uid int, worker string) error {
+	if info, err := os.Lstat(bin); err != nil || !info.IsDir() {
+		return nil // absent, or a link the account made: not ours to walk
 	}
-	return nil
+	entries, err := os.ReadDir(bin)
+	if err != nil {
+		return nil
+	}
+	var failures []error
+	for _, entry := range entries {
+		digits, ok := strings.CutPrefix(entry.Name(), ".pb-backup-")
+		if !ok || digits == "" || strings.Trim(digits, "0123456789") != "" {
+			continue
+		}
+		path := filepath.Join(bin, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		if stat, ok := info.Sys().(*syscall.Stat_t); !ok || int(stat.Uid) != uid {
+			continue
+		}
+		if target, err := os.Readlink(path); err != nil || target != worker {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !installNotExistOnly(err) {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func uninstallWithActivation(ctx context.Context, retire, uninstall func(context.Context) error) error {
