@@ -52,10 +52,17 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 	if err == nil {
 		// A known identity whose provider email now names another account's
 		// address is refused, never given a duplicate or that address.
+		// Only a change of address is checked, so legacy accounts that already
+		// share a canonical address keep signing in through their own subject.
 		var other bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
+		if err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$2 AND
+ coalesce(canonical_email,paperboat.canonical_email_address(primary_email))=$1)
+ AND EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
  (canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1))`, canonical, id).Scan(&other); err != nil {
 			return "", "", err
+		}
+		if other && !profile.EmailVerified {
+			return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
 		}
 		if other {
 			return canonical, id, &EmailAlreadyRegisteredError{Canonical: canonical}

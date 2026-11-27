@@ -156,6 +156,42 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	if _, _, err := refresher.AuthenticateRequest(ctx, request); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("changed provider subject survived refresh: %v", err)
 	}
+	// A refresh whose provider email moved to another account's address ends the
+	// session and leaves both accounts as they were.
+	moveBefore := WorkOSProfile{Subject: prefix + "mover", Email: prefix + "mover@example.test", EmailVerified: true, SessionID: "session_mover123", RefreshToken: "mover-before", AccessExpiresAt: time.Now().Add(9 * time.Second)}
+	moveAfter := moveBefore
+	moveAfter.Email, moveAfter.RefreshToken, moveAfter.AccessExpiresAt = canonical, "mover-after", time.Now().Add(time.Hour)
+	mover := NewService(store, nil, verifiedEmailRefreshVerifier{before: moveBefore, after: moveAfter}, []string{"mover-key"}, true)
+	mover.RequireWorkOSSessions("mover-encryption")
+	moverUser, moverSession, err := mover.VerifyCallback(ctx, CallbackInput{Code: "mover"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.sessions SET workos_access_expires_at=now() WHERE id=$1`, moverSession.ID); err != nil {
+		t.Fatal(err)
+	}
+	moveRequest := httptest.NewRequest(http.MethodGet, "https://login.example.test/v1/me", nil)
+	moveRequest.AddCookie(&http.Cookie{Name: SessionCookieName, Value: moverSession.Token})
+	if _, _, err := mover.AuthenticateRequest(ctx, moveRequest); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("refresh onto another account's address: %v", err)
+	}
+	var revoked bool
+	var moverEmail string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT s.revoked_at IS NOT NULL, u.primary_email FROM paperboat.sessions s JOIN paperboat.users u ON u.id=s.user_id WHERE s.id=$1`, moverSession.ID).Scan(&revoked, &moverEmail); err != nil || !revoked || moverEmail != prefix+"mover@example.test" || moverUser.ID == first.ID {
+		t.Fatalf("moved refresh: revoked=%v email=%q err=%v", revoked, moverEmail, err)
+	}
+	// Legacy accounts that already share a canonical address each keep signing in.
+	for _, tag := range []string{"a", "b"} {
+		id := prefix + "dup" + tag
+		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, id, prefix+".dup+"+tag+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tag := range []string{"a", "b"} {
+		if got, _, err := login("dup"+tag, prefix+".dup+"+tag+"@example.test"); err != nil || got.ID != prefix+"dup"+tag {
+			t.Fatalf("legacy duplicate %s locked out: %v", tag, err)
+		}
+	}
 	// A legacy row whose stored address is a +tag is left as is and its own
 	// identity still signs in; a new alias of it is refused.
 	legacy := prefix + "legacy"

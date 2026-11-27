@@ -196,12 +196,15 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 			return err
 		}
 		// resolveWorkOSIdentity names an id that does not exist yet for a first sign-in: this is where an account is created.
-		var existed bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$1)`, accountID).Scan(&existed); err != nil {
+		// A legacy account without canonical_email keeps it NULL (as refresh does):
+		// legacy accounts may share a canonical address, which the unique index forbids.
+		var existed, legacy bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$1),
+ EXISTS(SELECT 1 FROM paperboat.users WHERE id=$1 AND canonical_email IS NULL)`, accountID).Scan(&existed, &legacy); err != nil {
 			return err
 		}
 		created = !existed
-		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: sql.NullString{String: canonical, Valid: true}, UserID: accountID, WorkosSubject: profile.Subject, PrimaryEmail: strings.ToLower(strings.TrimSpace(profile.Email)), EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
+		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: sql.NullString{String: canonical, Valid: !legacy}, UserID: accountID, WorkosSubject: profile.Subject, PrimaryEmail: strings.ToLower(strings.TrimSpace(profile.Email)), EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
 		if err != nil {
 			return err
 		}

@@ -101,8 +101,15 @@ func (s *Service) refreshWorkOSSession(ctx context.Context, sessionHash, subject
 	// A provider email changed to another account's address ends this session
 	// (the next sign-in is refused with email_already_registered) instead of
 	// giving this account that address.
+	// Same lock as sign-in, so a concurrent sign-up of that address is serialised.
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(paperboat.canonical_email_address($1),174))`,
+		strings.ToLower(strings.TrimSpace(profile.Email))); err != nil {
+		return err
+	}
 	var taken bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
+	if err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$2 AND
+		coalesce(canonical_email,paperboat.canonical_email_address(primary_email))=paperboat.canonical_email_address($1))
+		AND EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
 		(canonical_email=paperboat.canonical_email_address($1) OR paperboat.canonical_email_address(primary_email)=paperboat.canonical_email_address($1)))`,
 		strings.ToLower(strings.TrimSpace(profile.Email)), userID).Scan(&taken); err != nil {
 		return err
