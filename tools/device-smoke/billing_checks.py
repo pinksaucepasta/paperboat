@@ -11,26 +11,35 @@ TEST-MODE pages with the test card, and deletes the account at the end (which ca
                             never cut off): with the fair-use amount used up, `pb send` over a relay path finishes, intact, at the slowed
                             speed, and says why and where to act; the console's card says "Slowed" (F13-06).
   billing-declined-card     F13-04: a declined test card on Checkout leaves the workspace Free and says why; the good card on the same
-                            Checkout recovers. (A failed RENEWAL needs a Stripe test clock or key: not here, see below.)
+                            Checkout recovers.
+  billing-renewal-failure   F13-04, F13-04G: a declined renewal, seven days of grace that a retry does not extend, Free once it ends,
+                            full recovery on payment.
+  billing-sandbox-purchase  F13-05 in test mode: verified catalog, forged webhooks refused, one $8 purchase, its invoice, refund, cancel.
   billing-topup             F13-04T: Free refused, quantity limits, 200 GB bought on the console and credited once; F13-06A: the
                             allowance period; F13-03T: with the plan allowance used up, relayed traffic is taken from the top-up.
+  billing-team-yearly       F13-04: a team switched to yearly billing and back in Stripe's portal.
   plus-alias-signup         F13-07: plus_alias_signup.mjs.
   billing-team-lifecycle    F13-04, the transitions that need no clock: a team bought on the console's Checkout (upgrade), a seat added mid-cycle
                             (charged at once, one more paid invoice, billing date unchanged) and removed (nothing charged, date unchanged), the
                             plan cancelled and kept in Stripe's portal, the removal surviving it (L37) and shown in the Seats section
-                            before, during and after the cancellation (L38). Not here: failed payment -> grace -> suspension -> recovery (needs a
-                            Stripe test clock and the test API key, which only the server holds).
+                            before, during and after the cancellation (L38). Failed payment -> grace -> suspension -> recovery is
+                            billing-renewal-failure.
 
 Each prints its failed steps in the receipt and keeps every step in the results directory. A step that fails never stops the others.
 """
 import datetime
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
+import secrets
 import shlex
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 
 import fixture_checks as fx
 import workspace_usage
@@ -335,6 +344,39 @@ def billing_team_lifecycle(m):
     return steps.result('billing-team-lifecycle', 'team bought on console Checkout, seat added (invoiced at once) and removed on a fixed billing date, cancelled and kept')
 
 
+def billing_team_yearly(m):
+    """F13-04, F13-04C: a team's seats billed yearly and monthly again, through Stripe's portal."""
+    steps = Steps()
+    _, state = m.account('tyear')
+    team = 'pbyear-' + m.run_id
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'team-checkout', team, '2')
+    path = '/v1/billing/workspaces/teams/' + team
+    try:
+        bought = api(m, state, path)
+    except RuntimeError as error:
+        bought = {'state': str(error)}
+    if bought.get('state') != 'active' or not bought.get('allowance_bytes'):
+        steps.add('F13-04', 'a paid team to switch', False, 'not run: Checkout left state=%s' % bought.get('state'))
+        return steps.result('billing-team-yearly', '')
+    for interval in ('year', 'month'):
+        browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'portal', interval, team=team)
+        deadline = time.monotonic() + 180
+        while True:
+            seen = api(m, state, path)
+            if (seen.get('product') or {}).get('interval') == interval or time.monotonic() > deadline:
+                break
+            time.sleep(10)
+        steps.add('F13-04', 'the team is billed per %s and keeps its two seats and their allowance' % interval,
+                  (seen.get('product') or {}).get('interval') == interval and seen.get('state') == 'active' and seen.get('seats_bought') == 2
+                  and seen.get('allowance_bytes') == bought['allowance_bytes'],
+                  'state=%s interval=%s seats=%s allowance=%s (%s at purchase)' % (seen.get('state'), (seen.get('product') or {}).get('interval'),
+                                                                                 seen.get('seats_bought'), seen.get('allowance_bytes'), bought['allowance_bytes']))
+        steps.add('F13-04', 'billed per %s, the renewal keeps its time of day' % interval,
+                  bool(seen.get('period_end')) and when(seen['period_end']).time() == when(bought['period_end']).time(),
+                  'renews %s, bought to %s' % (seen.get('period_end'), bought['period_end']))
+    return steps.result('billing-team-yearly', 'a two-seat team switched to yearly and back in the portal, seats and allowance unchanged')
+
+
 TERMS_VERSION = '2026-11-19'  # server/internal/legalconsent: the wording a purchase request accepts
 
 
@@ -354,6 +396,172 @@ def billing_declined_card(m):
     steps.add('F13-04', 'the API shows one active Pro subscription after the recovery', now.get('state') == 'active' and now.get('product_code') == 'pro-month' and not now.get('renewal_grace_until'),
               'state=%s product=%s grace=%s' % (now.get('state'), now.get('product_code'), now.get('renewal_grace_until')))
     return steps.result('billing-declined-card', 'a declined card leaves the workspace Free with the reason shown; the good card on the same Checkout recovers')
+
+
+def stripe_sandbox(action, email, *args, timeout=900):
+    """stripe_sandbox.py on the host that holds the sandbox key (SMOKE_STRIPE_SANDBOX_HOST reads SMOKE_STRIPE_SANDBOX_KEY_FILE there)."""
+    command = 'python3 -I - ' + ' '.join(map(shlex.quote, (fx.ENV['SMOKE_STRIPE_SANDBOX_KEY_FILE'], action, email) + args))
+    done = fx.run(['ssh', '-o', 'BatchMode=yes', fx.ENV['SMOKE_STRIPE_SANDBOX_HOST'], command], stdin=(fx.HERE / 'stripe_sandbox.py').read_text(), timeout=timeout, check=False)
+    out = fx.last_json(done.stdout)
+    if done.returncode or not out or 'error' in out:
+        raise RuntimeError('stripe sandbox %s: %s' % (action, out.get('error') or done.stderr.strip()[-200:]))
+    return out
+
+
+def overview_when(m, state, want, seconds=240):
+    """The personal billing overview once `want(overview)` holds, or the last one read."""
+    deadline = time.monotonic() + seconds
+    while True:
+        seen = api(m, state, '/v1/billing/workspaces/personal')
+        if want(seen) or time.monotonic() > deadline:
+            return seen
+        time.sleep(10)
+
+
+def plan_of(overview):
+    """What a plan grants, for comparing one state with another."""
+    return {'allowance': overview.get('allowance_bytes'), 'machines': (overview.get('limits') or {}).get('machines', {}).get('limit'),
+            'relay_mbit': overview.get('relay_mbit')}
+
+
+def grace_rows(failed, paid, seen, now):
+    """F13-04G, right after the failed renewal: [(step, ok, detail)]."""
+    grace = seen.get('renewal_grace_until')
+    days = (when(grace).timestamp() - failed['attempted_at']) / 86400 if grace else 0
+    return [
+        ('the workspace is past due and still on Pro', seen.get('state') == 'past_due' and seen.get('product_code') == 'pro-month', 'state=%s product=%s' % (seen.get('state'), seen.get('product_code'))),
+        ('the grace ends seven days after the failed renewal', 6.99 <= days <= 7.01, 'grace %s, %.4f days after the attempt' % (grace, days)),
+        ('paid benefits last exactly until the grace ends', bool(grace) and seen.get('paid_benefits_until') == grace and when(grace) > now, 'paid until %s' % seen.get('paid_benefits_until')),
+        ('the paid allowance, machine limit and relay speed stay during grace', plan_of(seen) == plan_of(paid), '%s, paid %s' % (plan_of(seen), plan_of(paid))),
+    ]
+
+
+def paid_charges(history, amount):
+    """How many invoices of exactly `amount` the portal's history lists as paid (the shortened trial also leaves a paid $0.00 one)."""
+    return history.count(' %s Paid' % amount)
+
+
+def retry_detail(failed, again, before, after):
+    """What a retry did to the grace deadline, in terms that show where a moved deadline came from."""
+    def days_from(moment):
+        return '%+.0f s from seven days after' % (when(after).timestamp() - 7 * 86400 - moment) if after else 'no deadline'
+    return 'retry %.0f s after the failed renewal (Stripe attempt_count %s): grace %s -> %s; the new value is %s the first attempt and %s the retry' % (
+        again['attempted_at'] - failed['attempted_at'], again.get('attempt_count'), before, after, days_from(failed['attempted_at']), days_from(again['attempted_at']))
+
+
+def billing_renewal_failure(m):
+    """F13-04 / F13-04G in Stripe's test mode: a renewal that fails, seven days of grace, retries that do not extend it, the paid
+    features pausing once it ends, and recovery by a successful payment. The grace's seven days are passed by moving its stored
+    deadline (workspace_usage.py lapse, a throwaway account only): the server's clock cannot be moved."""
+    steps = Steps()
+    email, state = m.account('renew')
+    user = api(m, state, '/v1/me')['id']
+    free = api(m, state, '/v1/billing/workspaces/personal')
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'checkout')
+    paid = api(m, state, '/v1/billing/workspaces/personal')
+    if paid.get('product_code') != 'pro-month':
+        steps.add('F13-04G', 'a paid plan to renew', False, 'not run: Checkout left product=%s' % paid.get('product_code'))
+        return steps.result('billing-renewal-failure', '')
+    methods = []
+    m.callback(lambda: methods and stripe_sandbox('cleanup', email, *methods))
+    failed = stripe_sandbox('renewal-fail', email)
+    methods.append(failed['payment_method'])
+    steps.add('F13-04', 'the renewal invoice is declined and the subscription is past due',
+              failed['billing_reason'] == 'subscription_cycle' and failed['payment_status'] == 402 and failed['subscription_status'] == 'past_due', json.dumps(failed))
+    seen = overview_when(m, state, lambda o: o.get('state') == 'past_due' and o.get('renewal_grace_until'))
+    for step, ok, detail in grace_rows(failed, paid, seen, datetime.datetime.now(datetime.timezone.utc)):
+        steps.add('F13-04G', step, ok, detail)
+    grace = seen.get('renewal_grace_until')
+    browser(m, steps, 'F13-04G', state, 'billing_console.mjs', 'payment-state', 'grace')
+    time.sleep(120)  # so that a deadline restarted by the retry is unmistakably two minutes later
+    again = stripe_sandbox('retry', email, failed['invoice'])
+    time.sleep(45)  # its webhook reaches the server
+    after_retry = api(m, state, '/v1/billing/workspaces/personal')
+    steps.add('F13-04G', 'a failed retry does not extend the grace', again['payment_status'] == 402 and bool(grace) and after_retry.get('renewal_grace_until') == grace,
+              retry_detail(failed, again, grace, after_retry.get('renewal_grace_until')))
+    if after_retry.get('state') != 'past_due':
+        steps.add('F13-04G', 'a past due workspace to let lapse', False, 'not run: state=%s' % after_retry.get('state'))
+        return steps.result('billing-renewal-failure', '')
+    workspace_usage.run(user, 'lapse')
+    gone = api(m, state, '/v1/billing/workspaces/personal')
+    steps.add('F13-04', 'after the grace the workspace has only what Free has: allowance, machine limit, relay speed', plan_of(gone) == plan_of(free), '%s, Free %s, paid %s' % (plan_of(gone), plan_of(free), plan_of(paid)))
+    products = api(m, state, '/v1/billing/workspaces/personal/products').get('items', [])
+    topup = next((p for p in products if p.get('catalog_type') == 'top_up'), {})
+    status, body = api_call(m, state, 'POST', '/v1/billing/workspaces/personal/topups', topup_request(topup, 1, m.env['ORIGIN']))
+    steps.add('F13-04', 'after the grace nothing paid can be bought on top (409 paid_plan_required)', status == 409 and 'paid_plan_required' in json.dumps(body), '%s %s' % (status, json.dumps(body)[:200]))
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'payment-state', 'paused')
+    back = stripe_sandbox('recover', email, failed['invoice'])
+    methods.append(back['payment_method'])
+    steps.add('F13-04', 'a good card pays the open invoice', back['payment_status'] == 200 and back['invoice_status'] == 'paid' and back['subscription_status'] == 'active', json.dumps(back))
+    healed = overview_when(m, state, lambda o: o.get('state') == 'active' and not o.get('renewal_grace_until') and plan_of(o) == plan_of(paid))
+    steps.add('F13-04G', 'the payment clears the grace and restores the paid plan', healed.get('state') == 'active' and not healed.get('renewal_grace_until') and plan_of(healed) == plan_of(paid),
+              'state=%s grace=%s %s' % (healed.get('state'), healed.get('renewal_grace_until'), plan_of(healed)))
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'payment-state', 'none')
+    found = browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'invoices')
+    shown = next((s['detail'] for s in found or [] if s.get('step', '').endswith('invoices')), '')
+    steps.add('F13-04', 'the portal lists both $8.00 invoices as paid (the purchase and the recovered renewal)', paid_charges(shown, '$8.00') == 2, shown)
+    return steps.result('billing-renewal-failure', 'failed renewal: seven days of grace that a retry does not extend, Free once it ends, full recovery on payment')
+
+
+def forged_webhooks(account, now):
+    """Webhook requests an attacker could send: [(label, headers, body)]. Each claims a paid subscription for `account`."""
+    body = json.dumps({'id': 'evt_smoke_forged_%d' % now, 'type': 'checkout.session.completed', 'created': now, 'livemode': False,
+                       'data': {'object': {'object': 'checkout.session', 'id': 'cs_test_smokeforged', 'payment_status': 'paid', 'mode': 'subscription',
+                                           'client_reference_id': account, 'subscription': 'sub_smokeforged', 'customer': 'cus_smokeforged'}}}).encode()
+
+    def signed(secret, at):
+        return 't=%d,v1=%s' % (at, hmac.new(secret.encode(), b'%d.%s' % (at, body), hashlib.sha256).hexdigest())
+
+    return [('without a signature', {}, body), ('with a malformed signature', {'Stripe-Signature': 't=%d,v1=00' % now}, body),
+            ('signed with another secret', {'Stripe-Signature': signed('whsec_' + secrets.token_hex(24), now)}, body),
+            ('with an old timestamp', {'Stripe-Signature': signed('whsec_' + secrets.token_hex(24), now - 3600)}, body)]
+
+
+def post(url, headers, body):
+    request = urllib.request.Request(url, data=body, method='POST', headers=dict(headers, **{'Content-Type': 'application/json', 'User-Agent': 'smoke-check'}))
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, response.read()[:200].decode(errors='replace')
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()[:200].decode(errors='replace')
+
+
+def billing_sandbox_purchase(m):
+    """F13-05 in Stripe's test mode (billing never moves real money here): verified catalog, a webhook endpoint that believes only
+    Stripe's signature, one $8 purchase through the product with the test card, its paid invoice, and the cancellation."""
+    steps = Steps()
+    email, state = m.account('buy')
+    user = api(m, state, '/v1/me')['id']
+    items = api(m, state, '/v1/billing/workspaces/personal/products').get('items', [])
+    pro = next((p for p in items if p.get('code') == 'pro-month'), {})
+    steps.add('F13-05', 'every product the API offers has a price verified against Stripe', bool(items) and all(p.get('price_verified') for p in items),
+              ' '.join('%s=%s' % (p.get('code'), p.get('price_verified')) for p in items)[:200])
+    steps.add('F13-05', 'Pro monthly is $8.00 USD a month', (pro.get('unit_amount'), pro.get('currency'), pro.get('interval')) == (800, 'usd', 'month'),
+              json.dumps({k: pro.get(k) for k in ('unit_amount', 'currency', 'interval')}))
+    base = fx.ENV['SMOKE_OPERATOR_API'].rstrip('/')
+    for label, headers, body in forged_webhooks(user, int(time.time())):
+        status, said = post(base + '/v1/webhooks/stripe', headers, body)
+        steps.add('F13-05', 'a webhook %s is refused (401 invalid_signature)' % label, status == 401 and 'invalid_signature' in said, '%s %s' % (status, said))
+    now = api(m, state, '/v1/billing/workspaces/personal')
+    steps.add('F13-05', 'after the forged webhooks the workspace is still Free', now.get('state') == 'free' and not now.get('product_code'), '%s %s' % (now.get('state'), now.get('product_code')))
+    browser(m, steps, 'F13-05', state, 'billing_console.mjs', 'checkout')
+    paid = api(m, state, '/v1/billing/workspaces/personal')
+    if paid.get('product_code') != 'pro-month':
+        steps.add('F13-05', 'a purchase to check', False, 'not run: Checkout left product=%s' % paid.get('product_code'))
+        return steps.result('billing-sandbox-purchase', '')
+    found = browser(m, steps, 'F13-05', state, 'billing_console.mjs', 'invoices')
+    shown = next((s.get('detail', '') for s in found if 'paid' in s), '')
+    steps.add('F13-05', 'the portal shows exactly one paid invoice of $8.00', paid_invoices(found) == 1 and '$8.00' in shown, shown)
+    try:
+        back = stripe_sandbox('refund', email, '800')
+    except (RuntimeError, subprocess.TimeoutExpired) as error:
+        back = {'error': str(error)[:250]}
+    steps.add('F13-05', 'the $8.00 charge is refunded in full', back.get('refund_status') == 'succeeded' and back.get('amount_refunded') == 800 and back.get('charge_refunded') is True, json.dumps(back))
+    browser(m, steps, 'F13-05', state, 'billing_console.mjs', 'portal', 'cancel')
+    after = api(m, state, '/v1/billing/workspaces/personal')
+    steps.add('F13-05', 'cancelling keeps the paid plan until the paid date', after['cancel_at_period_end'] and after['state'] == 'active' and after['period_end'] == paid['period_end'],
+              'state=%s cancel_at_period_end=%s ends %s' % (after['state'], after['cancel_at_period_end'], after['period_end']))
+    return steps.result('billing-sandbox-purchase', 'sandbox purchase: verified $8 catalog, forged webhooks refused, bought with the test card, one paid $8.00 invoice, refunded, cancelled to the period end')
 
 
 def topup_request(product, quantity, origin):
@@ -415,7 +623,8 @@ def billing_topup(m):
     digest = make_file(m, prefix, 'topup.bin', SEND_BYTES)
     code, out, err, seconds = machine_send(m, prefix, peer, 'topup.bin', False)
     steps.add('F13-03T', 'the send over the relay runs at full speed and says nothing about a limit',
-              code == 0 and received(m, peer_prefix, 'topup.bin') == digest and 'throttled' not in out + err and seconds < SEND_BYTES / (FREE_SLOW_BYTES_PER_SECOND * 2),
+              # a slowed send of this size needs about SEND_BYTES / FREE_SLOW (23 s); relay setup alone took 10 s on a healthy run
+              code == 0 and received(m, peer_prefix, 'topup.bin') == digest and 'throttled' not in out + err and seconds < 0.75 * SEND_BYTES / FREE_SLOW_BYTES_PER_SECOND,
               'exit %s in %.1f s %s' % (code, seconds, ' '.join(err.split())[-150:]))
     # a machine reports its relayed bytes at most every five minutes (cli/internal/bandwidth batchInterval)
     deadline, after = time.monotonic() + 480, before
@@ -431,4 +640,4 @@ def billing_topup(m):
     return steps.result('billing-topup', 'Free refused, 200 GB bought once on Checkout, quantity limits, allowance period, and relayed traffic past the plan is taken from the top-up')
 
 
-CHECKS = {'billing-declined-card': billing_declined_card, 'billing-topup': billing_topup, 'billing-team-lifecycle': billing_team_lifecycle, 'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}
+CHECKS = {'billing-renewal-failure': billing_renewal_failure, 'billing-team-yearly': billing_team_yearly, 'billing-sandbox-purchase': billing_sandbox_purchase, 'billing-declined-card': billing_declined_card, 'billing-topup': billing_topup, 'billing-team-lifecycle': billing_team_lifecycle, 'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}

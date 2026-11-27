@@ -59,7 +59,9 @@ portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 tes
 | `billing-team-lifecycle` | F13-04 (part), F13-04C (Team monthly) | team bought on console Checkout; a seat added mid-cycle (charged at once: one more paid invoice) and removed, billing date unchanged; cancel and keep in the portal. Not covered: failed payment, grace, suspension, recovery (Stripe test clock and test API key needed) |
 | (L37, L38 steps) | F13-04, F13-04C | `billing-console`: a Checkout left unpaid does not block the next one and can no longer be paid. `billing-team-lifecycle`: the removal survives cancel and keep, and the Seats section reads "3 seats until <date>, then 2." (" if you keep the plan" while cancelling), right after the removal and after a reload |
 | `plus-alias-signup` | F13-07 | sign-ups with plus addresses of an existing account are refused by name; a plus address with no base account signs up; the base address signing up afterwards must not land in that account |
-
+| `billing-renewal-failure` | F13-04, F13-04G | a declined renewal: past due, paid features for seven days (a retry adds nothing), only Free once the stored deadline has passed (moved by `workspace_usage.py lapse`), console messages, recovery by a good card |
+| `billing-team-yearly` | F13-04 (Team seats yearly) | a two-seat team bought on Checkout, switched to yearly and back in the portal: seats, allowance and renewal time of day unchanged |
+| `billing-sandbox-purchase` | F13-05 (test mode) | verified catalog; unsigned, forged and stale webhooks refused; one $8 test-card purchase, one paid $8.00 invoice in the portal, the charge refunded; cancel keeps the plan to the paid date |
 | `billing-declined-card` | F13-04 (failed payment at purchase), F13-05 (sandbox purchase) | a declined test card leaves the workspace Free and says why; the good card on the same Checkout recovers |
 | `billing-topup` | F13-04T, F13-03T, F13-06A | Free refused (409), quantity limits, 200 GB bought on the console and credited once; with the plan allowance used up, relayed traffic is taken from the top-up |
 
@@ -70,6 +72,11 @@ Each check makes its own throwaway account(s) and containers on `SMOKE_FIXTURE_H
 sandbox), `tunnel-create` (C279), `tunnel-route-rules` (F8-16), `tunnel-ip-rules` (F8-13, C280), `preview-ip-rules` (F7-09, C281),
 `tunnel-origin` (F8-09..F8-12), `tunnel-origin-proxies` (F8-09). The two IP rule checks need `SMOKE_OBSERVER_SSH`, a second host with curl
 and python3 whose public address differs from the controller's.
+
+`billing-renewal-failure` and `billing-sandbox-purchase` need two things the console cannot do (end a trial so a renewal is billed, refund a
+charge). `stripe_sandbox.py` does them **on the host that already holds the rehearsal's Stripe sandbox key** (`SMOKE_STRIPE_SANDBOX_HOST`,
+`SMOKE_STRIPE_SANDBOX_KEY_FILE`). The key is read there and never copied or printed; anything but a test-mode key is refused, and only the
+customer of a throwaway account younger than six hours is touched.
 
 A controller that must not run a browser sets `SMOKE_PW_CHROMIUM` to `remote_chrome.sh` and `SMOKE_BROWSER_HOST` to a host with Chrome:
 the browser runs there, node and every session state stay on the controller. Stripe Checkout offers a buyer in the US a list of payment

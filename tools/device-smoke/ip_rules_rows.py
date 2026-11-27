@@ -276,7 +276,8 @@ def main():
 
         def raw_answer(observer, host, port, mode, ip):
             code, out, err = run(remote(observer, ['python3', '-c', RAW, host, str(port), mode, ip]), 60)
-            return out.strip() or 'refused'
+            # a probe that did not run (ssh, python) is never a refusal
+            return out.strip() if code == 0 and out.strip() in ('answered', 'refused') else 'probe error %s %s' % (code, err.strip()[-120:])
 
         def raw_protocol(mode):
             suffix = name + '-' + mode

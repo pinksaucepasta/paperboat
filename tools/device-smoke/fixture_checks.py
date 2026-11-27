@@ -77,7 +77,8 @@ class Machines(contextlib.ExitStack):
         self.run_id = '%s-%s' % (time.strftime('%H%M%S', time.gmtime()), secrets.token_hex(2))
         self.leftovers = []  # what a cleanup step could not remove: reported with the result, never hidden
         self.env = dict(os.environ, ORIGIN=ENV['SMOKE_CONSOLE_ORIGIN'], PW_CHROMIUM=path('SMOKE_PW_CHROMIUM'), SMOKE_CT_DOCKER=DOCKER,
-                        **({'PW_MODULE': path('SMOKE_PW_MODULE')} if ENV.get('SMOKE_PW_MODULE') else {}))
+                        **({'PW_MODULE': path('SMOKE_PW_MODULE')} if ENV.get('SMOKE_PW_MODULE') else {}),
+                        **{k: ENV[k] for k in ('SMOKE_BROWSER_HOST', 'SMOKE_BROWSER_BIN') if ENV.get(k)})  # remote_chrome.sh
 
     def machine(self, label, state_key=None, state=None, binary=None, zone=None, host=None, name=None):
         """(name, machine id, prefix) of a machine paired as the account of the stored session (a setting, or a state file path);

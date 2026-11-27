@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -45,6 +46,9 @@ NEEDS = {
     'plus-alias-signup': ['console_tools'],
     'billing-team-lifecycle': ['console_tools'],
     'billing-declined-card': ['console_tools'],
+    'billing-team-yearly': ['console_tools'],
+    'billing-sandbox-purchase': ['console_tools', 'operator_api', 'stripe_sandbox_key'],
+    'billing-renewal-failure': ['console_tools', 'workspace_db', 'stripe_sandbox_key'],
     'billing-topup': ['console_tools', 'fixture_host', 'workspace_db'],
     # access_checks.py: throwaway accounts and containers
     **{check: ['console_tools', 'fixture_host'] for check in ('policy-cli', 'policy-token', 'machine-tags', 'policy-team', 'tunnel-route-rules',
@@ -72,6 +76,7 @@ def console(state_key, method, path):
     env = dict(os.environ, ORIGIN=needed['SMOKE_CONSOLE_ORIGIN'], STATE=state, PW_CHROMIUM=needed['SMOKE_PW_CHROMIUM'])
     if setting('SMOKE_PW_MODULE'):
         env['PW_MODULE'] = setting('SMOKE_PW_MODULE')
+    env.update({k: setting(k) for k in ('SMOKE_BROWSER_HOST', 'SMOKE_BROWSER_BIN') if setting(k)})
     try:
         done = subprocess.run(['node', str(HERE / 'console_api.mjs'), method, path], env=env, capture_output=True, text=True, timeout=120)
         reply = json.loads(done.stdout.strip().splitlines()[-1])
@@ -217,7 +222,38 @@ def console_tools():
     if not setting('SMOKE_CONSOLE_ORIGIN'):
         return 'SMOKE_CONSOLE_ORIGIN (the live console) is not set. Fix: %s' % FIX_ACCOUNTS
     missing = [t for t in ('node',) if not shutil.which(t)] + [p for p in (setting('SMOKE_PW_CHROMIUM'), setting('SMOKE_PW_MODULE')) if not p or not Path(p).exists()]
-    return ('console automation is missing: %s. Fix: %s' % (', '.join(missing) or 'SMOKE_PW_CHROMIUM / SMOKE_PW_MODULE unset', FIX_ACCOUNTS)) if missing or not setting('SMOKE_PW_CHROMIUM') else None
+    if missing or not setting('SMOKE_PW_CHROMIUM'):
+        return 'console automation is missing: %s. Fix: %s' % (', '.join(missing) or 'SMOKE_PW_CHROMIUM / SMOKE_PW_MODULE unset', FIX_ACCOUNTS)
+    if Path(setting('SMOKE_PW_CHROMIUM')).name == 'remote_chrome.sh':
+        host = setting('SMOKE_BROWSER_HOST')
+        if not host:
+            return 'SMOKE_PW_CHROMIUM is remote_chrome.sh: set SMOKE_BROWSER_HOST to the host that runs the browser'
+        try:
+            done = ssh(host, 'command -v %s >/dev/null && echo ok' % shlex.quote(setting('SMOKE_BROWSER_BIN', 'google-chrome')))
+        except subprocess.TimeoutExpired:
+            done = None
+        if done is None or done.stdout.strip() != 'ok':
+            return 'the browser host %s does not answer over ssh or has no browser' % host
+    return None
+
+
+def operator_api():
+    return None if setting('SMOKE_OPERATOR_API').startswith('https://') else 'set SMOKE_OPERATOR_API (the https origin of the server API, which receives the Stripe webhooks)'
+
+
+def stripe_sandbox_key():
+    host, path = setting('SMOKE_STRIPE_SANDBOX_HOST'), ENV.get('SMOKE_STRIPE_SANDBOX_KEY_FILE', '')
+    if not host or not re.fullmatch(r'/[A-Za-z0-9._/-]+', path):
+        return ('set SMOKE_STRIPE_SANDBOX_HOST (the host that already holds the rehearsal\'s Stripe sandbox key) and '
+                'SMOKE_STRIPE_SANDBOX_KEY_FILE (its path there)')
+    # only the prefix is looked at, on that host: the key never leaves it
+    try:
+        done = ssh(host, 'case "$(head -c 8 %s)" in sk_test_|rk_test_) echo test;; *) echo other;; esac' % path)
+    except subprocess.TimeoutExpired:
+        done = None
+    if done is None or done.stdout.strip() != 'test':
+        return 'the key file on %s is missing, unreadable or not a TEST-mode key: the billing rows that use it do not run' % host
+    return None
 
 
 def workspace_db():
@@ -246,7 +282,7 @@ def observer_host():
     return None
 
 
-VERIFIERS = {f.__name__: f for f in (observer_host, workspace_db, team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
+VERIFIERS = {f.__name__: f for f in (operator_api, stripe_sandbox_key,observer_host,workspace_db, team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
                                       s3_keys, fixture_host, windows_rsync, console_tools, operator_password, staging_stack)}
 
 

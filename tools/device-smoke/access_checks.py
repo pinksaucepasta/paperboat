@@ -102,7 +102,7 @@ import json, sys, urllib.error, urllib.request
 base, method, path = sys.argv[1:4]
 body = sys.stdin.read() or None
 request = urllib.request.Request(base.rstrip('/') + path, data=body.encode() if body else None, method=method, headers={
-    'Authorization': 'Bearer ' + open('api.tok').read().strip(), 'Content-Type': 'application/json', 'User-Agent': 'paperboat-smoke',
+    'Authorization': 'Bearer ' + open('api.tok').read().strip(), 'Content-Type': 'application/json', 'User-Agent': 'smoke-check',
     'Idempotency-Key': 'smoke-%s' % __import__('os').urandom(8).hex()})
 try:
     with urllib.request.urlopen(request, timeout=60) as response:
@@ -134,7 +134,7 @@ def policy_format(m, prefix, email, target, steps):
         return data(pb('policy get --workspace personal --json')[1])['version']
 
     base = server_url(m, prefix)
-    with urllib.request.urlopen(urllib.request.Request(base.rstrip('/') + '/v1/policy/schema', headers={'User-Agent': 'paperboat-smoke'}), timeout=30) as response:
+    with urllib.request.urlopen(urllib.request.Request(base.rstrip('/') + '/v1/policy/schema', headers={'User-Agent': 'smoke-check'}), timeout=30) as response:
         served, kind = json.loads(response.read()), response.headers.get('Content-Type', '')
     printed = json.loads(pb('policy schema')[1])
     step('F18-01 the server serves the schema the CLI prints', served == printed and 'schema+json' in kind, '%s %s' % (kind, str(served)[:120]))
@@ -184,10 +184,10 @@ def policy_format(m, prefix, email, target, steps):
         if entry.get('expires_at'):
             import datetime
             left = (datetime.datetime.fromisoformat(entry['expires_at'].replace('Z', '+00:00')) - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
-        step('F18-06 the list shows the expiry asked for (1 day) and no secret', 85_000 < left <= 86_400 and secret not in json.dumps(listed), entry)
+        step('F18-06 the list shows the expiry asked for (1 day) and no secret', 85_000 < left <= 86_700 and secret not in json.dumps(listed), entry)  # 5 min of clock difference
         for bad in ('0d', '4000d'):
             code, _, out = pb('api-token create smoke-bad --workspace personal --expires %s' % bad)
-            step('F18-06 expiry %s is refused' % bad, code != 0 and 'pbat_' not in out, redact(out))
+            step('F18-06 expiry %s is refused' % bad, code != 0 and 'pbat_' not in out and re.search(r'expir|duration', out, re.I) is not None, redact(out))
         code, _, out = pb('api-token revoke smoke-api --workspace personal --yes')
         step('F18-06 revoke the token', code == 0, out)
         dead = api('GET', '/v1/workspaces/personal/policy')
@@ -274,6 +274,11 @@ def policy_team(m):
                         'team enforcement, explain, review, audit, member rights, ENV rules, groups, tags, ports and session end', 30)
 
 
+def port_refused(port, output):
+    """What `pb access machine` says for a port the policy leaves out (the port is never offered), or a listener that carries nothing."""
+    return re.search(r'offer port %d\b|denied|permission|not allowed|is listening on' % port, output, re.I) is not None
+
+
 def policy_enforce(m, team, name, machine_id, owner, member, member_email, steps):
     """F18-02 beyond exec: a group may reach a tag; deny wins per action; private access follows the ports of the rule;
     removing the rule ends a command that is already running."""
@@ -311,7 +316,8 @@ def policy_enforce(m, team, name, machine_id, owner, member, member_email, steps
         raise RuntimeError('share: ' + out[-300:])
     m.callback(lambda: m.at(owner, '%s team machine unshare %s %s --generation %s --json' % (PB, team, machine_id, generation()), check=False, timeout=150))
     document = {'groups': {'group:ops': ['user:' + member_email]}, 'tags': {'tag:smoke-ops': ['machine:' + name]},
-                'rules': [{'src': ['group:ops'], 'dst': ['tag:smoke-ops'], 'allow': ['exec', 'private_access'], 'ports': ['8765']}]}
+                'rules': [{'src': ['group:ops'], 'dst': ['tag:smoke-ops'], 'allow': ['exec']},  # ports go only on a rule for private_access alone
+                          {'src': ['group:ops'], 'dst': ['tag:smoke-ops'], 'allow': ['private_access'], 'ports': ['8765']}]}
     try:
         save(document, 'smoke-groups')
         ok, out = until(True, run)
@@ -319,24 +325,31 @@ def policy_enforce(m, team, name, machine_id, owner, member, member_email, steps
         for port in (8765, 8766):
             m.at(owner, 'nohup python3 -m http.server %d --bind 127.0.0.1 >/dev/null 2>&1 & sleep 1' % port)
         m.callback(lambda: m.at(owner, "pkill -f 'http.server 876' || true", check=False))
+        for port in (8765, 8766):  # both answer on their own machine: a later refusal is Paperboat's, not a dead server
+            done = m.at(owner, 'curl -fsS -m 5 --retry 10 --retry-connrefused --retry-delay 1 -o /dev/null http://127.0.0.1:%d/' % port, check=False)
+            step('the test server on port %d answers on its own machine' % port, done.returncode == 0, done.stderr)
 
         def forwarded(port):
             local = 19000 + port % 100
             done = m.at(member, '(%s access machine %s --workspace %s --port %d --listen 127.0.0.1:%d > access-%d.log 2>&1 & echo $! > access-%d.pid); '
-                        'rc=1; for i in $(seq 20); do curl -fsS -m 5 -o /dev/null http://127.0.0.1:%d/ && { rc=0; break; }; sleep 2; done; '
-                        'kill $(cat access-%d.pid) 2>/dev/null; cat access-%d.log; exit $rc' % (PB, name, team, port, local, port, port, local, port, port), check=False, timeout=150)
-            return done.returncode, done.stdout + done.stderr
+                        'rc=1; for i in $(seq 40); do curl -fsS -m 5 -o /dev/null http://127.0.0.1:%d/ && { rc=0; break; }; kill -0 $(cat access-%d.pid) 2>/dev/null || break; sleep 2; done; '
+                        'kill $(cat access-%d.pid) 2>/dev/null; cat access-%d.log; exit $rc' % (PB, name, team, port, local, port, port, local, port, port, port), check=False, timeout=240)
+            # stdout is pb's own log; curl's errors only matter when pb wrote nothing
+            return done.returncode, done.stdout if done.stdout.strip() else done.stderr
+
+        def said(log):
+            return ' '.join(log.split())[:290]  # pb states what failed at the start
         code, out = forwarded(8765)
-        step('F18-02 private access to the port the rule names works', code == 0, out)
+        step('F18-02 private access to the port the rule names works', code == 0, said(out))
         code, out = forwarded(8766)
-        step('F18-02 private access to another port is refused', code != 0, out)
+        step('F18-02 private access to another port is refused', code != 0 and port_refused(8766, out), said(out))
         denied = json.loads(json.dumps(document))
         denied['rules'].append({'src': ['user:' + member_email], 'dst': ['machine:' + name], 'deny': ['exec']})
         save(denied, 'smoke-deny')
         ok, out = until(False, run)
         step('F18-02 a deny on the machine beats the group allow on its tag', ok, out)
         code, out = forwarded(8765)
-        step('F18-02 the deny of one action leaves private access allowed', code == 0, out)
+        step('F18-02 the deny of one action leaves private access allowed', code == 0, said(out))
         save(document, 'smoke-groups-again')
         ok, out = until(True, run)
         step('F18-02 exec works again once the deny is removed', ok, out)
@@ -358,8 +371,12 @@ def policy_enforce(m, team, name, machine_id, owner, member, member_email, steps
         removed = time.monotonic()
         save({'groups': document['groups'], 'tags': document['tags'], 'rules': []}, 'smoke-remove')
         thread.join(150)
-        ended = not thread.is_alive() and outcome.get('code') != 0 and 'held-end' not in outcome.get('out', '').replace('echo held-end', '')
-        step('F18-02 removing the rule ends the running exec', running and ended, 'after %.0fs %s' % (time.monotonic() - removed, outcome))
+        within = not thread.is_alive()
+        thread.join(150)  # past the command's own end, to tell "ended late" from "never ended"
+        ran_out = re.search(r'^held-end\s*$', outcome.get('out', ''), re.M) is not None
+        step('F18-02 removing the rule ends the running exec', running and within and outcome.get('code') != 0 and not ran_out,
+             'ended within 150 s of the removal: %s; the 240 s command ran to its end: %s; pb exec exit %s after %.0f s in all' % (
+                 within, ran_out, outcome.get('code'), outcome.get('seconds', -1)))
         gone = True
         for _ in range(12):
             gone = m.at(owner, "pgrep -f 'sleep 240' >/dev/null", check=False).returncode != 0
@@ -451,24 +468,29 @@ def tunnel_create(m):
     return line_verdict('tunnel-create', 0, '\n'.join(steps), 'pb tunnel create: receipts, public and private, refusals in plain words', 7)
 
 
+ORIGIN_SCENARIOS = ('headers', 'keepalive', 'ws', 'tls', 'grpc', 'failures')
+
+
+def origin_cells(report):
+    """tunnel_origin_rows.py's --out report (one JSON object, cells with result ok|FAILED): (cells, failed ones, scenarios that never ran)."""
+    try:
+        cells = json.loads(report)['cells']
+    except (ValueError, KeyError, TypeError):
+        cells = []
+    failed = ['%s/%s (%s)' % (c.get('scenario'), c.get('cell'), str(c.get('detail', ''))[:110]) for c in cells if c.get('result') != 'ok']
+    return cells, failed, sorted(set(ORIGIN_SCENARIOS) - {c.get('scenario') for c in cells})
+
+
 def tunnel_origin(m):
     _, _, [(name, _, prefix)] = solo(m, ['torigin'])
     docker_exec(fx.HOST, name, 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv >/dev/null', timeout=600)
     code, text = fx.on_machine(prefix, 'tunnel_origin_rows.py', ['--pb', PB, '--out', 'tor.jsonl'], 2700)
     rows = m.at(prefix, 'cat d/tor.jsonl 2>/dev/null || true', check=False).stdout
     log = fx.keep('tunnel-origin', text + '\n' + rows)
-    cells = []
-    for line in rows.splitlines():
-        try:
-            cells.append(json.loads(line))
-        except ValueError:
-            continue
-    failed = ['%s/%s (%s)' % (c.get('scenario'), c.get('cell', c.get('name')), str(c.get('detail', ''))[:110]) for c in cells if not c.get('ok', c.get('status') == 'PASS')]
-    scenarios = {c.get('scenario') for c in cells}
-    wanted = {'headers', 'keepalive', 'ws', 'tls', 'grpc', 'failures'}
-    if code == 0 and cells and not failed and wanted <= scenarios:
+    cells, failed, missing = origin_cells(rows)
+    if code == 0 and cells and not failed and not missing:
         return True, 'origin TLS modes with a pinned origin, gRPC with trailers, quiet WebSocket, keep-alive and failure pages; %d/%d cells, log %s' % (len(cells), len(cells), log)
-    return False, '%d/%d cells failed (exit %d, missing %s): %s log %s' % (len(failed), len(cells), code, sorted(wanted - scenarios), '; '.join(failed)[:230] or ' '.join(text.split())[-230:], log)
+    return False, '%d/%d cells failed (exit %d, missing %s): %s log %s' % (len(failed), len(cells), code, missing, '; '.join(failed)[:230] or ' '.join(text.split())[-230:], log)
 
 
 def tunnel_origin_proxies(m):

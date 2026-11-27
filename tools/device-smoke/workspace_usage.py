@@ -49,12 +49,30 @@ def script(user, action, values=()):
     return '\n'.join(sql + ['COMMIT;']) + '\n'
 
 
+# the same fence for the one billing row a check may move in time: a past_due personal workspace whose grace has not ended yet
+LAPSE = """SELECT w.id FROM paperboat.billing_workspaces w JOIN paperboat.users u ON w.user_id = u.id AND w.team_id IS NULL
+WHERE u.id = '%(user)s' AND u.primary_email ~ '^final-[0-9a-f]{10}@' AND u.created_at > now() - interval '6 hours'
+  AND w.state = 'past_due' AND w.renewal_grace_until > now()
+FOR UPDATE OF w"""
+
+
+def lapse_script(user):
+    """The seven days of renewal grace pass: the deadline of one past_due throwaway workspace moves to a minute ago."""
+    if not re.fullmatch(r'user_[0-9a-f-]{36}', user):
+        raise ValueError('USER_ID must be user_<uuid>')
+    return '\n'.join(['\\set ON_ERROR_STOP 1', 'BEGIN;', 'CREATE TEMP TABLE chosen ON COMMIT DROP AS ' + LAPSE % {'user': user} + ';',
+                      'DO $$ BEGIN IF (SELECT count(*) FROM chosen) <> 1 THEN RAISE EXCEPTION '
+                      "'not exactly one past_due throwaway workspace in grace'; END IF; END $$;",
+                      "UPDATE paperboat.billing_workspaces w SET renewal_grace_until = now() - interval '1 minute' FROM chosen c WHERE w.id = c.id;",
+                      "SELECT json_build_object('lapsed', true);", 'COMMIT;']) + '\n'
+
+
 def run(user, action, *values, host=None):
     host = host or load().get('database_host')
     if not host:
         raise RuntimeError('set database_host in the local development targets')
     done = subprocess.run(['ssh', '-o', 'BatchMode=yes', '--', host, 'runuser', '-u', 'postgres', '--', 'psql', '-d', 'paperboat', '-qAt'],
-                          input=script(user, action, values), capture_output=True, text=True, timeout=120)
+                          input=lapse_script(user) if action == 'lapse' else script(user, action, values), capture_output=True, text=True, timeout=120)
     if done.returncode != 0 or 'ERROR' in done.stderr:
         raise RuntimeError('workspace usage %s failed: %s' % (action, done.stderr.strip()[-300:]))
     return json.loads(done.stdout.strip().splitlines()[-1])

@@ -125,6 +125,20 @@ class Fence(unittest.TestCase):
                 workspace_usage.script(user, action, values)
 
 
+class RenewalEvidence(unittest.TestCase):
+    def test_only_the_charges_count_not_the_zero_trial_invoice(self):
+        history = ('3 paid:  Nov 27, 2026 $8.00 Paid Paperboat Pro Nov 27, 2026 $0.00 Paid Trial period for Paperboat Pro '
+                   'Nov 27, 2026 $8.00 Paid Paperboat Pro')  # the portal's own text on release A
+        self.assertEqual(b.paid_charges(history, '$8.00'), 2)
+        self.assertEqual(b.paid_charges('1 paid:  Nov 27, 2026 $8.00 Paid Paperboat Pro', '$8.00'), 1)
+
+    def test_a_moved_grace_is_traced_to_the_retry(self):
+        text = b.retry_detail({'attempted_at': 1795815729}, {'attempted_at': 1795815849, 'attempt_count': 1},
+                                           '2026-12-04T21:42:09Z', '2026-12-04T21:44:09Z')
+        self.assertIn('+120 s from seven days after the first attempt', text)
+        self.assertIn('+0 s from seven days after the retry', text)
+
+
 class Registration(unittest.TestCase):
     def test_every_check_runs_in_smoke_and_is_preflighted(self):
         smoke = (HERE / 'smoke.sh').read_text()

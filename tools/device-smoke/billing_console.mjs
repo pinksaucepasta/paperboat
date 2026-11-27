@@ -10,6 +10,7 @@
 //   team-checkout TEAM SEATS    Create team (monthly) on the console, pay on test-mode Checkout, the team's paid overview
 //   seats N                     the team's billing page: set N seats, read what it costs now, buy or remove
 //   declined                    F13-04: Upgrade with a declined test card (workspace stays Free), then the good card on the same Checkout
+//   payment-state grace|paused|none   what the billing page says about a failed renewal (F13-04G)
 //   topup UNITS                 F13-04T: buy UNITS x 100 GB on the console, test-mode Checkout; credited once
 //   invoices                    the Stripe portal's invoice history; the step "invoices" carries the number of paid ones in "paid"
 // With BILLING_TEAM=<team id> the plan, seats, portal and invoice commands act on that team's workspace instead of the personal one.
@@ -289,6 +290,18 @@ async function main(argv) {
     add("no second credit arrives for the same payment", later.topup_bytes_purchased === after.topup_bytes_purchased, `${later.topup_bytes_purchased}`)
   }
 
+  // What the billing page says after a renewal payment failed: within the grace period (paid features stay), after it (paused), or
+  // nothing once the payment succeeded.
+  async function paymentState(expected) {
+    await openPlan()
+    const want = { grace: /Payment failed\. Paid features stay until \w{3} \d{1,2}, \d{4}\./, paused: /Payment failed\. Paid features are paused until payment succeeds\./, none: /Plan\s+Pro · \$8\/month/ }[expected]
+    const done = (t) => want.test(t) && (expected !== "none" || !/Payment failed|Payment overdue/.test(t))
+    const text = await settled(main_(), done)
+    add(`the billing page shows the '${expected}' payment state`, done(text), text.replace(/\s+/g, " ").slice(0, 220))
+    const update = await main_().getByRole("button", { name: "Update payment method" }).count()
+    add(expected === "none" ? "no 'Update payment method' prompt remains" : "it offers 'Update payment method'", expected === "none" ? update === 0 : update === 1, `${update} buttons`)
+  }
+
   // Nothing is clicked on a Stripe page unless it is the test-mode portal.
   async function enteredPortal() {
     await page.waitForURL((u) => u.hostname === "billing.stripe.com", { timeout: 90000, waitUntil: "commit" })
@@ -415,8 +428,8 @@ async function main(argv) {
     await page.waitForTimeout(8000)
     await openPlan()
     const want = {
-      month: /Plan\s+Pro · \$8\/month/,
-      year: /Plan\s+Pro · \$80\/year/,
+      month: /Plan\s+(Pro · \$8|Team · \$[\d,]+)\/month/,
+      year: /Plan\s+(Pro · \$80|Team · \$[\d,]+)\/year/,
       cancel: /Ends\s+\w{3} \d{1,2}, \d{4}[\s\S]*Keep plan/,
       keep: /Renews\s+\w{3} \d{1,2}, \d{4}[\s\S]*Cancel plan/,
     }[action]
@@ -428,6 +441,7 @@ async function main(argv) {
     if (command === "card") await card(argument)
     else if (command === "checkout") await checkout()
     else if (command === "declined") await declined()
+    else if (command === "payment-state") await paymentState(argument)
     else if (command === "topup") await topup(Number(argument))
     else if (command === "portal") await portal(argument)
     else if (command === "team-checkout") await teamCheckout(argument, Number(extra))
@@ -436,7 +450,7 @@ async function main(argv) {
     else if (command === "seat-note") {
       await openPlan()
       await expectNote(`L38: ${last}`, Number(argument), Number(extra), last === "cancelling")
-    } else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | declined | topup UNITS | seat-note BOUGHT THEN cancelling|renewing | invoices")
+    } else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | declined | topup UNITS | payment-state grace|paused|none | seat-note BOUGHT THEN cancelling|renewing | invoices")
   } catch (error) {
     const where = page.url().split("?")[0].replace(origin, "").slice(0, 60)
     const why = String(error?.message ?? error).split("\n")[0].replace(/(https?:\/\/[^\s?"']+)\?[^\s"']*/g, "$1").slice(0, 160)

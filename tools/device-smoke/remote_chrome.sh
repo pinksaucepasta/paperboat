@@ -10,4 +10,9 @@ bin=${SMOKE_BROWSER_BIN:-google-chrome}
 [[ $host =~ ^[A-Za-z0-9][A-Za-z0-9@._-]*$ && $bin =~ ^[A-Za-z0-9/._-]+$ ]] || { echo "remote_chrome: bad SMOKE_BROWSER_HOST or SMOKE_BROWSER_BIN" >&2; exit 2; }
 args=''
 [ $# = 0 ] || printf -v args ' %q' "$@"
-exec ssh -T -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 "$host" "exec $bin$args 3<&0 4>&1 0</dev/null 1>&2" 0<&3 1>&4
+# Playwright removes its profile directory only on its own machine, so the one made over there is removed when the browser ends
+profile=''
+for a in "$@"; do [[ $a =~ ^--user-data-dir=(/tmp/playwright_[A-Za-z0-9._-]+)$ ]] && profile=${BASH_REMATCH[1]}; done
+command="$bin$args 3<&0 4>&1 0</dev/null 1>&2"
+[ -z "$profile" ] || command="$command; rc=\$?; rm -rf -- $profile; exit \$rc"
+exec ssh -T -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 "$host" "$command" 0<&3 1>&4
