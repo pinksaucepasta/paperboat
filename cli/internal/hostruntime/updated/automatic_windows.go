@@ -49,17 +49,25 @@ func (c *windowsController) automaticCheck(ctx context.Context) (autoupdate.Resu
 		return autoupdate.Result{}, loadErr
 	}
 	statePath := filepath.Join(c.config.StateRoot, "maintenance.json")
-	state, err := autoupdate.LoadMaintenanceState(statePath)
-	if err != nil {
-		return autoupdate.Result{}, err
-	}
 	response, err := c.invokeWithAutomatic(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "download"}, true)
 	result := autoupdate.Result{Version: response.Version}
 	if err != nil {
 		return result, err
 	}
+	// The download can take a while and settings change meanwhile: decide on the settings as they are now (as Unix).
+	if settings, err = machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, nil); err != nil {
+		return result, err
+	}
+	if !settings.Enabled {
+		return result, nil
+	}
 	active := c.config.Source.SHA256
 	now := time.Now() // after the download, which can take a while: the window is decided and recorded on one clock
+	// Read after the download too: a settings change meanwhile records the window it was kept through.
+	state, err := autoupdate.LoadMaintenanceState(statePath)
+	if err != nil {
+		return result, err
+	}
 	if due, err := settings.Due(statePath, now, state, active); !due || err != nil {
 		return result, err
 	}

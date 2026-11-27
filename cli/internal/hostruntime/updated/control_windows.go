@@ -314,6 +314,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 		}
 	}
 	if request.Operation == "settings" {
+		previous, previousErr := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, nil)
 		settings, err := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, request.Settings)
 		if err != nil {
 			return response, err
@@ -326,6 +327,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 			response.NextMaintenanceAt = settings.NextMaintenance(time.Now())
 		}
 		if request.Settings != nil {
+			anchorMaintenanceWindow(c.config.StateRoot, previous, previousErr == nil, settings, c.config.Source.SHA256, time.Now())
 			c.scheduler.Wake()
 		}
 		return response, nil

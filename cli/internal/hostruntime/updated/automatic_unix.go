@@ -51,10 +51,6 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 		return autoupdate.Result{Version: result.Version}, err
 	}
 	statePath := filepath.Join(s.config.StateRoot, "maintenance.json")
-	state, err := autoupdate.LoadMaintenanceState(statePath)
-	if err != nil {
-		return autoupdate.Result{}, err
-	}
 	// Download ahead of the window, retaining normal cohort eligibility. The
 	// same exact verified candidate is reused by preparation and activation.
 	candidate, err := s.downloadWithResolver(ctx, s.source.Resolve, false)
@@ -74,6 +70,11 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	}
 	active := s.config.Active.SHA256
 	now := time.Now() // after the download, which can take a while: the window is decided and recorded on one clock
+	// Read after the download too: a settings change meanwhile records the window it was kept through.
+	state, err := autoupdate.LoadMaintenanceState(statePath)
+	if err != nil {
+		return result, err
+	}
 	if due, err := settings.Due(statePath, now, state, active); !due || err != nil {
 		return result, err
 	}

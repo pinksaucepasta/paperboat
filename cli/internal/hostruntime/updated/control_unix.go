@@ -221,6 +221,7 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 	case "settings":
 		// No controlMu: settings are one atomic file, and the automatic check re-reads them before it installs.
 		// Behind the lock, a settings read or change timed out ("unreachable") while a check downloaded a release.
+		previous, previousErr := machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, nil)
 		settings, err := machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, request.Settings)
 		if err != nil {
 			return ControlResponse{}, err
@@ -229,6 +230,7 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 			settings.Enabled = false
 		}
 		if request.Settings != nil {
+			anchorMaintenanceWindow(s.config.StateRoot, previous, previousErr == nil, settings, s.activeDigest(), time.Now())
 			s.scheduler.Wake()
 		}
 		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Settings: &settings}

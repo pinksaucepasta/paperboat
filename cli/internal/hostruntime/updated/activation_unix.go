@@ -426,9 +426,17 @@ func (s *Service) refreshManager() error {
 	}
 	s.managerMu.Lock()
 	s.manager = manager
-	s.managerMu.Unlock()
+	// Under managerMu: the settings handler reads the active digest without controlMu (activeDigest).
 	s.config.Active = active
+	s.managerMu.Unlock()
 	return nil
+}
+
+// activeDigest is the active release digest for callers that do not hold controlMu.
+func (s *Service) activeDigest() string {
+	s.managerMu.RLock()
+	defer s.managerMu.RUnlock()
+	return s.config.Active.SHA256
 }
 
 func (s *Service) currentManager() *workerupdate.Manager {
