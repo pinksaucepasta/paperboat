@@ -85,11 +85,16 @@ class Machines(contextlib.ExitStack):
         env = dict(self.env, **({'SMOKE_CT_TZ': zone} if zone else {}))
         done = run([str(HERE / 'fixture_machine.sh'), 'up', host, name, binary or path('SMOKE_FIXTURE_PB'), state or path(state_key)], timeout=900, check=False, env=env)
         if done.returncode:
-            self.callback(run, [str(HERE / 'fixture_machine.sh'), 'down', host, name], check=False, env=self.env)
+            self.callback(self._down, host, name)
             raise RuntimeError('fixture machine %s: %s' % (name, done.stderr.strip()[-300:]))
         made = json.loads(done.stdout.strip().splitlines()[-1])
-        self.callback(run, [str(HERE / 'fixture_machine.sh'), 'down', host, name, made['machine_id']], check=False, env=self.env, timeout=300)
+        self.callback(self._down, host, name, made['machine_id'])
         return name, made['machine_id'], made['prefix'].replace(' exec ', ' exec -i ', 1)
+
+    def _down(self, host, name, *machine_id):
+        done = run([str(HERE / 'fixture_machine.sh'), 'down', host, name, *machine_id], check=False, env=self.env, timeout=300)
+        if done.returncode:
+            self.leftovers.append('fixture machine %s NOT revoked: %s' % (name, done.stderr.strip()[-150:]))
 
     def at(self, prefix, command, **kw):
         return run(shlex.split(prefix) + ['bash -lc ' + shlex.quote(command)], **kw)

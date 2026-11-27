@@ -10,6 +10,8 @@ Use --prefix for one run prefix or --id for exact machine records. --all covers 
 Cleanup revokes matching machines unseen for --stale (default 2 h), together with their pair-time CLI sessions.
 The local configuration protects shared test devices. Dry-run by default: it
 prints the ids it would revoke; --apply revokes them in one transaction and prints them again.
+Exit 1 when an --id record stays live (wrong account, not a throwaway name, protected or seen within --stale):
+a row's cleanup must never read "revoked 0" as done. An id already revoked or deleted is fine.
 It runs SQL on the production database through `ssh <host> docker exec psql` (operator access).
 """
 import argparse
@@ -94,7 +96,11 @@ def main():
     sql = "\\set ON_ERROR_STOP 1\nBEGIN;\nSET LOCAL search_path TO paperboat, public;\n" + SELECT % params
     if args.apply:
         sql += REVOKE
-    sql += "\\copy (SELECT id FROM doomed ORDER BY id) TO STDOUT\n" + ("COMMIT;\n" if args.apply else "ROLLBACK;\n")
+    sql += "\\copy (SELECT id FROM doomed ORDER BY id) TO STDOUT\n"
+    if args.id:  # asked for by exact id, still live and not selected: on any account
+        sql += ("\\copy (SELECT 'kept:' || id FROM user_machines WHERE id = ANY(%(ids)s) AND revoked_at IS NULL"
+                " AND deleted_at IS NULL AND id NOT IN (SELECT id FROM doomed)) TO STDOUT\n" % params)
+    sql += "COMMIT;\n" if args.apply else "ROLLBACK;\n"
     done = subprocess.run(["ssh", "--", host, "runuser", "-u", "postgres", "--",
                            "psql", "-d", "paperboat", "-qAt"],
                           input=sql, capture_output=True, text=True, timeout=120)
@@ -104,6 +110,11 @@ def main():
     ids = [line for line in done.stdout.split() if line.startswith("machine_")]
     verb = "revoked" if args.apply else "would revoke"
     print(f"{verb} {len(ids)} machine(s)" + (": " + " ".join(ids) if ids else ""))
+    kept = [line.removeprefix("kept:") for line in done.stdout.split() if line.startswith("kept:")]
+    if kept:
+        print("NOT revoked, still live: " + " ".join(kept) + " (account not in cleanup_accounts/--account, not a throwaway "
+              "name, protected, or seen within --stale)", file=sys.stderr)
+        return 1
     return 0
 
 

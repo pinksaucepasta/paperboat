@@ -15,7 +15,7 @@ SSH = '''#!/bin/bash
 echo "ssh $*" >> "$STUB_LOG"
 case "$*" in
   *"ss -ltnH"*) printf '%s\\n' "$STUB_UP"; exit 0 ;;
-  *runuser*psql*) cat > "$STUB_SQL"; exit 0 ;;
+  *runuser*psql*) cat > "$STUB_SQL"; [ -z "${STUB_PSQL_OUT:-}" ] || printf '%s\\n' $STUB_PSQL_OUT; exit 0 ;;
 esac
 cat > /dev/null 2>&1 || true
 [ -z "${STUB_SSH_FAIL:-}" ]
@@ -204,9 +204,9 @@ class CleanupScopeTest(unittest.TestCase):
         self.targets.write_text(json.dumps({'database_host': 'db', 'cleanup_accounts': ['user_x'],
                                             'cleanup_protected': '(pbvm|^canary-)'}))
 
-    def run_cleanup(self, *args):
+    def run_cleanup(self, *args, **extra):
         env = dict(os.environ, HOME=str(self.env.home), PATH=f'{self.env.bin}:{os.environ["PATH"]}', STUB_LOG=str(self.env.log),
-                   STUB_SQL=str(self.env.sql), PB_DEV_TARGETS_FILE=str(self.targets), STUB_UP='')
+                   STUB_SQL=str(self.env.sql), PB_DEV_TARGETS_FILE=str(self.targets), STUB_UP='', **extra)
         return subprocess.run(['python3', str(HERE / 'cleanup_test_account.py'), *args], env=env,
                               capture_output=True, text=True, timeout=60, cwd=HERE)
 
@@ -220,6 +220,17 @@ class CleanupScopeTest(unittest.TestCase):
         self.assertIn(f"ARRAY['{ID1}']::text[]", sql)
         self.assertIn("m.alias ~ '^(", sql)  # still a throwaway name
         self.assertIn('macpool-', sql)
+
+    def test_an_id_that_stays_live_is_a_failure(self):
+        done = self.run_cleanup('--id', ID1, '--id', ID2, '--apply', STUB_PSQL_OUT=f'{ID1} kept:{ID2}')
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn(f'revoked 1 machine(s): {ID1}', done.stdout)
+        self.assertIn(f'NOT revoked, still live: {ID2}', done.stderr)
+        self.assertIn("SELECT 'kept:' || id FROM user_machines", self.env.sql.read_text())
+
+    def test_an_id_already_gone_is_not_a_failure(self):
+        done = self.run_cleanup('--id', ID1, '--apply')
+        self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_pool_runner_names_are_throwaway(self):
         self.run_cleanup('--all', '--pool', 'linuxpool', '--slot', '1')

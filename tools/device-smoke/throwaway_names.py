@@ -2,7 +2,7 @@
 import re
 
 # Run prefixes the check scripts give their throwaway machines (`<prefix><digits-or-words>`).
-PREFIXES = ('test-', 'sh-r1-', 'sh-slr-', 'sh-probe-', 'pbt1-')
+PREFIXES = ('test-', 'fx-', 'sh-r1-', 'sh-slr-', 'sh-probe-', 'pbt1-')
 # Older families that are regexes, not plain prefixes.
 PATTERNS = (r'worktree[a-z0-9]*-', r'luf14', r'winpool-', r'linuxpool-', r'macpool-', r'winrel', r'wina-', r'w[0-9]+-')
 
