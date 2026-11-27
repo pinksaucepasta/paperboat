@@ -126,6 +126,7 @@ type workflowAcceptanceHarness struct {
 	hasRequest           bool
 	deps                 tunnelDependencies
 	interruptFirstCreate bool
+	loseFirstCreateReply bool
 }
 
 func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
@@ -225,6 +226,10 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 		}
 		if h.createCalls > 1 && h.wrongReplayTunnel {
 			operation.ResourceID = "tun_wrong"
+		}
+		if h.loseFirstCreateReply && h.createCalls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable) // the server committed the create, but its reply is lost
+			return
 		}
 		if h.createCalls > 1 && h.completedReplay {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
@@ -597,4 +602,22 @@ func TestTunnelCreateWorkflowCanonicalReplayIdentity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// L44: a create whose first reply was lost is replayed as the finished tunnel with no operation; the
+// journal must record it and complete instead of failing as tunnel_create_partial on every retry.
+func TestTunnelCreateWorkflowCompletesReplayedCreateWithoutOperation(t *testing.T) {
+	h := newWorkflowAcceptanceHarness(t)
+	h.loseFirstCreateReply, h.completedReplay = true, true
+	out, errOut, err := h.execute(true, false)
+	if err != nil {
+		t.Fatalf("replayed create: %v stdout=%q stderr=%q", err, out, errOut)
+	}
+	if h.createCalls != 2 || !strings.Contains(out, `"tunnel_create"`) {
+		t.Fatalf("create calls=%d stdout=%q", h.createCalls, out)
+	}
+	if events := strings.Join(h.events.snapshot(), "|"); strings.Count(events, "workflow.complete") != 1 {
+		t.Fatalf("journal not completed: %s", events)
+	}
+	h.assertJournalLockReleased(t)
 }

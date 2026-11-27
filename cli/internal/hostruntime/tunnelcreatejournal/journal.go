@@ -152,13 +152,17 @@ func (s *Session) Snapshot() Journal {
 
 func (s *Session) RecordTunnel(ctx context.Context, tunnelID, operationID string) error {
 	return s.update(ctx, func(journal *Journal) error {
-		if !validToken(tunnelID) || !validToken(operationID) {
+		// A replayed create the server already finished returns the tunnel without an operation.
+		if !validToken(tunnelID) || operationID != "" && !validToken(operationID) {
 			return ErrInvalid
 		}
-		if journal.TunnelID != "" && (journal.TunnelID != tunnelID || journal.OperationID != operationID) {
+		if journal.TunnelID != "" && (journal.TunnelID != tunnelID || journal.OperationID != "" && journal.OperationID != operationID) {
 			return ErrRequestMismatch
 		}
-		journal.TunnelID, journal.OperationID = tunnelID, operationID
+		journal.TunnelID = tunnelID
+		if operationID != "" {
+			journal.OperationID = operationID
+		}
 		if journal.Stage == StagePrepared {
 			journal.Stage = StageTunnelCreated
 		}
@@ -301,7 +305,7 @@ func validateJournal(journal Journal) error {
 	if journal.ExpiresAt != nil && (journal.ExpiresAt.IsZero() || journal.ExpiresAt.Location() != time.UTC) {
 		return ErrInvalid
 	}
-	if (journal.TunnelID == "") != (journal.OperationID == "") || journal.TunnelID != "" && (!validToken(journal.TunnelID) || !validToken(journal.OperationID)) {
+	if journal.TunnelID == "" && journal.OperationID != "" || journal.TunnelID != "" && (!validToken(journal.TunnelID) || journal.OperationID != "" && !validToken(journal.OperationID)) {
 		return ErrInvalid
 	}
 	if journal.Stage == StagePrepared && journal.TunnelID != "" || journal.Stage != StagePrepared && journal.TunnelID == "" {

@@ -215,7 +215,7 @@ func tunnelCreateCommand() *cobra.Command {
 			// Completed mutations return the canonical tunnel, while running
 			// mutations return their operation. Recover the recorded operation
 			// without relying on a replay flag that is not part of the wire API.
-			if out.Operation.ID == "" {
+			if out.Operation.ID == "" && journal.OperationID != "" {
 				out.Operation, err = retryTunnelRead(ctx, func() (api.TunnelOperation, error) {
 					return client.GetTunnelOperationV1(ctx, journal.OperationID)
 				})
@@ -223,7 +223,9 @@ func tunnelCreateCommand() *cobra.Command {
 					return tunnelCreateJournalError(out.Tunnel.ID, "recovering tunnel operation", "pb tunnel show "+out.Tunnel.ID, err)
 				}
 			}
-			if out.Operation.ID != journal.OperationID || out.Operation.ResourceKind != "tunnel" || out.Operation.ResourceID != journal.TunnelID {
+			// With no operation in the reply or the journal, the create finished before its operation was
+			// recorded and the canonical tunnel is the result.
+			if out.Operation.ID != "" && (journal.OperationID != "" && out.Operation.ID != journal.OperationID || out.Operation.ResourceKind != "tunnel" || out.Operation.ResourceID != journal.TunnelID) {
 				return api.ErrUnsafeTunnelResponse
 			}
 			out.Replayed = true
