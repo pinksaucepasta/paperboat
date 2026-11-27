@@ -548,7 +548,7 @@ func expectedSocketRequestShutdownFailure(ctx context.Context, err error) (expec
 				leaves++
 				continue
 			}
-			if errno, ok := current.(syscall.Errno); ok && windowsPipeDisconnect(errno) {
+			if errno, ok := current.(syscall.Errno); current == winio.ErrFileClosed || ok && windowsPipeDisconnect(errno) {
 				sawPipeDisconnect = true
 				leaves++
 				continue
@@ -573,6 +573,12 @@ func expectedSocketRequestShutdownFailure(ctx context.Context, err error) (expec
 			leaves++
 			if current == contextErr {
 				sawContext = true
+				continue
+			}
+			// A stopping server closes its connections itself: go-winio then fails a reply still being written with
+			// its own closed-file error, not with a Windows pipe code.
+			if current == winio.ErrFileClosed {
+				sawPipeDisconnect = true
 				continue
 			}
 			errno, ok := current.(syscall.Errno)

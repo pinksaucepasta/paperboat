@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	winio "github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/sys/windows"
@@ -64,6 +65,23 @@ func TestWindowsNamedPipeReportsOperationalFailureAndRecovers(t *testing.T) {
 	}
 	if err := running.stop(); err != nil {
 		t.Fatalf("named-pipe server did not stop cleanly: %v", err)
+	}
+}
+
+// The reply a stopping server cannot write over the connection it just closed is part of the stop, not a failure.
+func TestWindowsReplyOnAConnectionTheStoppingServerClosedIsExpected(t *testing.T) {
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	reply := errors.Join(causedFailure{message: "hostd lifecycle request failed", cause: stopped.Err()},
+		&socketOperationFailure{message: "hostd lifecycle error response could not be written", cause: errors.Join(stopped.Err(), winio.ErrFileClosed)})
+	if !expectedSocketRequestShutdownFailure(stopped, reply) {
+		t.Fatal("a stop with a request in flight is reported as an operational failure")
+	}
+	if expectedSocketRequestShutdownFailure(context.Background(), reply) {
+		t.Fatal("a closed connection outside a stop must stay reported")
+	}
+	if expectedSocketRequestShutdownFailure(stopped, errors.Join(reply, os.ErrPermission)) {
+		t.Fatal("a real failure during a stop must stay reported")
 	}
 }
 
