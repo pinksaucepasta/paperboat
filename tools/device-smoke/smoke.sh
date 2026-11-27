@@ -214,6 +214,8 @@ device_py() {
 # ---------------------------------------------------------------- results
 declare -a ROWS=()
 FAILED=0
+BLOCKED_ROWS="|"  # rows the sign-in preflight already failed: their checks do not run
+declare -A SIGN_INS=()
 record() { # record ID STATUS SECONDS DETAIL
   local id=$1 status=$2 secs=$3 detail=${4:-} failure_code=${5:-}
   ROWS+=("$id|$status|$secs|${detail//|//}|$failure_code")
@@ -237,6 +239,7 @@ record_command_failure() {
 }
 
 skipped() {
+  [[ "$BLOCKED_ROWS" != *"|$1|"* ]] || return 0
   if [ -n "$ONLY_LIST" ] && [[ "$ONLY_IDS" != *"|$1|"* && "$ONLY_GROUPS" != *"|$1|"* ]]; then
     return 0
   fi
@@ -857,11 +860,11 @@ test_inbox_approval() {
   skipped inbox-approval && return
   local device id tag source_id phase output parent command success status t0
   if ! stage_terminal_fixtures "$TEAMMATE"; then
-    for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "could not stage teammate source"; done
+    for device in "${TLIST[@]}"; do skipped "inbox-approval:$device" || record "inbox-approval:$device" FAIL 0 "could not stage teammate source"; done
     return
   fi
   if ! source_id=$(on "$TEAMMATE" "python3 -c 'import sys;sys.path.insert(0,\"/tmp/$RUN_ID\");from install_lifecycle import registration;r=registration();print(r[\"machine_id\"],r[\"account_id\"])'") || ! [[ "$source_id" =~ ^[A-Za-z0-9_-]{3,128}\ [A-Za-z0-9_-]{3,128}$ ]]; then
-    for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "teammate source identity unavailable"; done
+    for device in "${TLIST[@]}"; do skipped "inbox-approval:$device" || record "inbox-approval:$device" FAIL 0 "teammate source identity unavailable"; done
     return
   fi
   for device in "${TLIST[@]}"; do
@@ -1263,19 +1266,98 @@ test_uninstall_fresh() {
 # on the device that runs them. The --teammate device (default: configured teammate) is the fixture team's independent teammate
 # and runs both checks in the member role; every other device of the run runs them in the owner role, a container
 # too when its teammate profile is signed in. A run therefore always covers both roles.
+team_check_devices() { # sets TEAM_DEVICES: where team-lifecycle and team-roles run
+  local device
+  TEAM_DEVICES=()
+  for device in "${TLIST[@]}"; do
+    # A container runs them only with its own signed-in teammate profile (teammate_profile.py).
+    ! ct_of "$device" >/dev/null || on "$device" 'test -s "$HOME/.local/state/paperboat/device-smoke/teammate/config/paperboat/config.json"' \
+      >/dev/null 2>&1 || continue
+    TEAM_DEVICES+=("$device")
+  done
+  [[ " ${TEAM_DEVICES[*]:-} " == *" $TEAMMATE "* ]] || TEAM_DEVICES+=("$TEAMMATE")
+}
+
 test_team_checks() {
-  local spec group script flags device devices
+  local spec group script flags
   for spec in "team-lifecycle team_lifecycle.py" "team-roles team_lifecycle.py --roles"; do
     set -- $spec; group=$1; script=$2; flags=${3:-}
-    devices=()
-    for device in "${TLIST[@]}"; do
-      # A container runs them only with its own signed-in teammate profile (teammate_profile.py).
-      ! ct_of "$device" >/dev/null || on "$device" 'test -s "$HOME/.local/state/paperboat/device-smoke/teammate/config/paperboat/config.json"' \
-        >/dev/null 2>&1 || continue
-      devices+=("$device")
+    skipped "$group" && continue
+    team_check_devices
+    test_device_application "$group" "$script" "$flags" "${TEAM_DEVICES[@]}"
+  done
+}
+
+# ---------------------------------------------------------------- sign-in preflight
+# profile_preflight.py: before any check, every profile a requested row needs answers a server call (`team list`; `auth
+# status` also says signed in for an expired session). A row that needs a signed-out profile is a FAIL row naming it and
+# the command that signs it in, and its check does not run. Nothing is signed in here.
+signin_probe() { # signin_probe DEVICE default|teammate: sets SIGNIN_DETAIL, empty when the server answered
+  local key="$1 $2" flags where out line=""
+  if [ -z "${SIGN_INS[$key]+x}" ]; then
+    flags="--machine $(printf %q "$1")"
+    if where=$(ct_of "$1"); then flags+=" --container $(printf %q "$where") --container-user $(printf %q "${CT_USER:-pbt}")"; fi
+    [ "$1" != "${WINDOWS_TARGET:-}" ] || flags+=" --windows-install-json $(printf %q "$WINDOWS_INSTALL_JSON")"
+    if stage_terminal_fixtures "$1" && out=$(device_py "$1" profile_preflight.py "$flags $(printf %q "$2")" </dev/null 2>&1); then
+      line=$(tr -d '\r' <<<"$out" | sed -n "s/^PROFILE $2 //p" | tail -n 1)
+    fi
+    case "$line" in
+      OK) SIGN_INS[$key]="" ;;
+      "") SIGN_INS[$key]="sign-in preflight: the $2 profile on $1 could not be checked (the device or its fixtures did not answer)" ;;
+      *) SIGN_INS[$key]=$line ;;
+    esac
+    [ -z "${SIGN_INS[$key]}" ] || echo "${SIGN_INS[$key]}" >&2
+  fi
+  SIGNIN_DETAIL=${SIGN_INS[$key]}
+}
+
+names_device() { # names_device DEVICE: the selection has a row on it (a whole run, or a whole group, has)
+  local selected=$ONLY_IDS other
+  if [ -n "$ONLY_CHECK" ]; then
+    [[ "$ONLY_CHECK" == *:* ]] || return 0
+    selected="|$ONLY_CHECK|"
+  elif [ -z "$ONLY_LIST" ]; then
+    return 0
+  fi
+  # exact ids and SOURCE-TARGET pairs: target names hold '-' themselves (linux, linux-peer)
+  [[ "$selected" != *":$1|"* ]] || return 0
+  for other in "${TLIST[@]}"; do
+    [[ "$selected" != *":$1-$other|"* && "$selected" != *":$other-$1|"* ]] || return 0
+  done
+  return 1
+}
+
+signin_preflight() {
+  local row id need group device problems rows=()
+  if ! skipped team-lifecycle || ! skipped team-roles; then
+    team_check_devices
+    for group in team-lifecycle team-roles; do
+      skipped "$group" && continue
+      for device in "${TEAM_DEVICES[@]}"; do # owner and member: the device's own account and its second profile
+        skipped "$group:$device" || rows+=("$group:$device|$device/default $device/teammate")
+      done
     done
-    [[ " ${devices[*]:-} " == *" $TEAMMATE "* ]] || devices+=("$TEAMMATE")
-    test_device_application "$group" "$script" "$flags" "${devices[@]}"
+  fi
+  if ! skipped inbox-approval; then
+    for device in "${TLIST[@]}"; do # the teammate's device sends to this one
+      skipped "inbox-approval:$device" || rows+=("inbox-approval:$device|$device/default $TEAMMATE/default")
+    done
+  fi
+  # Every target's own sign-in carries its other rows: they run, and this row says why they fail.
+  for device in "${TLIST[@]}"; do
+    names_device "$device" || continue
+    signin_probe "$device" default
+    [ -z "$SIGNIN_DETAIL" ] || record "sign-in:$device" FAIL 0 "$SIGNIN_DETAIL"
+  done
+  for row in "${rows[@]}"; do
+    id=${row%%|*} problems=""
+    for need in ${row#*|}; do
+      signin_probe "${need%/*}" "${need##*/}"
+      [ -z "$SIGNIN_DETAIL" ] || problems+="${problems:+ ; }$SIGNIN_DETAIL"
+    done
+    [ -n "$problems" ] || continue
+    record "$id" FAIL 0 "$problems"
+    BLOCKED_ROWS+="$id|"
   done
 }
 
@@ -1446,6 +1528,7 @@ fixture_ids=$(for id in config-team-default free-plan team-business recording-ke
 IFS=, read -r -a TLIST <<<"$TARGETS"
 echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARGETS"
 printf '%-28s %-5s %7s  %s\n' TEST RESULT TIME DETAIL
+signin_preflight
 
 for d in "${TLIST[@]}"; do check_device "$d"; done
 # windows-lifecycle: service stop/start/restart, crash recovery, keep-awake, exec (windows_lifecycle.py). The

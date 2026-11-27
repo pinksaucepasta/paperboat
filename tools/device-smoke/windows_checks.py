@@ -53,6 +53,7 @@ import urllib.request
 import dev_targets
 import install_path
 import preflight_fixtures
+import profile_preflight
 import winhost
 
 HERE = Path(__file__).resolve().parent
@@ -240,6 +241,61 @@ def missing(needs, args):
         elif not os.environ.get(need) and not (need == 'REVOKE_CLIENT_CMD' and os.environ.get('REVOKE_CLIENT_HOST')):
             gaps.append(need)
     return gaps
+
+
+# Checks that run without the device account's sign-in: account-login signs in itself, cli-budget calls no server.
+NO_SIGN_IN = ('account-login', 'cli-budget')
+
+
+def profiles_needed(check, argv, args):
+    """The sign-ins a check uses: the device's own and second profile, and a Unix fixture named by one of the runner's
+    --owner-cmd/--member-cmd options (its option name). policy-token's --token-cmd machine signs itself in."""
+    # --teammate (env-vault-lifecycle) runs every pb command as the second profile.
+    needed = [] if check in NO_SIGN_IN or '--teammate' in argv else [profile_preflight.DEFAULT]
+    if (winhost.WINDOWS_TEAMMATE in argv or '{teammate_account}' in argv or '--teammate' in argv
+            or argv[0] in ('team_lifecycle.py', 'team_machines.py')):
+        needed.append(profile_preflight.TEAMMATE)
+    # `windows` / `windows-teammate` name the device's own two profiles (above), not a Unix fixture.
+    if check == 'policy-team' and not winhost.is_side(args.owner_cmd):
+        needed.append('--owner-cmd')
+    if check == 'team-two-account' and args.member_cmd and not winhost.is_side(args.member_cmd):
+        needed.append('--member-cmd')
+    return needed
+
+
+def fixture_probe(option, args):
+    """One probe of a Unix fixture's default profile, run the way its check runs pb there."""
+    if option == '--owner-cmd':
+        import policy_team
+        code, stdout, _ = policy_team.sh(args.owner_cmd, args.owner_pb, list(profile_preflight.PROBE), timeout=60)
+        return profile_preflight.answer(code, stdout)
+    import team_two_account
+    prefix = shlex.split(args.member_cmd)
+    command = ' '.join([team_two_account.PB, *profile_preflight.PROBE])
+    done = subprocess.run(prefix + ['bash', '-lc', shlex.quote(command) if prefix[0] == 'ssh' else command],
+                          capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    return profile_preflight.answer(done.returncode, done.stdout)
+
+
+def sign_in_preflight(planned, args, pb_exe):
+    """{check: FAIL detail} for every planned (id, argv) whose sign-ins the server does not answer. Each sign-in is
+    probed once, all before the first check; nothing is signed in here."""
+    needs = {check: profiles_needed(check, argv, args) for check, argv in planned}
+    found = {}
+    for need in dict.fromkeys(need for names in needs.values() for need in names):
+        if need.startswith('--'):
+            machine = 'the %s machine' % need
+            reason = profile_preflight.problem(lambda: fixture_probe(need, args))
+            command = 'run `pb login` on the machine that %s reaches' % need
+        else:
+            machine = args.machine
+            reason = profile_preflight.problem(lambda: profile_preflight.probe(need))
+            command = profile_preflight.signin_command(need, machine, pb_exe, str(args.install_json))
+        if reason is not None:
+            found[need] = profile_preflight.detail('default' if need.startswith('--') else need, machine, reason, command)
+            print(found[need], file=sys.stderr, flush=True)
+    blocked = {check: ' | '.join(found[need] for need in names if need in found) for check, names in needs.items()}
+    return {check: text for check, text in blocked.items() if text}
 
 
 def verdict(returncode, stdout):
@@ -510,20 +566,23 @@ def main():
     if not winhost.RemotePath(device, pb_exe).exists():  # a stale install receipt otherwise fails every check with "cannot find the file"
         parser.error('%s does not exist on the device: --install-json is stale; install the build again and pass its receipt' % pb_exe)
     results = []
-    for check, (argv, needs) in sorted(table.items()):
-        if only and check not in only:
-            continue
-        gaps = missing(needs, args)
+    selected = [(check, argv, missing(needs, args)) for check, (argv, needs) in sorted(table.items())
+                if not only or check in only]
+    # Before any check: a signed-out profile fails the checks that use it, with the command that signs it in.
+    signed_out = sign_in_preflight([(check, argv) for check, argv, gaps in selected if not gaps], args, pb_exe)
+    for check, argv, gaps in selected:
         if gaps:
             outcome = ('SKIP', 0, 'needs ' + ', '.join(gaps))
+        elif check in signed_out:
+            outcome = ('FAIL', 0, signed_out[check])
         else:
             try:
                 outcome = run_check(check, argv, args, device)
-            except (subprocess.SubprocessError, winhost.DeviceError, OSError, ValueError, KeyError) as error:
-                outcome = ('FAIL', 0, str(error)[:300])
+            except Exception as error:  # noqa: BLE001 every check ends in its row; a traceback would lose all of them
+                outcome = ('FAIL', 0, ('%s: %s' % (type(error).__name__, error))[:300])
         results.append({'id': check + ':' + args.machine, 'status': outcome[0], 'seconds': outcome[1], 'detail': outcome[2]})
         print('%-34s %-5s %5ss  %s' % (check + ':' + args.machine, outcome[0], outcome[1],
-                                       outcome[2][:100 if outcome[0] == 'PASS' else 400].replace('\n', ' ')), flush=True)
+                                       outcome[2][:100 if outcome[0] == 'PASS' else 900].replace('\n', ' ')), flush=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     path = results_dir(__file__) / ('windows-%s.json' % stamp)
     path.parent.mkdir(exist_ok=True)

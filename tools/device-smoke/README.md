@@ -63,6 +63,15 @@ portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 tes
 When a console session has expired, preflight says which one: sign it in again with `console_session.mjs` (operator) or
 with the credentials in `free-account/account.json` (Free account).
 
+## Sign-in preflight
+
+Before the first check, `windows_checks.py` and `smoke.sh` ask the server through every CLI profile the selected rows use
+(`pb team list`, `profile_preflight.py`; `auth status` also says signed in for an expired session): the device's own
+sign-in and, for the team checks, its second profile, plus the Unix fixtures named by `--owner-cmd`/`--member-cmd`. A row
+whose profile is signed out is a FAIL row naming the profile and the command that signs it in, and its check does not run;
+the other rows run. `smoke.sh` also writes a `sign-in:<device>` FAIL row for a target whose own sign-in is out. The
+preflight never signs in, mints or copies a token.
+
 ## Console rows (browser)
 
 `fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail|console-recording-replay` (called by `smoke.sh`,
