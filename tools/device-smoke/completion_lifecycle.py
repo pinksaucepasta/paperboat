@@ -66,7 +66,7 @@ def unix_shells_accept(scripts):
         shell = next((path for path in ('/opt/homebrew/bin/bash', '/usr/local/bin/bash') if os.access(path, os.X_OK)), 'bash')
         loader = ('for f in /usr/share/bash-completion/bash_completion /opt/homebrew/etc/profile.d/bash_completion.sh '
                   '/usr/local/etc/profile.d/bash_completion.sh; do [ ! -r "$f" ] || { . "$f"; break; }; done; '
-                  'source "$1"; complete -p pb')
+                  'source "$1" && complete -p pb')
         registered = subprocess.run([shell, '-c', loader, 'x', str(bash)], capture_output=True, text=True, timeout=30)
         if registered.returncode or ' pb' not in registered.stdout:
             raise RuntimeError('bash did not register the pb completion')

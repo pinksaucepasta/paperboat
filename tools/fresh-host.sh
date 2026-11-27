@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus libpam-systemd ca-certificates curl sudo iproute2 iptables nftables kmod procps python3 \\
  && rm -rf /var/lib/apt/lists/* \\
  && systemctl mask getty.target console-getty.service systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket systemd-modules-load.service sys-kernel-config.mount sys-kernel-debug.mount sys-kernel-tracing.mount \\
- && useradd -m -u 1001 -s /bin/bash tester && echo 'tester ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/tester
+ && rm -f /usr/sbin/policy-rc.d && useradd -m -u 1001 -s /bin/bash tester && echo 'tester ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/tester
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
 DOCKERFILE

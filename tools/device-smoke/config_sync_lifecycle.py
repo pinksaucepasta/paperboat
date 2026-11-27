@@ -426,8 +426,13 @@ def main():
             ssh_error = str(error)
 
         def connect_all():
+            # `connect` reads the repository first: the token-protected HTTP one and SSH need their profile there.
+            profiles = {'http': profile}
+            if ssh_error is None:
+                profiles['ssh'] = json.dumps({'transport': 'ssh', 'auth': 'ssh', 'ssh_key_file': str(ssh_key), 'known_hosts_file': str(known_hosts), 'username': getpass.getuser()})
             for name, url in (('local', local_url), ('http', http_url)) + ((('ssh', ssh_url),) if ssh_error is None else ()):
-                data = pb_json('config', 'repository', 'connect', url, '--name', 'lifecycle-' + name)
+                extra = ('--credentials-file', '-') if name in profiles else ()
+                data = pb_json('config', 'repository', 'connect', url, '--name', 'lifecycle-' + name, *extra, stdin=profiles.get(name))
                 repositories[name] = data['repository']['id']
                 assert data['repository']['external_ref'] == url, data
             listed = pb_json('config', 'repository', 'list')['repositories']

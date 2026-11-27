@@ -78,13 +78,13 @@ def key_status(team):
 def token_sign_in():
     before = own_identity()
     name = 'covf-signin-' + uuid.uuid4().hex[:8]
-    created = ok('api-token', 'create', name, '--expires', '1d', '--json')
-    found = re.search(r'"(?:secret|token)"\s*:\s*"([^"]{20,})"', created)
-    assert found, 'api-token create --json carries no secret'
-    token = found[1]
-    SECRET.append(token)
     cells = []
     try:
+        created = ok('api-token', 'create', name, '--expires', '1d', '--json')
+        found = re.search(r'"(?:secret|token)"\s*:\s*"([^"]{20,})"', created)
+        assert found, 'api-token create --json carries no secret'
+        token = found[1]
+        SECRET.append(token)
         for label, arguments, stdin in (('stdin', ('login', '--api-token', '-'), token + '\n'),
                                         ('argument', ('login', '--api-token', token), '')):
             with tempfile.TemporaryDirectory(prefix='pb-signin-extras-') as home:

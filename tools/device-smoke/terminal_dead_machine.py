@@ -4,8 +4,8 @@
 TARGET is a throwaway machine of the same account, given by name and exact machine ID; this check
 revokes it, so it refuses any name without a throwaway prefix (smoke-, test-, test-) or whose name
 and ID do not match `pb machine list`. Real devices (Linux test machine, macmini, Windows test machine) can never be passed. It opens a terminal on TARGET, detaches, revokes TARGET by ID, then expects:
-- `pb session close` and `pb session delete` on that terminal to finish (exit 0, or a typed refusal
-  naming the revoked machine) within 30 s each, never hang or ask to retry;
+- `pb session close` and `pb session delete` on that terminal to finish (exit 0, or a refusal that is not retryable
+  and says the machine is revoked, unavailable or no longer on the account) within 30 s each, never hang;
 - the terminal to stop being listed as open or closing within 60 s;
 - no terminal operation for it to stay pending (seen as a terminal stuck in `closing`).
 Usage: terminal_dead_machine.py TARGET MACHINE_ID
@@ -105,9 +105,11 @@ def main():
                 receipt = parse(out)
             failure = receipt.get('error') or {}
             finished = receipt.get('ok') is True or (failure.get('retryable') is False and re.search(
-                r'revoked|machine_unavailable|not_found', str(failure.get('code', '')) + ' ' + str(failure.get('message', '')), re.I))
+                # a revoked machine leaves the account's list, so pb may refuse at the name: also a finished, typed end
+                r'revoked|machine_unavailable|not_found|No machine has that name or ID', str(failure.get('code', '')) + ' ' + str(failure.get('message', '')), re.I))
             row(f'F3-20 session {action} on a revoked machine finishes', bool(finished),
-                f'exit {code} in {time.monotonic() - t0:.1f} s, ok={receipt.get("ok")}, code={failure.get("code")}')
+                f'exit {code} in {time.monotonic() - t0:.1f} s, ok={receipt.get("ok")}, code={failure.get("code")}, '
+                f'retryable={failure.get("retryable")}, message={str(failure.get("message"))[:240]!r}')
         except subprocess.TimeoutExpired:
             row(f'F3-20 session {action} on a revoked machine finishes', False, 'hung for 30 s')
     deadline = time.monotonic() + 60
