@@ -39,7 +39,8 @@ CHECKS = ('env-vault-reset-locked:container',
           'env-vault-reset-locked:windows',
           'env-vault-reset-locked:macos',
           'pair-token-refusals:linux',
-          'held-web-ports:macos',)
+          'held-web-ports:macos',
+          'held-web-ports:windows',)
 BUSY = 'another program is using port 80'  # in both of pb doctor's busy-port titles
 DARWIN_ANCHOR = 'com.apple/000.paperboat-machineguard'
 GUARD = 'paperboat-machineguard.service'
