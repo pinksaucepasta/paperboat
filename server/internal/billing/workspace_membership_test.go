@@ -22,6 +22,8 @@ type membershipStripeFake struct {
 	// call is made without holding the team write lock.
 	probe  func() error
 	probed []error
+	// reductions records every ChangeSeats call.
+	reductions []billing.SeatChange
 }
 
 func (f *membershipStripeFake) runProbe() {
@@ -85,11 +87,15 @@ func (f *membershipStripeFake) ChangeSeats(_ context.Context, in billing.SeatCha
 	out := in.Preview
 	f.results[key] = out
 	f.updates[in.SubscriptionID]++
+	sub := f.subs[in.SubscriptionID]
 	if in.Quantity >= in.PreviousQuantity {
-		sub := f.subs[in.SubscriptionID]
 		sub.Quantity = in.Quantity
-		f.subs[in.SubscriptionID] = sub
+		sub.ScheduleID = "" // released
+	} else {
+		sub.ScheduleID = "sched_" + in.SubscriptionID
 	}
+	f.subs[in.SubscriptionID] = sub
+	f.reductions = append(f.reductions, in)
 	if f.fail[in.SubscriptionID] {
 		delete(f.fail, in.SubscriptionID)
 		return billing.SeatPreview{}, context.DeadlineExceeded

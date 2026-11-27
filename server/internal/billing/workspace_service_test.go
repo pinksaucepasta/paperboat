@@ -23,6 +23,18 @@ type workspaceStripeFake struct {
 	// lockProbe, when set, runs inside each provider read: it fails if the caller holds a database lock.
 	lockProbe    func() error
 	lockProbeErr error
+	// expirable lets ExpireCheckoutSession end an open session; expired lists the sessions it was asked to end.
+	expirable bool
+	expired   []string
+}
+
+func (f *workspaceStripeFake) ExpireCheckoutSession(_ context.Context, id string) error {
+	f.expired = append(f.expired, id)
+	if !f.expirable || (f.checkoutState != "" && f.checkoutState != "open") {
+		return errors.New("stripe refused to expire the session")
+	}
+	f.checkoutState = "expired"
+	return nil
 }
 
 func (f *workspaceStripeFake) CreateCustomer(_ context.Context, workspaceID, email, key string) (string, error) {
@@ -434,5 +446,37 @@ func TestWorkspaceServiceNilProviderIsExplicit(t *testing.T) {
 	}
 	if _, err := s.Portal(context.Background(), "u", "", "k", "r"); err != billing.ErrStripeUnavailable {
 		t.Fatalf("portal error=%v", err)
+	}
+}
+
+// L38: an abandoned, still-open checkout no longer blocks a new one for a day; it is expired first. One that
+// completed meanwhile still blocks, so no second subscription is started.
+func TestAbandonedCheckoutIsExpiredForNewCheckout(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	x := fmt.Sprint(time.Now().UnixNano())
+	user, code := "usr_abandon_"+x, "abandon-plan-"+x
+	insertUser(t, store, user, user+"@example.test")
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_products(id,code,provider,provider_product_id,provider_price_id,catalog_type,catalog_ref,active) VALUES($1,$2,'stripe',$3,$4,'personal_subscription','{}',true)`, "bp_abandon_"+x, code, "prod_"+x, "price_"+x); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspace_operations WHERE workspace_id=$1`, "personal:"+user)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspaces WHERE id=$1`, "personal:"+user)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_products WHERE code=$1`, code)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, user)
+	})
+	f := &workspaceStripeFake{expirable: true}
+	s := billing.NewWorkspaceService(store, f, "workspace-test-key")
+	ok, cancel := "https://example.test/success", "https://example.test/cancel"
+	if _, err := s.Checkout(ctx, user, user+"@example.test", "", code, "first-"+x, ok, cancel, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Checkout(ctx, user, user+"@example.test", "", code, "second-"+x, ok, cancel, 1); err != nil || f.checkouts != 2 || len(f.expired) != 1 || f.expired[0] != "cs_test" {
+		t.Fatalf("new checkout after an abandoned one: err=%v checkouts=%d expired=%v", err, f.checkouts, f.expired)
+	}
+	f.checkoutState = "complete"
+	if _, err := s.Checkout(ctx, user, user+"@example.test", "", code, "third-"+x, ok, cancel, 1); !errors.Is(err, billing.ErrCheckoutPending) || f.checkouts != 2 {
+		t.Fatalf("checkout after a completed one: err=%v checkouts=%d", err, f.checkouts)
 	}
 }

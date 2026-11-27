@@ -68,6 +68,8 @@ type StripeSubscription struct {
 	RenewalInvoiceID          string
 	RenewalFailureAt          time.Time
 	CancelAtPeriodEnd         bool
+	// ScheduleID is the subscription schedule that manages the subscription, empty without one.
+	ScheduleID string
 }
 
 type HTTPStripeClient struct {
@@ -122,6 +124,20 @@ func (c HTTPStripeClient) CreateSubscriptionCheckout(ctx context.Context, in Str
 		return CheckoutSession{}, errors.New("invalid stripe checkout response")
 	}
 	return CheckoutSession{URL: out.URL, ProviderSessionID: out.ID, ProviderCustomerID: out.Customer}, nil
+}
+
+// ExpireCheckoutSession ends an open Checkout session; Stripe refuses one that is already complete or expired.
+func (c HTTPStripeClient) ExpireCheckoutSession(ctx context.Context, id string) error {
+	var out struct {
+		ID, Status string
+	}
+	if err := c.do(ctx, http.MethodPost, "/v1/checkout/sessions/"+url.PathEscape(id)+"/expire", "", url.Values{}, &out); err != nil {
+		return err
+	}
+	if out.ID != id || out.Status != "expired" {
+		return ErrProviderOutcomeUnknown
+	}
+	return nil
 }
 
 func (c HTTPStripeClient) GetCheckoutSession(ctx context.Context, id string) (StripeCheckoutState, error) {
@@ -259,7 +275,9 @@ type stripeSubscriptionResponse struct {
 	Livemode             bool  `json:"livemode"`
 	CancelAtPeriodEnd    bool  `json:"cancel_at_period_end"`
 	CancelAt             int64 `json:"cancel_at"`
-	Metadata             struct {
+	// Schedule is the schedule's id, or the schedule object when expanded, or null.
+	Schedule json.RawMessage `json:"schedule"`
+	Metadata struct {
 		PaperboatCheckoutOperation string `json:"paperboat_checkout_operation"`
 	} `json:"metadata"`
 	Items struct {
@@ -308,6 +326,20 @@ func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 		Quantity: i.Quantity, CancelAtPeriodEnd: r.CancelAtPeriodEnd || r.cancelsAtCurrentPeriodEnd(i.CurrentPeriodEnd),
 		PeriodStart: time.Unix(i.CurrentPeriodStart, 0).UTC(),
 		PeriodEnd:   time.Unix(i.CurrentPeriodEnd, 0).UTC(),
+	}
+	if len(r.Schedule) > 0 && string(r.Schedule) != "null" {
+		var id string
+		if json.Unmarshal(r.Schedule, &id) != nil {
+			var object struct{ ID string }
+			if json.Unmarshal(r.Schedule, &object) != nil {
+				return StripeSubscription{}, errors.New("invalid stripe subscription response")
+			}
+			id = object.ID
+		}
+		if id == "" {
+			return StripeSubscription{}, errors.New("invalid stripe subscription response")
+		}
+		result.ScheduleID = id
 	}
 	if len(r.Items.Data) == 2 {
 		if addon.ID == "" || addon.Price.ID == "" || addon.Quantity != 1 {

@@ -57,6 +57,7 @@ function PreviewLine({ preview, pending }: { preview?: ChangePreview; pending: b
  */
 export function Seats({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
   const bought = billing.seats_bought
+  const time = useTimeFormat()
   const used = billing.seats_used ?? billing.members
   const [quantity, setQuantity] = useShellState("billing/billing-sections.tsx:quantity", bought)
   const refresh = useRefreshBilling(workspace)
@@ -117,6 +118,11 @@ export function Seats({ workspace, billing }: { workspace: Workspace; billing: B
           </span>
         )}
       </div>
+      {!changed && billing.scheduled_seats != null && billing.scheduled_seats_at && (
+        <p className="py-2 text-sm text-muted-foreground">
+          {`${bought} ${bought === 1 ? "seat" : "seats"} until ${time.date(billing.scheduled_seats_at, "date")}, then ${billing.scheduled_seats}${billing.cancel_at_period_end ? " if you keep the plan" : ""}.`}
+        </p>
+      )}
       {quantity < bought && changed && (
         <p className="py-2 text-sm text-muted-foreground">Removed seats stay paid until the billing date.</p>
       )}

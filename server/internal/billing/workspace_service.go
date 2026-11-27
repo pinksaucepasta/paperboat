@@ -546,6 +546,9 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 	if err != nil {
 		return false, err
 	}
+	if initial, err = s.reapplySeatReductionOnResume(ctx, initial); err != nil {
+		return false, err
+	}
 	processed := false
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var workspaceID string
@@ -652,7 +655,8 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 			return err
 		}
 		var previousProduct, previousState string
-		if err = tx.QueryRow(ctx, `SELECT coalesce(product_code,''),state FROM billing_workspaces WHERE id=$1`, workspaceID).Scan(&previousProduct, &previousState); err != nil {
+		var wasCancelling bool
+		if err = tx.QueryRow(ctx, `SELECT coalesce(product_code,''),state,cancel_at_period_end FROM billing_workspaces WHERE id=$1`, workspaceID).Scan(&previousProduct, &previousState, &wasCancelling); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5='active' THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,grant_until=NULL,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
@@ -673,9 +677,12 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1 AND scheduled_quantity_at<=$2 AND quantity=scheduled_quantity`, workspaceID, current.PeriodStart); err != nil {
 			return err
 		}
-		// A cancelling subscription never renews, so no scheduled seat reduction
-		// can take effect; Stripe releases the schedule when the cancel is set.
-		if current.CancelAtPeriodEnd {
+		// A scheduled seat reduction is kept while the subscription is cancelling: Stripe releases the schedule
+		// on cancel, and if the customer keeps the plan reapplySeatReductionOnResume schedules it again (L37).
+		// It is dropped once it can no longer apply: the subscription ended or was replaced, or the cancel was
+		// lifted without the reduction being scheduled again (the team uses more seats than it leaves).
+		if newSubscription || current.Status == "canceled" || current.Status == "incomplete_expired" ||
+			(!current.CancelAtPeriodEnd && current.ScheduleID == "" && wasCancelling) {
 			if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1`, workspaceID); err != nil {
 				return err
 			}
@@ -718,7 +725,20 @@ func (s *WorkspaceService) priorCheckoutState(ctx context.Context, account, team
 		return checkoutProviderState{}, err
 	}
 	out.session, out.err = s.stripe.GetCheckoutSession(ctx, prior.ProviderSessionID)
+	// An abandoned checkout (L38) stays open on Stripe for a day and would block every new checkout of the
+	// workspace. Expire our own recorded session first; if it completed meanwhile Stripe refuses, and the
+	// re-read reports the completion, which still blocks a second subscription.
+	if expirer, ok := s.stripe.(checkoutSessionExpirer); ok && out.err == nil && out.session.Status == "open" &&
+		out.session.ID == prior.ProviderSessionID && out.session.CustomerID == prior.ProviderCustomerID && out.session.CheckoutOperation == out.key {
+		_ = expirer.ExpireCheckoutSession(ctx, prior.ProviderSessionID)
+		out.session, out.err = s.stripe.GetCheckoutSession(ctx, prior.ProviderSessionID)
+	}
 	return out, nil
+}
+
+// checkoutSessionExpirer ends an open Stripe Checkout session so it can no longer be paid.
+type checkoutSessionExpirer interface {
+	ExpireCheckoutSession(ctx context.Context, id string) error
 }
 
 // subscriptionReconcileGates serialize reconciles of one subscription in this process (bounded: a
