@@ -27,6 +27,18 @@ Measured during the 22-26 Nov fix batch; none makes first use feel broken, so th
 - **Failed restore leaves a mixed set:** when the native-installation restore fails (a revoked machine whose previous carrier cannot start), `LifecycleManager.rollbackKeeping` (`cli/internal/hostruntime/service/transaction.go`, the `nativeInstallation.Restore` return) stops before the component restores, so the host service keeps the new build until the journal retry succeeds. The message says the restore did not finish (388e7b487 + cause-text fix). Idea: keep restoring components after a failed native restore and join the errors; test with an unrestorable `NativeInstallationState` and assert every component's `Restore` ran.
 - **Security review (week of 27 Nov):** elevated PowerShell on Windows loads modules via the user's PSModulePath; the machine guard takes its install dir from `%ProgramFiles%`. Proposed: clean the environment once where pb elevates.
 
+### From the smoke-gate triage (27 Nov): recorded, after launch
+User rule: before launch, fix what a user would notice or feel; the rest waits here.
+- **Path display:** `pb status` / the client can briefly show "direct" while traffic goes through the relay (seen on a self-hosted relay). The smoke's strict path check reports it.
+- **`pb relay list`** shows only the region ("eu Europe"), no node name: decide whether that is intended.
+- **Relay admission:** a relay logged a transient "relay admission refused ... fence generation 7" after a resume.
+- **Windows SSH setup time:** about 200 ms over budget (smoke `ssh-setup-time`: 1322 ms, allowed 1142 ms on 26 Nov).
+- **Update gate logging:** the hostd journal has no start/end line per update gate operation, only unclassified diagnostic events.
+- **Self-host enrolment (operator only):** send the edge domains and browser access in the claim (node reports inspect version 2, optional `edge_config`, server sends it only to v2). Open review finding: a stopped or restarted `pbh` can leave the runtime handoff behind, so an old tunnel runs unsupervised. Work kept unpushed on local branch `fix/enrol-claim-edge-config`.
+- **release.yml:** `always()` ignores cancellation in two jobs.
+- **Test hygiene:** a deploy test may still expect the removed postgres service (fix now only if CI fails); some device-smoke scripts still SSH to the old deployment-host setting; the paste tests append env overrides after the user's environment, so TERM/INPUTRC/ZDOTDIR can affect the bash/zsh subtests.
+- **`pb pair` on HTTP 429:** the CLI does not honor Retry-After or retry, and says "invalid machine bootstrap" (`local_io`) instead of rate limited (`cli/internal/hostruntime/bootstrap/bootstrap.go`).
+
 ## Before launch: decide
 
 ### DMCA designated agent — after launch (user 2026-11-19)
