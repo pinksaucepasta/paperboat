@@ -1141,10 +1141,14 @@ class ScheduledUpdateCheck(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout=json.dumps({'ok': True, 'data': {'overall': 'healthy', 'checks': [
                 {'code': 'machine_guard_version', 'status': 'pass'}]}}))
 
-    def run_check(self, world):
+    HEALTHY = {name: 'a' * 64 for name in ('cli', 'paperboat-hostd-u1000-g.service', 'paperboat-updated-u1000.service',
+                                            'paperboat-carrier-u1000-g.service', 'paperboat-machineguard.service', 'paperboatd')}
+
+    def run_check(self, world, parts=None):
         import update_scheduled
         clock = SimpleNamespace(now=world.now, sleep=world.sleep)
         with patch.object(update_scheduled, 'clock', clock), patch.object(update_scheduled.p, 'invoke', world.invoke), \
+                patch.object(update_scheduled.update_health, 'components', lambda run_shell=None: parts or self.HEALTHY), \
                 patch.object(update_scheduled.p, 'command_result', world.doctor), patch.object(update_scheduled, 'READY_SECONDS', 600), \
                 patch.object(sys, 'argv', ['update_scheduled.py', '--me', 'boxa', '--peer', 'boxb']):
             import io, contextlib
@@ -1152,6 +1156,11 @@ class ScheduledUpdateCheck(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 update_scheduled.main()
             return json.loads(out.getvalue().strip().splitlines()[-1])
+
+    def test_a_component_left_on_the_old_version_fails_the_row(self):
+        stale = dict(self.HEALTHY, **{'paperboat-machineguard.service': 'b' * 64})
+        with self.assertRaisesRegex(AssertionError, 'not on the installed pb.*machineguard'):
+            self.run_check(self.World(), parts=stale)
 
     def test_a_transfer_that_stalls_while_the_activation_is_pending_fails_the_row_and_restores_settings(self):
         world = self.World(stalls_inbound=True)

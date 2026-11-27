@@ -16,7 +16,7 @@ class FreshInstallWindow(unittest.TestCase):
             local = now.astimezone(zoneinfo.ZoneInfo(f.past_window_zone(now)))
             self.assertTrue(6 <= local.hour <= 21, (hour, local))
 
-    def fake(self, latest, version_after=None, sums_ok=True, local_hour='09', planned_ok=True):
+    def fake(self, latest, version_after=None, sums_ok=True, local_hour='09', planned_ok=True, guard='pass'):
         old, new = '2026.11.27.0', '2026.11.27.3'
         body = b'pb'
         digest = hashlib.sha256(body).hexdigest() if sums_ok else '0' * 64
@@ -30,6 +30,14 @@ class FreshInstallWindow(unittest.TestCase):
         versions = iter([old, version_after or old] + [version_after or old] * 100)
 
         def at(prefix, command, **kw):
+            if 'doctor --json' in command:
+                return mock.Mock(stdout=json.dumps({'ok': True, 'data': {'overall': 'healthy', 'checks': [{'code': 'machine_guard_version', 'status': guard}]}}))
+            if 'systemctl list-units' in command:
+                return mock.Mock(stdout=''.join('%s %s\n' % (n, 'a' * 64) for n in ('cli', 'paperboat-hostd-u1000-g.service', 'paperboat-updated-u1000.service', 'paperboat-carrier-u1000-g.service')))
+            if 'update status' in command:
+                planned = (datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Kolkata')) + datetime.timedelta(days=1)).replace(hour=4, minute=0, second=0, microsecond=0)
+                return mock.Mock(stdout=json.dumps({'ok': True, 'data': {'cli_version': old, 'runtime_version': old,
+                                 'next_maintenance_at': (planned if planned_ok else planned - datetime.timedelta(hours=5, minutes=30)).isoformat()}}))
             if command == 'date +%H':
                 return mock.Mock(stdout=local_hour + '\n')
             if '--version' in command:
@@ -85,6 +93,12 @@ class FreshInstallWindow(unittest.TestCase):
         ok, detail = f.fresh_install_window(self.fake('2026.11.27.3', planned_ok=False))
         self.assertFalse(ok)
         self.assertIn('did not take', detail)
+
+
+    def test_fails_when_the_fresh_install_leaves_the_guard_behind(self):
+        ok, detail = f.fresh_install_window(self.fake('2026.11.27.3', guard='warning'))
+        self.assertFalse(ok)
+        self.assertIn('machine_guard_version warning', detail)
 
 
 if __name__ == '__main__':

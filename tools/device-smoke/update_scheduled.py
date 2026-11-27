@@ -23,6 +23,7 @@ import tempfile
 import time
 
 import pairing_lifecycle as p
+import update_health
 import winhost
 
 PB = winhost.pb_path()
@@ -44,6 +45,18 @@ class Clock:
 
 
 clock = Clock()
+
+
+class ClockSeconds:
+    """update_health's clock (monotonic seconds, sleep) on this module's clock, so tests wait no real second."""
+    def monotonic(self):
+        return clock.now().timestamp()
+
+    def sleep(self, seconds):
+        clock.sleep(seconds)
+
+
+clock_seconds = ClockSeconds()
 READY_SECONDS = int(os.environ.get('PAPERBOAT_SMOKE_READY_SECONDS', '600'))
 # A new version is not 'activation complete' until its stability window (about 10 minutes) passes; settings are refused until then.
 ACTIVATION_SECONDS = int(os.environ.get('PAPERBOAT_SMOKE_ACTIVATION_SECONDS', '900'))
@@ -163,6 +176,8 @@ def scheduled_phase(lead, before, latest, me, peer):
         return (state['runtime_version'] == latest and state['activation_pending'] is False
                 and p.doctor_healthy(report) and (not guard or guard[0].get('status') == 'pass'))
     wait_until(clock.now() + datetime.timedelta(seconds=ACTIVATION_SECONDS), settled, 'doctor healthy, activation done and the guard on %s' % latest)
+    # every component (hostd, updater, carrier, guard, daemon; Windows services) on the new version, doctor healthy
+    update_health.settled(latest, READY_SECONDS, pb=PB, status=status, version=version, clock=clock_seconds)
     transfers(me, peer, 'after-activation')
     next_run = status()['next_maintenance_at']
     assert utc_stamp(next_run)[:16] > utc_minute(target + datetime.timedelta(hours=1)), \

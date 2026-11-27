@@ -24,6 +24,7 @@ import subprocess
 import tempfile
 
 import pairing_lifecycle as p
+import update_health
 import update_scheduled as u
 import winhost
 
@@ -135,6 +136,8 @@ def hold(installed, samples):
             same = p.command_result(PB, 'update', '--from', copy, timeout=900)
     assert same.returncode == 0, 'same-version pb update --from failed: %s' % (same.stdout + same.stderr)[-400:]
     relabelled.append(True)
+    health = update_health.settled(installed, u.READY_SECONDS, pb=PB, status=u.status, version=version, clock=u.clock_seconds)
+    samples.append({'at': u.clock.now().isoformat(timespec='seconds'), 'phase': 'healthy after the same-version --from', **health})
     stays_on(installed, window + datetime.timedelta(minutes=3), samples, 'custom after a same-version pb update --from')
     return text
 
@@ -157,6 +160,8 @@ def missed(installed, latest, samples):
     u.wait_until(woke + datetime.timedelta(seconds=u.READY_SECONDS + u.ACTIVATION_SECONDS),
                  lambda: version() == latest and not u.activation_pending(), 'the missed window to install ' + latest)
     samples.append({'at': u.clock.now().isoformat(timespec='seconds'), 'version': latest, 'phase': 'caught up'})
+    health = update_health.settled(latest, u.ACTIVATION_SECONDS, pb=PB, status=u.status, version=version, clock=u.clock_seconds)
+    samples.append({'at': u.clock.now().isoformat(timespec='seconds'), 'phase': 'healthy on ' + latest, **health})
     return text, int((u.clock.now() - woke).total_seconds())
 
 

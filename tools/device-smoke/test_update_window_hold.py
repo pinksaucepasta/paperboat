@@ -63,8 +63,16 @@ class Machine:
         return mock.Mock(returncode=0 if ok else 1, stdout='', stderr='' if ok else 'pb: open /tmp/pb-missing: no such file or directory')
 
 
-def run(machine, scenario, pid='42'):
+def run(machine, scenario, pid='42', health=None):
+    machine.health = []
+
+    def settled(expected, seconds, **kw):
+        machine.health.append(expected)
+        if health:
+            raise AssertionError(health)
+        return {'version': expected, 'components': ['hostd', 'updated', 'carrier'], 'doctor': 'healthy'}
     with mock.patch.object(update_scheduled, 'clock', machine), \
+            mock.patch.object(h.update_health, 'settled', settled), \
             mock.patch.object(h, 'updater_pid', lambda: pid), \
             mock.patch.object(update_scheduled.p, 'invoke', machine.invoke), \
             mock.patch.object(h.p, 'command_result', machine.command), \
@@ -112,6 +120,18 @@ class UpdateWindowHold(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, 'missed window'):
                 run(machine, 'missed')
 
+
+    def test_every_update_is_followed_by_a_health_check_on_its_version(self):
+        machine = Machine()
+        run(machine, 'hold')
+        self.assertEqual(machine.health, ['2026.11.27.0'])
+        machine = Machine()
+        run(machine, 'missed')
+        self.assertEqual(machine.health, ['2026.11.27.3'])
+
+    def test_a_component_on_the_old_version_after_the_catch_up_fails_the_row(self):
+        with self.assertRaisesRegex(AssertionError, 'guard on 2026.11.27.0'):
+            run(Machine(), 'missed', health='machine_guard_version warning: guard on 2026.11.27.0')
 
     def test_missed_window_fails_when_the_updater_was_restarted_while_frozen(self):
         with self.assertRaisesRegex(AssertionError, 'restarted while frozen'):

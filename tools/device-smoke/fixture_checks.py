@@ -416,9 +416,16 @@ def fresh_install_window(m):
         if seen != old:
             return False, 'installed %s %d s after a fresh install of %s in %s (local hour %d), outside the window' % (seen, round(time.monotonic() - began), old, zone, local_hour)
         time.sleep(60)
+    import update_health
+    try:  # healthy, with every component of the fresh install on A (the guard included)
+        health = update_health.settled(old, 300, doctor=lambda: json.loads(m.at(prefix, '%s doctor --json' % PB, timeout=180, check=False).stdout),
+                                       status=lambda: pb('update', 'status'), version=lambda: pb('--version')['version'],
+                                       run_shell=lambda script: m.at(prefix, script, timeout=180, check=False).stdout)
+    except AssertionError as error:
+        return False, str(error)
     status = pb('update', 'status')
     return True, 'fresh install of %s in %s (local hour %d, window 04:00 passed) stayed on it for %d s (%d samples) with %s Latest; next maintenance %s' % (
-        old, zone, local_hour, observe, samples, new, status.get('next_maintenance_at'))
+        old, zone, local_hour, observe, samples, new, status.get('next_maintenance_at')) + '; healthy, components on it: %s' % ', '.join(health['components'])
 
 
 CHECKS = {'free-plan': free_plan, 'config-team-default': config_team_default, 'team-business': team_business, 'recording-key-rotation': recording_key_rotation,
