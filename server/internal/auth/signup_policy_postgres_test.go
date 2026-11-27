@@ -228,8 +228,19 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	fresh := *s
 	fresh.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "fresh-unverified", Email: prefix + "fresh@example.test", EmailVerified: false}}
 	beforeFresh := countUsers(t)
-	if _, _, err := fresh.VerifyCallback(ctx, CallbackInput{Code: "fresh-unverified"}); !errors.As(err, new(*WorkOSVerificationError)) || countUsers(t) != beforeFresh {
-		t.Fatalf("unverified address created an account: %v", err)
+	for _, email := range []string{prefix + "fresh@example.test", prefix + "plainx@example.test"} {
+		if email == prefix+"plainx@example.test" {
+			// The base address is held only by a +tag account.
+			if _, _, err := login("plainx-tag", prefix+"plainx+tag@example.test"); err != nil {
+				t.Fatal(err)
+			}
+			beforeFresh = countUsers(t)
+		}
+		fresh.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "unverified-" + email, Email: email, EmailVerified: false}}
+		var verification *WorkOSVerificationError
+		if _, _, err := fresh.VerifyCallback(ctx, CallbackInput{Code: "fresh-unverified"}); !errors.As(err, &verification) || verification.Reason != "email_not_verified" || countUsers(t) != beforeFresh {
+			t.Fatalf("unverified %s: want email_not_verified and no account, got %v", email, err)
+		}
 	}
 	unverified := *s
 	unverified.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "unverified", Email: canonical, EmailVerified: false}}
