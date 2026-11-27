@@ -257,6 +257,8 @@ func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepth(t *testing.T) {
 	// (flaky under load). The carriers must stay held: keepalives here are rare.
 	carrier := testCarrierConfig(2)
 	carrier.KeepAliveInterval = time.Hour
+	// StreamOpenLimit also bounds each TLS handshake and request header here: the production value, not 1 s.
+	carrier.StreamOpenLimit = defaultOpenLimit
 	config := ServiceConfig{Carrier: carrier,
 		TCP: &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) { return identity, nil }}}
 	service, err := NewHTTPService(ctx, config)

@@ -196,7 +196,9 @@ func TestDataCarrierOverloadIsBounded(t *testing.T) {
 		t.Fatalf("full carrier refused after %s, want about %s", waited, streamPermitWait)
 	}
 	// A permit freed while the next open waits is used instead of refusing it.
-	go func() { time.Sleep(100 * time.Millisecond); _ = first.Close(); _ = accepted.Close() }()
+	// The connector's side closes first: closing the edge's frees the edge permit at once, and an open sent while
+	// the connector still counts the first stream is reset by it.
+	go func() { time.Sleep(100 * time.Millisecond); _ = accepted.Close(); _ = first.Close() }()
 	third, err := edge.OpenStream(context.Background(), testStreamOpen("route-a", "request-third"))
 	if err != nil {
 		t.Fatalf("open after a freed permit: %v", err)

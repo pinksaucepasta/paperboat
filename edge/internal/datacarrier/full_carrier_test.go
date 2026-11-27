@@ -15,7 +15,12 @@ import (
 // held open, the next open is refused with the bounded stream-limit error, and closing the streams returns every
 // permit.
 func TestOneCarrierHoldsTheDefaultStreamsAtOnce(t *testing.T) {
-	edge, connector := dataCarrierPair(t, testCarrierConfig(defaultMaximumStreams))
+	// The production time limits: the short ones of testCarrierConfig (1 s to write, a keepalive every 20 ms)
+	// close a stream or the whole carrier when a loaded runner schedules 16,384 streams late.
+	config := testCarrierConfig(defaultMaximumStreams)
+	config.KeepAliveInterval, config.ConnectionWriteLimit = defaultKeepAliveInterval, defaultWriteLimit
+	config.StreamOpenLimit, config.StreamCloseLimit = defaultOpenLimit, defaultCloseLimit
+	edge, connector := dataCarrierPair(t, config)
 	go func() {
 		for {
 			stream, _, err := connector.AcceptStream(context.Background())
@@ -32,6 +37,10 @@ func TestOneCarrierHoldsTheDefaultStreamsAtOnce(t *testing.T) {
 			}()
 		}
 	}()
+	// An opened stream lives only as long as this context, so it covers every open, every round trip and the
+	// time all streams are held. Its bound only has to outlast a loaded -race runner (over 20 s there).
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
 	release := make(chan struct{})
 	var open, done sync.WaitGroup
 	errs := make(chan error, defaultMaximumStreams)
@@ -40,24 +49,23 @@ func TestOneCarrierHoldsTheDefaultStreamsAtOnce(t *testing.T) {
 		done.Add(1)
 		go func() {
 			defer done.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
 			stream, err := edge.OpenStream(ctx, testStreamOpen("route-a", fmt.Sprintf("request-%d", i)))
+			// Each failure is sent before open.Done: errs is closed as soon as open.Wait returns.
 			if err != nil {
-				open.Done()
 				errs <- fmt.Errorf("stream %d: %w", i, err)
+				open.Done()
 				return
 			}
 			defer stream.Close()
 			reply := make([]byte, 4)
 			if err := writeAll(stream, []byte("ping")); err != nil {
-				open.Done()
 				errs <- fmt.Errorf("stream %d write: %w", i, err)
+				open.Done()
 				return
 			}
 			if _, err := io.ReadFull(stream, reply); err != nil || string(reply) != "pong" {
-				open.Done()
 				errs <- fmt.Errorf("stream %d round trip: %q %v", i, reply, err)
+				open.Done()
 				return
 			}
 			open.Done()
