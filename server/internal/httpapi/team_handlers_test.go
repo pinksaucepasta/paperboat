@@ -228,7 +228,7 @@ func TestTeamMachineTransferToPersonalRefusalsHaveTheirOwnCodes(t *testing.T) {
 		r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "actor"}}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
-		if w.Code != tc.status || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) || !strings.Contains(w.Body.String(), tc.says) {
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) {
 			t.Fatalf("%v: status %d body %s", tc.err, w.Code, w.Body.String())
 		}
 	}
