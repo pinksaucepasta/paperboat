@@ -8,7 +8,6 @@ package freeze
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -75,24 +74,46 @@ func (g *Gap) Stalled(now time.Time, limit time.Duration) bool {
 	return stalled
 }
 
+// timeoutContext keeps its own Done channel. Embedding the inner cancelCtx's channel (11-19, b96867cd3) let Go
+// attach derived contexts straight to that cancelCtx, so a child of an expired window reported Canceled, not
+// DeadlineExceeded: every idle terminal's output wait through the workload bridge then failed as an owner fault at
+// its 25 s request deadline and the browser reconnected. With its own channel, children watch Done and copy Err
+// and Cause, as they do for context.WithTimeout.
 type timeoutContext struct {
-	context.Context
-	fired atomic.Bool
+	context.Context // inner: carries values, the parent's deadline and the cause (context.Cause finds it)
+	cancelInner     context.CancelCauseFunc
+	done            chan struct{}
+	mu              sync.Mutex
+	err             error
 }
 
+func (c *timeoutContext) Done() <-chan struct{} { return c.done }
+
 func (c *timeoutContext) Err() error {
-	if err := c.Context.Err(); err != nil && c.fired.Load() {
-		return context.DeadlineExceeded
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+// finish ends the context once: the cause is recorded on the inner context before Done closes, so a child that
+// wakes on Done reads the right Err and Cause.
+func (c *timeoutContext) finish(err, cause error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return
 	}
-	return c.Context.Err()
+	c.cancelInner(cause)
+	c.err = err
+	close(c.done)
 }
 
 // WithTimeout is context.WithTimeout whose clock restarts when the process was frozen for longer than d
 // during the window.
 func WithTimeout(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
 	start()
-	inner, cancel := context.WithCancel(parent)
-	ctx := &timeoutContext{Context: inner}
+	inner, cancelInner := context.WithCancelCause(parent)
+	ctx := &timeoutContext{Context: inner, cancelInner: cancelInner, done: make(chan struct{})}
 	begin := time.Now()
 	var mu sync.Mutex
 	var timer *time.Timer
@@ -104,14 +125,19 @@ func WithTimeout(parent context.Context, d time.Duration) (context.Context, cont
 			timer.Reset(d)
 			return
 		}
-		ctx.fired.Store(true)
-		cancel()
+		ctx.finish(context.DeadlineExceeded, context.DeadlineExceeded)
 	})
+	// The parent ending ends this context with the parent's error; the cause stays the parent's.
+	stopParent := context.AfterFunc(inner, func() { ctx.finish(parent.Err(), context.Cause(parent)) })
+	if parent.Err() != nil {
+		ctx.finish(parent.Err(), context.Cause(parent))
+	}
 	return ctx, func() {
 		mu.Lock()
 		timer.Stop()
 		mu.Unlock()
-		cancel()
+		stopParent()
+		ctx.finish(context.Canceled, context.Canceled)
 	}
 }
 

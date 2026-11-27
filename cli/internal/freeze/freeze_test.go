@@ -93,3 +93,51 @@ func TestStalledCountsAStallEndingAtTheWindowStart(t *testing.T) {
 		t.Fatal("a stall ending at the window's first clock reading was not counted")
 	}
 }
+
+// A child of a freeze context must see what a child of context.WithTimeout sees: the workload bridge's output wait
+// runs on a derived context and is polled again only on DeadlineExceeded. Reporting Canceled dropped every idle
+// web terminal at its 25 s request deadline.
+func TestChildrenOfAFreezeContextSeeItsDeadlineAndCancel(t *testing.T) {
+	wait := func(ctx context.Context) {
+		t.Helper()
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+			t.Fatal("child never ended")
+		}
+	}
+	ctx, cancel := WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	child, childCancel := context.WithCancel(ctx)
+	defer childCancel()
+	grandchild, gcCancel := context.WithTimeout(child, time.Hour)
+	defer gcCancel()
+	wait(grandchild)
+	for name, c := range map[string]context.Context{"parent": ctx, "child": child, "grandchild": grandchild} {
+		if c.Err() != context.DeadlineExceeded || context.Cause(c) != context.DeadlineExceeded {
+			t.Errorf("expired %s: err=%v cause=%v, want DeadlineExceeded", name, c.Err(), context.Cause(c))
+		}
+	}
+
+	ctx2, cancel2 := WithTimeout(context.Background(), time.Hour)
+	child2, childCancel2 := context.WithCancel(ctx2)
+	defer childCancel2()
+	cancel2()
+	if ctx2.Err() != context.Canceled {
+		t.Fatalf("cancel is not synchronous: err=%v", ctx2.Err())
+	}
+	wait(child2)
+	if child2.Err() != context.Canceled || context.Cause(child2) != context.Canceled {
+		t.Errorf("canceled child: err=%v cause=%v", child2.Err(), context.Cause(child2))
+	}
+
+	parent, parentCancel := context.WithCancelCause(context.Background())
+	why := errors.New("why")
+	ctx3, cancel3 := WithTimeout(parent, time.Hour)
+	defer cancel3()
+	parentCancel(why)
+	wait(ctx3)
+	if ctx3.Err() != context.Canceled || context.Cause(ctx3) != why {
+		t.Errorf("parent canceled: err=%v cause=%v", ctx3.Err(), context.Cause(ctx3))
+	}
+}

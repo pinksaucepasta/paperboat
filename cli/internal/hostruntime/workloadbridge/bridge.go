@@ -223,7 +223,7 @@ func (s *Server) handler() http.Handler {
 			return
 		}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		requestTimeout := 25 * time.Second
+		requestTimeout := serverRequestTimeout
 		if len(parts) == 2 && parts[0] == "exec" && parts[1] == "begin_update" {
 			requestTimeout = hostdproto.MaximumUpdateGateDuration
 		}
@@ -419,6 +419,13 @@ func writeFrame(w http.ResponseWriter, frame []byte) {
 	_, _ = w.Write(frame)
 }
 
+// A request's deadline on the owner and on the worker that sends it. The worker waits longer so that a long poll's
+// server deadline reaches it as the owner's "deadline" answer, which it polls again. Variables for tests.
+var (
+	serverRequestTimeout = 25 * time.Second
+	clientRequestTimeout = 30 * time.Second
+)
+
 const frameContentType = "application/x-paperboat-exec-frame"
 
 type Client struct {
@@ -478,7 +485,7 @@ func (e ownerTransportFailure) Unwrap() []error { return []error{session.ErrOwne
 
 func (c *Client) callOnce(ctx context.Context, kind, op string, body json.RawMessage) (data json.RawMessage, resultErr error) {
 	callerCtx := ctx
-	requestTimeout := 30 * time.Second
+	requestTimeout := clientRequestTimeout
 	if kind == "exec" && op == "begin_update" {
 		requestTimeout = hostdproto.MaximumUpdateGateDuration
 	}
