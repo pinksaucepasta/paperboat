@@ -34,6 +34,7 @@ import {
   type MobileKey,
   type MobileModifiers,
 } from "@/lib/terminal/mobile-keys"
+import { HeldInput, holdsInput } from "@/lib/terminal/held-input"
 import { createLivenessProbe } from "@/lib/terminal/liveness-probe"
 import { endedMessage, nextReconnectDelay, reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
@@ -230,9 +231,8 @@ export function useTerminalConnection({
   const disposedRef = useRef(false)
   const busyRef = useRef(false)
   const startedOnceRef = useRef(false)
-  // Keys typed while the connection is down, sent once when it is back (bounded).
-  const queuedInputRef = useRef<Uint8Array[]>([])
-  const queuedBytesRef = useRef(0)
+  // Keys typed while the terminal is connecting or reconnecting, sent once when it attaches (bounded).
+  const [heldInput] = useState(() => new HeldInput())
   // The connection that was live when the browser went offline.
   const offlineConnectionRef = useRef("")
   const startConnectionRef = useRef<((retry?: boolean) => Promise<void>) | null>(null)
@@ -274,7 +274,7 @@ export function useTerminalConnection({
 
   const inputLocked = () =>
     filePasteBusyRef.current ||
-    (phaseRef.current !== "attached" && phaseRef.current !== "reconnecting") ||
+    (phaseRef.current !== "attached" && !holdsInput(phaseRef.current)) ||
     roleRef.current === "viewer"
 
   const syncInputLock = useCallback(() => {
@@ -307,9 +307,23 @@ export function useTerminalConnection({
       phaseRef.current = next
       setPhase(next)
       if (next !== "attached") setConnectedEdge("")
+      // This connection will not attach: held keys must not reach a later one, and the user is told.
+      if (next !== "attached" && !holdsInput(next) && heldInput.take())
+        setNotice("The keys typed while the terminal was connecting were not sent.")
       syncInputLock()
     },
-    [syncInputLock],
+    [heldInput, syncInputLock],
+  )
+
+  const holdInput = useCallback(
+    (data: Uint8Array) => {
+      setNotice(
+        heldInput.add(data)
+          ? "Keys typed now are sent once the terminal is connected."
+          : "Too much was typed while connecting; the rest was ignored.",
+      )
+    },
+    [heldInput],
   )
 
   const showFilePasteNotice = useCallback((message: string) => {
@@ -451,15 +465,8 @@ export function useTerminalConnection({
         setNotice("Terminal input is paused while files upload.")
         return
       }
-      if (roleRef.current !== "viewer" && phaseRef.current === "reconnecting" && !receiptInsertion) {
-        // Typed while the connection is down: kept, in order, and sent once when it is back.
-        if (queuedBytesRef.current + data.byteLength > 65536) {
-          setNotice("Too much was typed while reconnecting; the rest was ignored.")
-        } else {
-          queuedInputRef.current.push(data)
-          queuedBytesRef.current += data.byteLength
-          setNotice("Keys typed now are sent once the terminal has reconnected.")
-        }
+      if (roleRef.current !== "viewer" && holdsInput(phaseRef.current) && !receiptInsertion) {
+        holdInput(data)
         return
       }
       if (
@@ -563,7 +570,7 @@ export function useTerminalConnection({
     // macOS Option+Left/Right is word motion (ESC b / ESC f) and Option+letter sends the composed character, as in Terminal.app.
     const onOptionArrowCapture = (event: KeyboardEvent) => {
       const sequence = optionKeySequence(event, /^Mac/i.test(navigator.platform))
-      if (!sequence || event.isComposing || phaseRef.current !== "attached") return
+      if (!sequence || event.isComposing || (phaseRef.current !== "attached" && !holdsInput(phaseRef.current))) return
       event.preventDefault()
       event.stopPropagation()
       sendInput(new TextEncoder().encode(sequence))
@@ -621,7 +628,7 @@ export function useTerminalConnection({
               setNotice("Terminal input is paused while files upload.")
               return
             }
-            if (phaseRef.current !== "attached" && phaseRef.current !== "reconnecting") return
+            if (phaseRef.current !== "attached" && !holdsInput(phaseRef.current)) return
             const receiptInsertion = insertingReceiptRef.current !== null
             const modifiers = receiptInsertion ? noMobileModifiers : mobileModifiersRef.current
             if (!receiptInsertion && (modifiers.ctrl || modifiers.alt)) {
@@ -699,6 +706,8 @@ export function useTerminalConnection({
     return () => {
       disposed = true
       setReady(false)
+      // Held keys belong to this session only.
+      heldInput.take()
       observer?.disconnect()
       probe.clear()
       probeRef.current = null
@@ -720,7 +729,7 @@ export function useTerminalConnection({
       newCoreRef.current = null
       fitRef.current = null
     }
-  }, [sessionID, hostRef, uploadFiles, scheduleReconnect, setPhaseValue, showFilePasteNotice, markActive])
+  }, [sessionID, hostRef, uploadFiles, scheduleReconnect, setPhaseValue, showFilePasteNotice, markActive, heldInput, holdInput])
 
   const acknowledge = useCallback((connectionID: string, next: string) => {
     if (
@@ -800,8 +809,6 @@ export function useTerminalConnection({
           return
         }
         window.clearTimeout(reconnectTimerRef.current)
-        queuedInputRef.current = []
-        queuedBytesRef.current = 0
         if (outcome.phase !== "transport-error") void filePasteUploaderRef.current?.cancel()
         setPhaseValue(outcome.phase)
         setError(
@@ -868,22 +875,18 @@ export function useTerminalConnection({
           apiRef.current?.leave(connectionID)
           return
         }
-        // Keys typed while the connection was down go out once, in order, now that it is back.
-        const queued = queuedInputRef.current
-        queuedInputRef.current = []
-        queuedBytesRef.current = 0
-        if (queued.length && nextRole !== "viewer") {
-          const keys = new Uint8Array(queued.reduce((total, chunk) => total + chunk.byteLength, 0))
-          let at = 0
-          for (const chunk of queued) {
-            keys.set(chunk, at)
-            at += chunk.byteLength
-          }
-          setNotice("")
+        // Keys typed while the terminal was connecting go out once, in order, now that it is attached.
+        const cut = heldInput.cut
+        const keys = heldInput.take()
+        if (keys && nextRole === "viewer") {
+          setNotice("The keys typed while the terminal was connecting were not sent: you can only watch it.")
+        } else if (keys) {
+          // The warning stays up when only the first part goes out: the line on the prompt is incomplete.
+          setNotice(cut ? "Too much was typed while connecting; only the first part was sent. Check it before pressing Enter." : "")
           void apiRef.current
             ?.sendInput(connectionID, keys)
             .then(checkResult)
-            .catch(() => setNotice("Keys typed while reconnecting could not be sent."))
+            .catch(() => setNotice("Keys typed while connecting could not be sent."))
         }
         requestAnimationFrame(() => {
           if (connectionIDRef.current !== connectionID || roleRef.current === "viewer") return
@@ -932,6 +935,7 @@ export function useTerminalConnection({
       accessMethod,
       acknowledge,
       dropConnection,
+      heldInput,
       scheduleReconnect,
       offerSize,
       setPhaseValue,
@@ -1063,6 +1067,10 @@ export function useTerminalConnection({
     mobileModifiersRef.current = noMobileModifiers
     setMobileModifiers(noMobileModifiers)
     const sequence = mobileKeySequence(key, coreRef.current?.cursorKeysApp() ?? false, modifiers)
+    if (holdsInput(phaseRef.current)) {
+      holdInput(new TextEncoder().encode(sequence))
+      return
+    }
     const browser = apiRef.current
     if (!browser || !connectionIDRef.current) {
       setNotice("Input could not be sent. Reconnecting will not close the remote process.")
@@ -1072,7 +1080,7 @@ export function useTerminalConnection({
       .sendInput(connectionIDRef.current, new TextEncoder().encode(sequence))
       .then(checkResult)
       .catch(() => setNotice("Input could not be sent. Reconnecting will not close the remote process."))
-  }, [])
+  }, [holdInput])
 
   const focus = useCallback(() => terminalRef.current?.element.querySelector("textarea")?.focus(), [])
   const answerPendingPaste = useCallback(

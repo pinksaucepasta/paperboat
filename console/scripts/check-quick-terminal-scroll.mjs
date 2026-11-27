@@ -35,17 +35,15 @@ for (const name of BROWSERS.split(",")) {
       await page.waitForFunction(() => document.querySelector(".terminal-host").textContent.trim().length > 0, null, { timeout: 90_000 })
       await page.waitForTimeout(3000)
       await page.locator(".terminal-host").click()
-      // A shell that just started may drop keys (Windows), so retype until the listing arrives.
-      let printed = false
-      for (let attempt = 0; attempt < 4 && !printed; attempt++) {
-        const start = await content()
-        await page.keyboard.press("Enter")
-        await page.keyboard.type(CMD, { delay: 20 })
-        await page.keyboard.press("Enter")
-        await page.waitForTimeout(10_000)
-        printed = (await content()) > start + 1000
-      }
-      if (!printed) throw new Error("the command printed nothing")
+      // Typed once, as a user does: a retry would hide lost keys.
+      const start = await content()
+      await page.keyboard.press("Enter")
+      await page.keyboard.type(CMD, { delay: 20 })
+      await page.keyboard.press("Enter")
+      await page.waitForFunction((from) => document.querySelector(".terminal-host").scrollHeight > from + 1000, start, { timeout: 40_000 }).catch(() => {
+        throw new Error("the command printed nothing")
+      })
+      await page.waitForTimeout(3000)
       const before = await measure()
       const box = await page.locator(".terminal-host").boundingBox()
       await page.mouse.move(box.x + box.width / 2, Math.min(box.y + box.height / 2, before.window - 20))
