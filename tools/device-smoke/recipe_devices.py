@@ -84,7 +84,12 @@ class Posix:
                 '-o', 'ServerAliveInterval=30', self.host, run]
 
     def sh(self, script, stdin=None, timeout=300):
-        return spawn(self.argv(script), stdin, timeout)
+        for attempt in range(3):
+            done = spawn(self.argv(script), stdin, timeout)
+            # ssh gave up before the SSH handshake: nothing ran on the machine, so the same command is safe to send again
+            if attempt == 2 or done.code != 255 or 'during banner exchange' not in done.err:
+                return done
+            time.sleep(5)
 
     def pb(self, *args, stdin=None, timeout=180):
         return self.sh(PB_FIND + '"$P" ' + ' '.join(shlex.quote(a) for a in args), stdin, timeout)

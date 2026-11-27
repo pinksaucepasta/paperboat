@@ -97,6 +97,18 @@ class Secrets(unittest.TestCase):
         self.assertIn('PB_VERSION=2026.01.02.3', argv[-1])
 
 
+class Transport(unittest.TestCase):
+    def test_only_a_handshake_that_never_happened_is_sent_again(self):
+        banner = rd.Result(255, '', 'Connection timed out during banner exchange')
+        with patch.object(rd.time, 'sleep'), patch.object(rd, 'spawn', side_effect=[banner, rd.Result(0, 'ok')]) as spawn:
+            self.assertEqual('ok', rd.Posix('linux', 'h').sh('x').out)
+        self.assertEqual(2, spawn.call_count)
+        for failure in (rd.Result(255, '', 'Connection reset by peer'), rd.Result(1, '', 'pb: during banner exchange')):
+            with patch.object(rd, 'spawn', return_value=failure) as spawn:
+                rd.Posix('linux', 'h').sh('x')
+            self.assertEqual(1, spawn.call_count)
+
+
 class InstallLines(unittest.TestCase):
     def test_the_printed_lines_are_accepted(self):
         self.assertEqual('https://get.example.test', rd.installer_url('curl -fsSL https://get.example.test | sh'))
