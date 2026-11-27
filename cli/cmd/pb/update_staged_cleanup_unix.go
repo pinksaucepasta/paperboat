@@ -74,7 +74,21 @@ func processAlive(pid int) bool {
 // Linux in its transient service or under sudo, on macOS under sudo. It cannot tell whose it is: another account's
 // step only delays the removal. Unknown counts as running. Tests replace it.
 var privilegedStepRunning = func() bool {
-	out, err := exec.Command("/bin/ps", "-A", "-o", "args=").Output()
+	// A hidepid /proc hides root's processes from ps: the step's fixed transient service still shows (Linux).
+	for _, systemctl := range []string{"/usr/bin/systemctl", "/bin/systemctl"} {
+		if _, err := os.Stat(systemctl); err != nil {
+			continue
+		}
+		for _, operation := range []string{"install-supplied", "commit-supplied", "rollback-supplied"} {
+			unit := "paperboat-" + operation + "-u" + strconv.Itoa(os.Getuid()) + ".service"
+			if exec.Command(systemctl, "is-active", "--quiet", unit).Run() == nil {
+				return true
+			}
+		}
+		break
+	}
+	// -ww: without it BSD ps cuts a non-terminal line at 79 columns, dropping the step's name from a long pb path.
+	out, err := exec.Command("/bin/ps", "-A", "-ww", "-o", "args=").Output()
 	if err != nil {
 		return true
 	}
