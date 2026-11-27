@@ -83,9 +83,9 @@ func readyMachineGuard(ctx context.Context, version string, revision int) (resul
 // MachineGuardNotOlder (also pb doctor's mismatch test) reports whether a running guard may stay for the build
 // of the given version whose guard code is revision (the build being installed, not the running process: an
 // older pb installing a newer build must judge the guard against the new build). It is true for the same
-// version or a release not older. Development versions do not order, so a development build keeps only a
-// guard of its own revision (an official guard with another revision is replaced, 2026-11-27: pb 2026.11.26.21
-// updating to a dev build kept its own guard), and a release keeps a development guard only when that guard
+// version or a release not older. Development versions do not order, so a development build keeps a guard whose
+// revision is not lower than its own (never a downgrade of the shared guard; 2026-11-27: pb 2026.11.26.21 updating
+// to a dev build of a higher revision kept its own guard because it compared with its own revision), and a release keeps a development guard only when that guard
 // carries newer guard code (canaries 2026-11-26: custom -> official kept the custom build's guard). Revision 0
 // (the candidate's revision is unknown: Windows, the heal, a candidate built before it reported one) keeps only
 // the same version or a release not older, so an unknown build never keeps a guard it cannot prove is its own.
@@ -102,7 +102,7 @@ func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string, rev
 	if _, err := selfupdate.CompareVersions(version, version); err == nil {
 		return status.Revision > revision
 	}
-	return status.Revision == revision
+	return status.Revision >= revision
 }
 
 // candidateGuardRevision is the guard revision of the build being installed: this process's for its own

@@ -15,14 +15,15 @@ import (
 // another version than the installed one (an older updater drove the update, so it never replaced the
 // guard), it installs the guard from the installed executable, keeping the guard's local access
 // domain, and restores the replaced guard if the new one is not ready. A missing or unreachable guard
-// is left to pb install and doctor. It reports whether the guard was replaced.
+// is left to pb install and doctor. It reports whether the guard was replaced. It runs in the installed build,
+// so it judges the guard by this build's revision, as pb doctor does.
 // Prior art: tailscaled restarts its helpers from its own package on start.
 func HealMachineGuard(ctx context.Context, source installsource.Source, executable string) (bool, error) {
 	if err := source.Verify(executable); err != nil {
 		return false, hostInstallFailure("verify Paperboat machine guard executable", err)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	readyErr := existingMachineGuardReady(probeCtx, source.Version, 0)
+	readyErr := existingMachineGuardReady(probeCtx, source.Version, machineguard.Revision)
 	domain := ""
 	if readyErr != nil {
 		domain = existingMachineGuardDomain(probeCtx)
@@ -40,7 +41,7 @@ func HealMachineGuard(ctx context.Context, source installsource.Source, executab
 	}
 	if err == nil {
 		verifyCtx, cancelVerify := context.WithTimeout(ctx, 15*time.Second)
-		err = existingMachineGuardReady(verifyCtx, source.Version, 0)
+		err = existingMachineGuardReady(verifyCtx, source.Version, machineguard.Revision)
 		cancelVerify()
 	}
 	if err != nil {

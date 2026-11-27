@@ -109,10 +109,10 @@ func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
 	}{
 		// 2026-11-27: official pb 2026.11.26.21 running `pb update --from <dev build>` kept its own guard because the
 		// decision used the running installer's revision, not the candidate's.
-		"official guard replaced by a dev build of a newer revision":    {machineguard.RuntimeStatus{Version: "2026.11.26.21", Revision: r}, "dev-x", false, r + 1},
-		"official guard kept by a dev build of the same revision":       {machineguard.RuntimeStatus{Version: "2026.11.26.21", Revision: r}, "dev-x", true, r},
-		"dev guard of a higher revision replaced by an older dev build": {machineguard.RuntimeStatus{Version: "dev-a", Revision: r + 1}, "dev-x", false, r},
-		"dev guard replaced by a release of a newer revision":           {machineguard.RuntimeStatus{Version: "dev-a", Revision: r + 1}, "2026.11.16.0", false, r + 2},
+		"official guard replaced by a dev build of a newer revision": {machineguard.RuntimeStatus{Version: "2026.11.26.21", Revision: r}, "dev-x", false, r + 1},
+		"official guard kept by a dev build of the same revision":    {machineguard.RuntimeStatus{Version: "2026.11.26.21", Revision: r}, "dev-x", true, r},
+		"dev guard of a higher revision kept by an older dev build":  {machineguard.RuntimeStatus{Version: "dev-a", Revision: r + 1}, "dev-x", true, r},
+		"dev guard replaced by a release of a newer revision":        {machineguard.RuntimeStatus{Version: "dev-a", Revision: r + 1}, "2026.11.16.0", false, r + 2},
 		"same version":                    {machineguard.RuntimeStatus{Version: "2026.11.16.0"}, "2026.11.16.0", true, 0},
 		"newer release kept":              {machineguard.RuntimeStatus{Version: "2026.11.17.2"}, "2026.11.16.0", true, 0},
 		"older release replaced":          {machineguard.RuntimeStatus{Version: "2026.11.13.0"}, "2026.11.16.0", false, 0},
