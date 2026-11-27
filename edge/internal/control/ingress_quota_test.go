@@ -234,8 +234,8 @@ func TestIngressAuthorityListsFreeOwnedHostnames(t *testing.T) {
 // bound) is read whole, never refused or cut.
 func TestIngressSnapshotOfMoreThanFourThousandEntriesIsReadWhole(t *testing.T) {
 	const entries = 5000
-	now := time.Now().UTC()
-	base := ingressAuthorityTestDecision(now)
+	// 5,000 of each take over a second to read under -race alone, and over the 9 s the helper gives a decision when loaded.
+	base := ingressAuthorityTestDecision(ingressStallProofNow())
 	decisions := make([]connectorprotocol.IngressDecision, entries)
 	throttled := make([]connectorprotocol.IngressThrottle, entries)
 	blocked := make([]connectorprotocol.IngressBlock, entries)

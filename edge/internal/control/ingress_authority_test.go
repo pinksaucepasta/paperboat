@@ -277,6 +277,13 @@ func TestIngressAuthorityKeepsPublicDecisionsThroughAControlOutage(t *testing.T)
 	}
 }
 
+// ingressStallProofNow is a decision issue time that a stalled run cannot outlive. A decision lives at most
+// IngressAuthorityLifetime (10 s) and the client reads the real clock, so under a loaded -race run a test whose server
+// stamps the current time can have its decisions expire before they are read. A minute ahead is inside MaxClockSkew.
+func ingressStallProofNow() time.Time {
+	return time.Now().UTC().Add(connectorprotocol.MaxClockSkew / 2)
+}
+
 // F21-38: an edge that holds the current version gets fresh times only. An idle edge with 200
 // decisions pulling every refresh interval for a minute moves a small fraction of the full bytes,
 // and a changed set is fetched whole.
@@ -285,12 +292,14 @@ func TestIngressAuthorityAsksForAVersionAndIdleBytesStaySmall(t *testing.T) {
 	var bytesSent, fullBytes atomic.Int64
 	var fulls, unchanged atomic.Int32
 	changed := atomic.Bool{}
+	var stamped atomic.Int64 // the issue time of the server's latest answer
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Version string `json:"version"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
-		now := time.Now().UTC()
+		now := ingressStallProofNow()
+		stamped.Store(now.UnixNano())
 		decisions := make([]connectorprotocol.IngressDecision, 200)
 		for i := range decisions {
 			d := base
@@ -337,9 +346,12 @@ func TestIngressAuthorityAsksForAVersionAndIdleBytesStaySmall(t *testing.T) {
 	if perMinute, budget := bytesSent.Load(), fullBytes.Load()*3; perMinute > budget {
 		t.Fatalf("idle edge moved %d bytes in a minute, budget %d", perMinute, budget)
 	}
-	got, _ := authority.snapshot(t.Context(), true)
-	if time.Until(got[0].ExpiresAt) < 7*time.Second {
-		t.Fatal("unchanged answer did not refresh the decision times")
+	got, err := authority.snapshot(t.Context(), true)
+	if err != nil || len(got) != 200 {
+		t.Fatalf("last idle pull: %d %v", len(got), err)
+	}
+	if lifetime := got[0].ExpiresAt.Sub(got[0].IssuedAt); got[0].IssuedAt.UnixNano() != stamped.Load() || lifetime < 8*time.Second {
+		t.Fatalf("unchanged answer did not refresh the decision times: issued %s, lifetime %s", got[0].IssuedAt, lifetime)
 	}
 	changed.Store(true)
 	if got, err := authority.snapshot(t.Context(), true); err != nil || len(got) != 199 || fulls.Load() != 2 {
