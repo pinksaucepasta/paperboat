@@ -29,7 +29,7 @@ func TestWorkOSCallbackFailureSeparatesRejectionProviderAndStoreErrors(t *testin
 		wantCapture bool
 	}{
 		{name: "invalid email", err: emailpolicy.ErrInvalid, status: 400, code: "invalid_email"},
-		{name: "alias of an existing account", err: fmt.Errorf("upsert workos user and session: %w", &auth.EmailAlreadyRegisteredError{Canonical: "x@example.test"}), status: http.StatusConflict, code: "email_already_registered"},
+		{name: "alias of an existing account", err: fmt.Errorf("upsert workos user and session: %w", &auth.EmailAlreadyRegisteredError{Existing: "x+tag@example.test"}), status: http.StatusConflict, code: "email_already_registered"},
 		{name: "unverified email", err: fmt.Errorf("upsert workos user and session: %w", &auth.WorkOSVerificationError{Reason: "email_not_verified"}), status: http.StatusForbidden, code: "email_not_verified"},
 		{name: "invalid code", err: &auth.WorkOSVerificationError{Reason: "provider_http_error", HTTPStatus: http.StatusBadRequest}, status: http.StatusUnauthorized, code: "auth_callback_failed"},
 		{name: "provider transport failure", err: &auth.WorkOSVerificationError{Reason: "provider_transport", HTTPStatus: http.StatusServiceUnavailable, Cause: syscall.ETIMEDOUT}, status: http.StatusServiceUnavailable, code: "provider_unavailable", cause: "network_timeout", wantCapture: true},

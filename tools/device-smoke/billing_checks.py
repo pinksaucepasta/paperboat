@@ -278,7 +278,7 @@ def plus_alias_signup(m):
     m.callback(delete_if_made, m, work)
     m.callback(delete_if_made, m, Path(str(work) + '-later'))
     browser(m, steps, 'F13-07', None, 'plus_alias_signup.mjs', str(Path(state).parent), str(work), timeout=1500)
-    return steps.result('plus-alias-signup', 'plus addresses of an existing account are refused by name; one with no base account signs up and is not joined by a later base sign-up')
+    return steps.result('plus-alias-signup', 'first sign-up wins: plus addresses of an existing account are refused naming it; a plus sign-up with no base account works and a later base sign-up is refused naming the plus address')
 
 
 def delete_if_made(m, directory):

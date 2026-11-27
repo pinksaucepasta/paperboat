@@ -39,18 +39,21 @@ func TestExistingAccountForAliasPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
-		submitted, canonical string
-		exists               bool
+		submitted, existing string
+		exists              bool
 	}{
+		// F13-07 first sign-up wins: any other spelling, in any order, names the existing exact address
 		{prefix + "+1234@example.test", existing, true},
 		{"  " + prefix + "+a+b@EXAMPLE.test ", existing, true},
-		{existing, existing, false},
-		{prefix + "+1234@fresh.test", prefix + "@fresh.test", false},
-		{prefix + "+kept@other.test", prefix + "@other.test", false},
+		{existing, "", false},
+		{prefix + "+1234@fresh.test", "", false},
+		{prefix + "+kept@other.test", "", false},
+		{prefix + "@other.test", prefix + "+kept@other.test", true},
+		{prefix + "+2@OTHER.test", prefix + "+kept@other.test", true},
 	} {
-		canonical, exists, err := s.ExistingAccountForAlias(ctx, c.submitted)
-		if err != nil || canonical != c.canonical || exists != c.exists {
-			t.Fatalf("%q: canonical=%q exists=%v err=%v, want %q %v", c.submitted, canonical, exists, err, c.canonical, c.exists)
+		got, exists, err := s.ExistingAccountForAlias(ctx, c.submitted)
+		if err != nil || got != c.existing || exists != c.exists {
+			t.Fatalf("%q: existing=%q exists=%v err=%v, want %q %v", c.submitted, got, exists, err, c.existing, c.exists)
 		}
 	}
 	if _, _, err = s.ExistingAccountForAlias(ctx, "not an address"); err == nil {

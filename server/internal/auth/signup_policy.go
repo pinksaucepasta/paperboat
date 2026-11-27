@@ -6,27 +6,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/emailpolicy"
-	"strings"
 )
 
 // EmailAlreadyRegisteredError refuses a new provider identity whose canonical
-// address (lowercased, first +tag stripped) already belongs to an account
-// (F13-07). A +tag can be a different mailbox, so accounts are never merged by
-// alias: the second sign-up, in either order, is refused.
-type EmailAlreadyRegisteredError struct{ Canonical string }
+// address (lowercased, +tag stripped) already belongs to an account, in any
+// order: first sign-up wins (F13-07, user decision 2026-11-27). Existing is that
+// account's exact address, the one to sign in with.
+type EmailAlreadyRegisteredError struct{ Existing string }
 
 func (e *EmailAlreadyRegisteredError) Error() string {
-	return "An account for " + e.Canonical + " already exists. Sign in with that address."
-}
-
-func hasPlusTag(email string) bool {
-	local, _, _ := strings.Cut(strings.TrimSpace(email), "@")
-	return strings.Contains(local, "+")
+	return "An account with " + e.Existing + " already exists. Sign in with that address."
 }
 
 // Resolve verified provider identities before account creation. A known
 // provider subject signs into its account; a new subject gets a new account
-// unless its canonical address is taken, which is refused. The canonical lock
+// unless its canonical address is taken (any spelling), which is refused. The canonical lock
 // makes concurrent first-use aliases create at most one account.
 func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile) (string, string, error) {
 	canonical, err := emailpolicy.Normalize(ctx, tx, profile.Email)
@@ -46,47 +40,42 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 		// Only a change of address is checked, so legacy accounts that already
 		// share a canonical address keep signing in through their own subject.
 		var other bool
+		var existing string
 		if err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$2 AND
- coalesce(canonical_email,paperboat.canonical_email_address(primary_email))=$1)
- AND EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
- (canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1))`, canonical, id).Scan(&other); err != nil {
+ coalesce(canonical_email,paperboat.canonical_email_address(primary_email))=$1),
+ coalesce((SELECT primary_email FROM paperboat.users WHERE id<>$2 AND
+ (canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1) ORDER BY created_at,id LIMIT 1),'')`, canonical, id).Scan(&other, &existing); err != nil {
 			return "", "", err
 		}
+		other = other && existing != ""
 		if other && !profile.EmailVerified {
 			return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
 		}
 		if other {
-			return canonical, id, &EmailAlreadyRegisteredError{Canonical: canonical}
+			return canonical, id, &EmailAlreadyRegisteredError{Existing: existing}
 		}
 		return canonical, id, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", "", err
 	}
-	err = tx.QueryRow(ctx, `SELECT id FROM paperboat.users WHERE canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1
- ORDER BY (canonical_email=$1) DESC NULLS LAST,created_at,id LIMIT 1`, canonical).Scan(&id)
+	var existing string
+	err = tx.QueryRow(ctx, `SELECT id,primary_email FROM paperboat.users WHERE canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1
+ ORDER BY (canonical_email=$1) DESC NULLS LAST,created_at,id LIMIT 1`, canonical).Scan(&id, &existing)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return canonical, newID("user"), nil
 	}
 	if err != nil {
 		return "", "", err
 	}
-	// F13-07: only a plus address, or the exact address itself, is refused when
-	// the canonical address has an account. A plain address whose canonical
-	// form is held only by +tag accounts is its own new account (never merged).
-	var exact bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE lower(btrim(primary_email))=$1)`,
-		strings.ToLower(strings.TrimSpace(profile.Email))).Scan(&exact); err != nil {
-		return "", "", err
-	}
-	if !hasPlusTag(profile.Email) && !exact {
-		return canonical, newID("user"), nil
-	}
+	// F13-07: first sign-up wins. Any other spelling of the canonical address
+	// (x after x+tag, x+1 after x+2, x+tag after x) is refused, naming the
+	// existing account's exact address.
 	// An unverified address must not learn whether an account exists.
 	if !profile.EmailVerified {
 		return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
 	}
 	// The existing account's id is returned with the refusal so the caller can
 	// report a ban on it first; it is never used to sign in.
-	return canonical, id, &EmailAlreadyRegisteredError{Canonical: canonical}
+	return canonical, id, &EmailAlreadyRegisteredError{Existing: existing}
 }

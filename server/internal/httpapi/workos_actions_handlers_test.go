@@ -61,7 +61,7 @@ func TestWorkOSRegistrationActionDeniesAnAliasOfAnExistingAccount(t *testing.T) 
 		Verdict   string `json:"verdict"`
 		Message   string `json:"error_message"`
 	}
-	if err := json.Unmarshal(response.Payload, &payload); err != nil || payload.Verdict != "Deny" || payload.Message != "An account for tester@example.test already exists. Sign in with that address." {
+	if err := json.Unmarshal(response.Payload, &payload); err != nil || payload.Verdict != "Deny" || payload.Message != "An account with tester@example.test already exists. Sign in with that address." {
 		t.Fatalf("payload=%s err=%v", response.Payload, err)
 	}
 	want := workOSActionMAC(workOSActionTestSecret, strconv.FormatInt(payload.Timestamp, 10), response.Payload)

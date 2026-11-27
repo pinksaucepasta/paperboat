@@ -198,7 +198,7 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 		// resolveWorkOSIdentity names an id that does not exist yet for a first sign-in: this is where an account is created.
 		// canonical_email is unique: a legacy account without it keeps it NULL (as
 		// refresh does), and so does an account whose canonical address another
-		// account already holds (x after x+tag, F13-07: separate accounts).
+		// account already holds (a legacy duplicate from before F13-07 first-sign-up-wins).
 		var existed, legacy bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$1),
  EXISTS(SELECT 1 FROM paperboat.users WHERE id=$1 AND canonical_email IS NULL)

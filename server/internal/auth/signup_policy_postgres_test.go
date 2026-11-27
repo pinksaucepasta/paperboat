@@ -43,11 +43,11 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		service.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + subject, Email: email, EmailVerified: true}}
 		return service.VerifyCallback(ctx, CallbackInput{Code: "verified-provider-code"})
 	}
-	refused := func(t *testing.T, err error, canonical string) {
+	refused := func(t *testing.T, err error, existing string) {
 		t.Helper()
 		var taken *EmailAlreadyRegisteredError
-		if !errors.As(err, &taken) || taken.Canonical != canonical || taken.Error() != "An account for "+canonical+" already exists. Sign in with that address." {
-			t.Fatalf("want refusal for %s, got %v", canonical, err)
+		if !errors.As(err, &taken) || taken.Existing != existing || taken.Error() != "An account with "+existing+" already exists. Sign in with that address." {
+			t.Fatalf("want refusal naming %s, got %v", existing, err)
 		}
 	}
 	countUsers := func(t *testing.T) int {
@@ -59,29 +59,21 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		return n
 	}
 	canonical := prefix + ".one@example.test"
-	// Order 1 (F13-07): x+tag first signs up normally; x then signs up as its own
-	// separate account, never merged into the +tag one.
-	tagUser, tagSession, err := login("tag-first", strings.ToUpper(prefix)+".One+first@EXAMPLE.TEST")
-	if err != nil || tagSession.UserID != tagUser.ID {
+	// Order 1 (F13-07, first sign-up wins, user decision 2026-11-27): x+tag
+	// signs up and keeps its exact address; x, x+other and capitals are refused
+	// naming that exact address.
+	tagAddress := prefix + ".one+first@example.test"
+	first, tagSession, err := login("tag-first", strings.ToUpper(prefix)+".One+first@EXAMPLE.TEST")
+	if err != nil || tagSession.UserID != first.ID {
 		t.Fatalf("plus address with no canonical account was not signed up: %v", err)
 	}
-	if tagUser.PrimaryEmail != prefix+".one+first@example.test" {
-		t.Fatalf("contact address = %q, want the exact address", tagUser.PrimaryEmail)
-	}
-	first, session, err := login("first", strings.ToUpper(prefix)+".One@EXAMPLE.TEST")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.ID == tagUser.ID || session.UserID != first.ID || first.PrimaryEmail != canonical {
-		t.Fatalf("x after x+tag was merged or got the wrong address: %+v", first)
-	}
-	if got, _, err := login("tag-first", prefix+".one+first@example.test"); err != nil || got.ID != tagUser.ID {
-		t.Fatalf("x+tag account cannot sign in after x signed up: %v", err)
+	if first.PrimaryEmail != tagAddress {
+		t.Fatalf("contact address = %q, want the exact address", first.PrimaryEmail)
 	}
 	before := countUsers(t)
-	for i, email := range []string{canonical, prefix + ".one+second@example.test", prefix + ".ONE+second+third@EXAMPLE.TEST"} {
+	for i, email := range []string{canonical, strings.ToUpper(prefix) + ".One@EXAMPLE.TEST", prefix + ".one+second@example.test", prefix + ".ONE+second+third@EXAMPLE.TEST"} {
 		user, aliasSession, err := login(fmt.Sprintf("alias%d", i), email)
-		refused(t, err, canonical)
+		refused(t, err, tagAddress)
 		if user.ID != "" || aliasSession.Token != "" {
 			t.Fatal("refused sign-up returned an account or session")
 		}
@@ -90,8 +82,8 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		t.Fatal("a refused sign-up created an account")
 	}
 	// The existing account is unchanged and still signs in with its own identity.
-	again, againSession, err := login("first", strings.ToUpper(prefix)+".One@EXAMPLE.TEST")
-	if err != nil || again.ID != first.ID || again.PrimaryEmail != first.PrimaryEmail || againSession.UserID != first.ID {
+	again, againSession, err := login("tag-first", tagAddress)
+	if err != nil || again.ID != first.ID || again.PrimaryEmail != tagAddress || againSession.UserID != first.ID {
 		t.Fatalf("existing account changed or cannot sign in: %v", err)
 	}
 	r := httptest.NewRequest(http.MethodGet, "https://login.example.test/v1/me", nil)
@@ -113,7 +105,7 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	// A known identity whose provider email changes to another account's address
 	// gets the same refusal, and neither account changes.
 	_, _, err = login("owner", prefix+".one+moved@example.test")
-	refused(t, err, canonical)
+	refused(t, err, tagAddress)
 	var ownerEmail string
 	if err = store.SQL().QueryRowContext(ctx, `SELECT primary_email FROM paperboat.users WHERE id=$1`, owner.ID).Scan(&ownerEmail); err != nil || ownerEmail != plain {
 		t.Fatalf("owner address changed: %q %v", ownerEmail, err)
@@ -187,7 +179,7 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		}
 	}
 	// A legacy row whose stored address is a +tag is left as is and its own
-	// identity still signs in; a new alias of it is refused.
+	// identity still signs in; a new alias of it is refused naming that address.
 	legacy := prefix + "legacy"
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, legacy, prefix+".old+tag@example.test"); err != nil {
 		t.Fatal(err)
@@ -196,7 +188,7 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		t.Fatalf("existing plus-address account cannot sign in: %v", err)
 	}
 	_, _, err = login("legacy-alias", prefix+".old+other@example.test")
-	refused(t, err, prefix+".old@example.test")
+	refused(t, err, prefix+".old+tag@example.test")
 	var legacyEmail string
 	if err = store.SQL().QueryRowContext(ctx, `SELECT primary_email FROM paperboat.users WHERE id=$1`, legacy).Scan(&legacyEmail); err != nil || legacyEmail != prefix+".old+tag@example.test" {
 		t.Fatalf("legacy account changed: %q %v", legacyEmail, err)

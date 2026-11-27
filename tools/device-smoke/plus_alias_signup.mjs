@@ -1,4 +1,5 @@
-// F13-07: a console sign-up with a plus-address of an address that has an account is refused, naming that address.
+// F13-07 (first sign-up wins, user decision 2026-11-27): a console sign-up with any other spelling of an existing account's
+// canonical address (x+tag after x, x after x+tag) is refused, naming the existing account's exact address.
 // usage: ORIGIN=<console> PW_CHROMIUM=<chromium> [PW_MODULE=...] node plus_alias_signup.mjs ACCOUNT_DIR [WORK_DIR]
 //   ACCOUNT_DIR  a throwaway account made by fresh_account.mjs signup (account.json): its address is the canonical one
 //   WORK_DIR     when given, the other half too: a plus address whose canonical has NO account is not refused. It signs that address
@@ -12,7 +13,7 @@ const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 const origin = process.env.ORIGIN
 const [accountDir, workDir] = process.argv.slice(2)
 const { email: canonical } = JSON.parse(readFileSync(`${accountDir}/account.json`, "utf8"))
-const refusal = (address) => `An account for ${address} already exists. Sign in with that address.`
+const refusal = (address) => `An account with ${address} already exists. Sign in with that address.`
 const steps = []
 const add = (step, ok, detail = "") => steps.push({ step, ok: Boolean(ok), detail: String(detail).slice(0, 220) })
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM })
@@ -119,8 +120,7 @@ try {
       const state = `${workDir}/state.json`
       writeFileSync(state, JSON.stringify(await result.context.storageState()), { mode: 0o600 })
       chmodSync(state, 0o600)
-      // The other order, "no silent merge" (on most domains a +tag may be someone else's mailbox): the base address signs up afterwards, as
-      // a second login with its own password and its own emailed code. It must not end up inside the account the plus address made.
+      // The other order: the base address signs up afterwards. First sign-up wins, so it is refused naming the plus address.
       const idOf = async (context) => {
         const reply = await context.request.get(origin + "/api/v1/me")
         const body = reply.ok() ? await reply.json() : {}
@@ -138,10 +138,9 @@ try {
         if (!laterAccount) await later.page.waitForTimeout(5000)
       }
       // a sign-up that neither finished nor was refused proves nothing: that is a failure, never a pass
-      const apart = later.outcome === "refused" || Boolean(laterAccount && laterAccount !== plusAccount)
-      add("no silent merge: the base address signing up later does not land in the plus-address account", Boolean(plusAccount) && apart,
-        plusAccount && laterAccount === plusAccount ? "the second login is signed in to the plus address's account"
-          : `outcome=${later.outcome} second login ${laterAccount ? "signed in" : "not signed in"} ${unfinished}`)
+      // first sign-up wins: the base address is refused, naming the plus address that signed up first
+      add("the base address signing up after the plus address is refused, naming the plus address", Boolean(plusAccount) && later.outcome === "refused" && later.text.includes(refusal(alias)),
+        `outcome=${later.outcome} second login ${laterAccount ? (laterAccount === plusAccount ? "same account" : "a separate account") : "not signed in"} ${unfinished}`)
       if (laterAccount && laterAccount !== plusAccount) {
         // it made an account of its own: that one is deleted by the caller too (a sibling directory, so deleting one keeps the other's login)
         mkdirSync(`${workDir}-later`, { recursive: true, mode: 0o700 })

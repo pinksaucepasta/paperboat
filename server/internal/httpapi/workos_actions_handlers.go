@@ -58,7 +58,7 @@ func workOSRegistrationAction(checker RegistrationAliasChecker, secret string, n
 			return
 		}
 		if exists {
-			verdict, message = "Deny", "An account for "+canonical+" already exists. Sign in with that address."
+			verdict, message = "Deny", "An account with "+canonical+" already exists. Sign in with that address."
 		}
 		signed, err := signWorkOSActionResponse(verdict, message, secret, now())
 		if err != nil {
