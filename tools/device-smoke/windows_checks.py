@@ -258,6 +258,31 @@ def verdict(returncode, stdout):
     return 'PASS' if returncode == 0 and statuses and set(statuses) == {'PASS'} else 'FAIL'
 
 
+def failed_lines(stdout):
+    """The lines of a check's output that say what failed, in verdict()'s own formats."""
+    failed = []
+    for line in stdout.splitlines():
+        if line.startswith('FAIL ') or (line.startswith('RESULT ') and line.split()[1:2] != ['PASS']):
+            failed.append(line)
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and record.get('status') not in (None, 'PASS', 'SKIP') and not (failed and 'results' in record):
+            why = record.get('detail') or record.get('error') or record.get('reason')
+            failed.append('%s %s: %s' % (record['status'], record.get('check', ''), why or line[:200]))
+    return failed
+
+
+def failure_detail(returncode, stdout, stderr):
+    """Every failed step first: the end of the output alone once showed a SKIP line and hid the FAIL above it."""
+    failed = failed_lines(stdout)
+    if failed:
+        return 'exit %s: %s' % (returncode, ' | '.join(line[:300] for line in failed)[:1500])
+    return 'exit %s: %s' % (returncode, (stderr.strip() or stdout.strip())[-300:])
+
+
 def protocol_gate(probe):
     """The external half of preview_protocols.py: probe its URL from here and release the gate it waits on.
 
@@ -341,6 +366,15 @@ def run_streaming(command, environment, timeout, on_state=None):
         return subprocess.CompletedProcess(command, process.returncode, ''.join(lines), errors.read())
 
 
+def check_timeout(check, argv, limit):
+    """A check that holds a session for --seconds gets that long plus ten minutes, whatever --timeout is."""
+    if check.split('-long')[0] in ('ssh', 'exec') and '-long' in check:
+        held = argv[argv.index('--seconds') + 1]
+        if held.isdigit():
+            return max(limit, int(held) + 600)
+    return limit
+
+
 def run_check(check, argv, args, device):
     environment = dict(os.environ, PB_SMOKE_WINDOWS_PB=device.pb_exe)
     if check == 'workspace-switch':
@@ -392,7 +426,7 @@ def run_check(check, argv, args, device):
             on_state = terminal_gate(environment)
         command = [sys.executable, str(HERE / argv[0])] + [replacements.get(word, word) for word in argv[1:]]
         started = time.monotonic()
-        done = run_streaming(command, environment, args.timeout, on_state)
+        done = run_streaming(command, environment, check_timeout(check, argv, args.timeout), on_state)
     # The whole output is kept beside the result file (owner-only): per-row receipts and failure causes live there.
     output = results_dir(__file__) / 'windows-output' / ('%s-%s.out' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), check))
     output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -400,7 +434,7 @@ def run_check(check, argv, args, device):
         handle.write(done.stdout + '\n--- stderr ---\n' + done.stderr)
     outcome = verdict(done.returncode, done.stdout)
     detail = ((done.stdout.strip().splitlines() or [''])[-1][:300] if outcome == 'PASS'
-              else 'exit %s: %s' % (done.returncode, (done.stderr.strip() or done.stdout.strip())[-300:]))
+              else failure_detail(done.returncode, done.stdout, done.stderr))
     took = round(time.monotonic() - started)
     if outcome != 'PASS' and os.environ.get('SMOKE_ON_FAIL'):  # the devices' evidence at the failure, as smoke.sh does
         with contextlib.suppress(OSError, subprocess.TimeoutExpired):  # evidence never changes the result
@@ -488,7 +522,8 @@ def main():
             except (subprocess.SubprocessError, winhost.DeviceError, OSError, ValueError, KeyError) as error:
                 outcome = ('FAIL', 0, str(error)[:300])
         results.append({'id': check + ':' + args.machine, 'status': outcome[0], 'seconds': outcome[1], 'detail': outcome[2]})
-        print('%-34s %-5s %5ss  %s' % (check + ':' + args.machine, outcome[0], outcome[1], outcome[2][:100]), flush=True)
+        print('%-34s %-5s %5ss  %s' % (check + ':' + args.machine, outcome[0], outcome[1],
+                                       outcome[2][:100 if outcome[0] == 'PASS' else 400].replace('\n', ' ')), flush=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     path = results_dir(__file__) / ('windows-%s.json' % stamp)
     path.parent.mkdir(exist_ok=True)

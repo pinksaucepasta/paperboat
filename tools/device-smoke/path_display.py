@@ -162,8 +162,11 @@ def window_failures(samples):
         failures.append('pb status was never readable while the relay was forced')
     wrong = [sample for sample in samples if wrong_path(sample)]
     if wrong:
-        failures.append('pb status reported a wrong path in %d of %d samples while the relay was forced: %s at %.2f s, last at %.2f s'
-                        % (len(wrong), len(samples), wrong[0].get('path'), wrong[0]['t'], wrong[-1]['t']))
+        # final-table.py annotates a known bug only from this exact text: which wrong states, and what the window ended on
+        failures.append('pb status reported a wrong path in %d of %d samples while the relay was forced (wrong: %s; window ended on: %s; '
+                        'first at %.2f s, last at %.2f s)' % (len(wrong), len(samples),
+                                                              ','.join(sorted({str(s.get('path')) for s in wrong})),
+                                                              samples[-1].get('path', 'unreadable'), wrong[0]['t'], wrong[-1]['t']))
     return failures
 
 

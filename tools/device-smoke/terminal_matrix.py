@@ -515,6 +515,9 @@ def network_drop(a, sessions):
 
 def control_plane_down(a, sessions):
     """W7: the server is unreachable (deploy, outage) mid-session; the open terminal keeps working."""
+    if DEVICE and not PEER_CUT:  # a cut on the Windows device has to stop its pb.exe, which is the terminal under test
+        row('N5 server unreachable: open terminal keeps working', False, 'refused: a Windows client needs SMOKE_PEER_CUT')
+        return
     if not (PEER_CUT or has_iptables()):
         row('N5 server unreachable: open terminal keeps working', None, NO_FIREWALL)
         return
@@ -528,8 +531,6 @@ def control_plane_down(a, sessions):
     try:
         if PEER_CUT:
             block = peer_cut('add', 'server', *addrs)
-        elif DEVICE:
-            block = DEVICE.cut_network(240, addresses=addrs, inbound=False)
         elif DARWIN:
             block = pf_block('block drop out quick to { %s }\n' % ' '.join(addrs), 240)
         else:
@@ -548,8 +549,6 @@ def control_plane_down(a, sessions):
             capture = ''
             if PEER_CUT:
                 capture = '; ' + peer_cut('remove')
-            elif DEVICE:
-                block.release()
             elif DARWIN:
                 pf_release(block)
             else:

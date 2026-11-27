@@ -3,7 +3,7 @@
 
 The member's console session is a Playwright storage state (mode 600, never printed); the token is minted from it,
 valid one day, and goes straight into the container's `pb login --api-token -`. Idempotent: a profile that is
-already signed in is left alone.
+already signed in and answered by the server is left alone.
 Usage: teammate_signin.py HOST CONTAINER USER   env: ORIGIN, STATE, PW_CHROMIUM, [PW_MODULE]
 
 Windows device (the profile is %USERPROFILE%\\.pb-smoke\\teammate; only pb.exe runs there, through winhost):
@@ -45,16 +45,17 @@ def device_signin(mint_token):
         prepare(root, {'server_url': shown['server_url'],
                        'auth': {'allow_file_fallback': bool(shown.get('auth_file_fallback'))}})
     env = environment(root)
-    status = pb.run_remote(['--config', str(config), 'auth', 'status', '--json'], input='', env=env, timeout=40)
-    try:
-        if status.returncode == 0 and json.loads(status.stdout or '{}').get('signed_in'):
-            return False
-    except ValueError:
-        pass
+    def live():  # a call the server must answer: `auth status` also says signed in for a session that expired
+        return pb.run_remote(['--config', str(config), 'team', 'list', '--json'], input='', env=env, timeout=60).returncode == 0
+
+    if live():
+        return False
     done = pb.run_remote(['--config', str(config), 'login', '--api-token', '-'], input=mint_token(), env=env,
                          timeout=90)
     if done.returncode:
         raise RuntimeError('teammate sign-in failed: ' + done.stdout[-200:] + done.stderr[-200:])
+    if not live():
+        raise RuntimeError('the server does not answer the new teammate session')
     return True
 
 

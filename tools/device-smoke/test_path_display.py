@@ -19,7 +19,7 @@ class Window(unittest.TestCase):
         samples = [{'t': 0.0, 'path': 'direct'}, {'t': 1.0, 'path': 'none'}, {'t': 2.0, 'path': 'relay'}]
         failures = pd.window_failures(samples)
         self.assertEqual(len(failures), 1)
-        self.assertIn('1 of 3 samples', failures[0])
+        self.assertIn('1 of 3 samples while the relay was forced (wrong: direct; window ended on: relay;', failures[0])
         self.assertEqual(pd.window_failures(samples[1:]), [])
 
     def test_a_window_nobody_could_read_fails(self):

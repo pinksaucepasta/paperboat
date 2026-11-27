@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import secrets
+import traceback
 
 import winhost
 from install_lifecycle import registration
@@ -38,6 +39,19 @@ def check_roles(call, current, invite, team_id, owner_id, recipient_id):
     assert current()['owner_account'] == recipient_id
     mutate('transfer', owner_id, teammate=True)
     assert current()['owner_account'] == owner_id
+
+
+def prove_teammate_live(call, team_id, active):
+    """A call the server must answer for the teammate's own session (`auth status` only reads the local profile).
+    `team list` names only the teams the account is an active member of."""
+    try:
+        teams = call('team', 'list', '--json', teammate=True)
+    except Exception as error:
+        raise RuntimeError('TEAMMATE SESSION IS NOT LIVE: nothing was removed. Sign the teammate profile in again '
+                           '(teammate_signin.py): %s' % error) from error
+    if active and not any(t['team_id'] == team_id for t in teams):
+        raise RuntimeError("TEAMMATE SESSION DOES NOT LIST %s, where the owner shows it as an active member: nothing was "
+                           'removed' % team_id)
 
 
 def main():
@@ -92,6 +106,8 @@ def main():
             team = current()
             was_member = any(m['account_id'] == recipient['account']['id'] and m['active']
                              for m in team['members'])
+            # only the teammate can accept its way back in: a dead session is found before it is removed
+            prove_teammate_live(call, team_id, was_member)
             if was_member:
                 call('team', 'remove', team_id, recipient['account']['id'], '--generation',
                      str(team['generation']), '--json')
@@ -134,13 +150,20 @@ def main():
         raise
     finally:
         try:
-            if fixture:
+            if fixture and was_member:
                 # The retained team keeps its teammate: put the original membership back.
-                if was_member and not any(m['account_id'] == recipient['account']['id'] and m['active']
-                                          for m in call('team', 'get', team_id, '--json')['members']):
-                    restored = call('team', 'invite', team_id, email, '--generation',
-                                    str(call('team', 'get', team_id, '--json')['generation']), '--json')
-                    call('team', 'accept', restored['invitation_id'], '--json', teammate=True)
+                try:
+                    if not any(m['account_id'] == recipient['account']['id'] and m['active']
+                               for m in call('team', 'get', team_id, '--json')['members']):
+                        restored = call('team', 'invite', team_id, email, '--generation',
+                                        str(call('team', 'get', team_id, '--json')['generation']), '--json')
+                        call('team', 'accept', restored['invitation_id'], '--json', teammate=True)
+                except BaseException as error:
+                    print(json.dumps({'check': 'team-lifecycle', 'status': 'FAIL', 'team': team_id,
+                                      'detail': 'TEAMMATE NOT RESTORED: the shared team %s is left without its teammate; '
+                                                'sign the teammate in again, invite it and accept before any other team row: %s'
+                                                % (team_id, error)}), flush=True)
+                    raise
             if created:
                 current_team = call('team', 'get', team_id, '--json')
                 cleanup_owner = current_team['owner_account']
@@ -156,6 +179,7 @@ def main():
         except BaseException:
             if primary_error is None:
                 raise
+            traceback.print_exc()
             print(json.dumps({'check': 'team-lifecycle', 'cleanup': 'failed',
                               'owned_state_retained': True}), flush=True)
     print(json.dumps({'check': 'team-roles' if args.roles else 'team-lifecycle', 'status': 'PASS',

@@ -1490,8 +1490,7 @@ class TeammateSigninOnTheDevice(unittest.TestCase):
     PB = ('#!/bin/sh\n'
           'case "$*" in\n'
           '"config show --json") echo \'{"data":{"server_url":"https://api.example.test","auth_file_fallback":true}}\';;\n'
-          '*"auth status --json") if [ -f "$XDG_CONFIG_HOME/in" ]; then echo \'{"signed_in":true}\'; '
-          'else echo \'{"signed_in":false}\'; exit 1; fi;;\n'
+          '*"team list --json") if [ -f "$XDG_CONFIG_HOME/in" ]; then echo "[]"; else exit 1; fi;;\n'
           '*"login --api-token -") mkdir -p "$XDG_CONFIG_HOME"; cat > "$XDG_CONFIG_HOME/in"; '
           'printf "%s|%s" "$2" "$XDG_STATE_HOME" > "$XDG_CONFIG_HOME/seen";;\n'
           '*) exit 9;;\nesac\n')

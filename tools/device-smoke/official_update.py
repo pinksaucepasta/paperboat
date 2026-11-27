@@ -58,6 +58,8 @@ def main():
     parser.add_argument('--expect-release', required=True)
     args = parser.parse_args()
     binary = winhost.pb_path()
+    if not winhost.device():  # asked now: refused after the revoke below, the host is left with no machine
+        winhost.refuse_real_home(['uninstall'])
     password = None if winhost.device() else sys.stdin.readline().rstrip('\n')  # Windows asks through UAC, not sudo
     if not password and not winhost.device():
         raise RuntimeError('sudo credential required on stdin')
