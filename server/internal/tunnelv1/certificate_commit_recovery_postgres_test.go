@@ -250,3 +250,114 @@ func TestCertificateRenewalWhoseCommitWasLostIsRecordedOnPostgres(t *testing.T) 
 		t.Fatalf("workspace certificate reads after recovery = %d, want still 2", calls)
 	}
 }
+
+// A passthrough `domain add --wait` that outlived the 15-minute window of the edge-fetch settlement (a long edge
+// outage) is completed by the certificate worker's tick once the edges serve it; one whose domain or route went away
+// fails with a clear code (both stayed running for good). A paused tunnel's add waits; other operations are untouched.
+func TestPassthroughDomainCreateIsSettledByTheWorkerAfterALongOutageOnPostgres(t *testing.T) {
+	x := newCommitRecoveryFixture(t)
+	suffix := x.f.suffix
+	tunnel, route, edge := "tun_commit_"+suffix, "rte_commit_"+suffix, "edge_commit_"+suffix
+	label := strings.ReplaceAll(suffix, "_", "-")
+	var account string
+	if err := x.f.database.SQL().QueryRowContext(x.ctx, `SELECT account_id FROM paperboat.tunnels WHERE id=$1`, tunnel).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	addPassthrough := func(name string) (string, string) {
+		t.Helper()
+		domain := "dom_" + name + "_" + suffix
+		ws := "wsd_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		x.exec(t, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, ws, account, ws[4:]+".example.test")
+		x.exec(t, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+VALUES($1,$2,$3,$4,$5,'exact',$1,$5,'none','not_applicable','ready','clear',$6)`, domain, account, tunnel, route, name+"-"+label+".example.test", ws)
+		op := "op_pass_" + domain
+		sum := sha256.Sum256([]byte(op))
+		// Begun an hour ago: the edges were out for longer than the settlement window.
+		x.exec(t, `INSERT INTO paperboat.operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at)
+VALUES ($1,$2,$3,$4,'domain.create','domain_binding',$5,'connecting','running',60,'changed',$6,now()-interval '1 hour',now()-interval '1 hour')`, op, account, "idem_"+op, sum[:], domain, "cor_"+op)
+		return domain, op
+	}
+	operation := func(op string) (string, string) {
+		t.Helper()
+		var state, code string
+		if err := x.f.database.SQL().QueryRowContext(x.ctx, `SELECT state,COALESCE(error_code,'') FROM paperboat.operations WHERE id=$1`, op).Scan(&state, &code); err != nil {
+			t.Fatal(err)
+		}
+		return state, code
+	}
+	_, served := addPassthrough("served")
+	removed, gone := addPassthrough("removed")
+	x.exec(t, `UPDATE paperboat.tunnel_domains SET deleted_at=now() WHERE id=$1`, removed)
+	// The edges are back: live, serving the route, and have fetched a route snapshot since.
+	x.exec(t, `UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',tunnel_endpoints_epoch=process_epoch,tunnel_snapshot_at=now() WHERE id=$1`, edge)
+	x.exec(t, `UPDATE paperboat.endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE edge_node_id=$1`, edge)
+	x.reconcile(t)
+	if state, code := operation(served); state != "succeeded" {
+		t.Fatalf("passthrough domain.create served by every edge after a long outage = %s (%s), want succeeded", state, code)
+	}
+	if state, code := operation(gone); state != "failed" || code != "domain_binding_removed" {
+		t.Fatalf("passthrough domain.create whose domain was removed = %s (%s), want failed domain_binding_removed", state, code)
+	}
+	// A paused tunnel's add waits (resuming serves it): neither failed nor completed.
+	_, waiting := addPassthrough("waiting")
+	managed := "op_managed_" + suffix
+	managedSum := sha256.Sum256([]byte(managed))
+	x.exec(t, `INSERT INTO paperboat.operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at)
+VALUES ($1,$2,$3,$4,'domain.create','domain_binding','dom_managed_not_passthrough','issuing_certificate','running',60,'changed',$5,now()-interval '1 hour',now()-interval '1 hour')`, managed, account, "idem_"+managed, managedSum[:], "cor_"+managed)
+	x.exec(t, `UPDATE paperboat.tunnels SET desired_state='paused' WHERE id=$1`, tunnel)
+	x.reconcile(t)
+	if state, code := operation(waiting); state != "running" {
+		t.Fatalf("passthrough domain.create on a paused tunnel = %s (%s), want running", state, code)
+	}
+	// Its route is removed: it can never be served, so it fails; another resource's operation is left alone.
+	x.exec(t, `UPDATE paperboat.tunnels SET desired_state='active' WHERE id=$1`, tunnel)
+	x.exec(t, `UPDATE paperboat.tunnel_routes SET desired_state='deleted',deleted_at=now() WHERE id=$1`, route)
+	x.reconcile(t)
+	if state, code := operation(waiting); state != "failed" || code != "domain_binding_removed" {
+		t.Fatalf("passthrough domain.create whose route was removed = %s (%s), want failed domain_binding_removed", state, code)
+	}
+	if state, _ := operation(managed); state != "running" {
+		t.Fatalf("an unrelated domain.create = %s, want untouched (running)", state)
+	}
+}
+
+// Passthrough adds that cannot finish yet (here: on paused tunnels) never fill the settlement batches: a new add
+// on a serving tunnel still completes beside more than a batch of them.
+func TestPassthroughDomainCreateBatchIsNotStarvedByWaitingAddsOnPostgres(t *testing.T) {
+	x := newCommitRecoveryFixture(t)
+	suffix := x.f.suffix
+	tunnel, route, edge := "tun_commit_"+suffix, "rte_commit_"+suffix, "edge_commit_"+suffix
+	label := strings.ReplaceAll(suffix, "_", "-")
+	var account string
+	if err := x.f.database.SQL().QueryRowContext(x.ctx, `SELECT account_id FROM paperboat.tunnels WHERE id=$1`, tunnel).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	ws := "wsd_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	x.exec(t, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, ws, account, ws[4:]+".example.test")
+	// 120 old waiting adds on a paused tunnel of the same account (more than one batch), each with its own route.
+	paused := "tun_paused_" + suffix
+	x.exec(t, `INSERT INTO paperboat.tunnels (id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,desired_state,summary_transitioned_at,created_at,updated_at)
+SELECT $1,account_id,$1,$2,$3,created_by_host_id,account_id,'paused',now(),now(),now() FROM paperboat.tunnels WHERE id=$4`, paused, testutil.EndpointID("paused:"+suffix), "https://"+testutil.EndpointLabel(testutil.EndpointID("paused:"+suffix))+".tunnels.example.test", tunnel)
+	x.exec(t, `INSERT INTO paperboat.tunnel_routes (id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id,created_at,updated_at)
+SELECT 'rte_p'||g||'_'||$1,$2,'r'||g,'http','exact','p'||g||'-'||$3||'.example.test','http','127.0.0.1:3000',$4,$4,now(),now() FROM generate_series(1,120) g`, suffix, paused, label, account)
+	x.exec(t, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+SELECT 'dom_p'||g||'_'||$1,$2,$3,'rte_p'||g||'_'||$1,'d'||g||'-'||$4||'.example.test','exact','dom_p'||g||'_'||$1,'d'||g||'-'||$4||'.example.test','none','not_applicable','ready','clear',$5 FROM generate_series(1,120) g`, suffix, account, paused, label, ws)
+	x.exec(t, `INSERT INTO paperboat.operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at)
+SELECT 'op_p'||g||'_'||$1,$2,'idem_p'||g||'_'||$1,sha256(convert_to('op_p'||g||'_'||$1::text,'UTF8')),'domain.create','domain_binding','dom_p'||g||'_'||$1,'connecting','running',60,'changed','cor_p'||g||'_'||$1,now()-interval '2 hours',now()-interval '2 hours' FROM generate_series(1,120) g`, suffix, account)
+	// A new add (recent) and an old one (long outage) on the serving tunnel both complete beside them.
+	x.exec(t, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+VALUES($1,$2,$3,$4,$5,'exact',$1,$5,'none','not_applicable','ready','clear',$6),($7,$2,$3,$4,$8,'exact',$7,$8,'none','not_applicable','ready','clear',$6)`, "dom_new_"+suffix, account, tunnel, route, "new-"+label+".example.test", ws, "dom_old_"+suffix, "old-"+label+".example.test")
+	for _, op := range []struct{ id, domain, age string }{{"op_new_" + suffix, "dom_new_" + suffix, "1 minute"}, {"op_old_" + suffix, "dom_old_" + suffix, "3 hours"}} {
+		x.exec(t, `INSERT INTO paperboat.operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at)
+VALUES ($1::text,$2,$3,sha256(convert_to($1::text,'UTF8')),'domain.create','domain_binding',$4,'connecting','running',60,'changed',$5,now()-$6::interval,now()-$6::interval)`, op.id, account, "idem_"+op.id, op.domain, "cor_"+op.id, op.age)
+	}
+	x.exec(t, `UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',tunnel_endpoints_epoch=process_epoch,tunnel_snapshot_at=now() WHERE id=$1`, edge)
+	x.exec(t, `UPDATE paperboat.endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE edge_node_id=$1`, edge)
+	x.reconcile(t)
+	for _, op := range []string{"op_new_" + suffix, "op_old_" + suffix} {
+		var state string
+		if err := x.f.database.SQL().QueryRowContext(x.ctx, `SELECT state FROM paperboat.operations WHERE id=$1`, op).Scan(&state); err != nil || state != "succeeded" {
+			t.Fatalf("%s beside 120 waiting adds = %q, %v; want succeeded", op, state, err)
+		}
+	}
+}

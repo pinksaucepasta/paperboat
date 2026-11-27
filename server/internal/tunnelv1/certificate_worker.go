@@ -64,6 +64,14 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		return 0, ErrInvalidInput
 	}
 	now := w.now().UTC()
+	// Passthrough domain adds have no certificate step: settle them on every tick too, so one waiting through a long
+	// edge outage completes (or fails, once its domain, route or tunnel is gone) without waiting for an edge fetch.
+	if err := RefreshPendingStateOperations(ctx, w.db.Pool(), now); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return 0, err
+		}
+		workers.IterationFailure(ctx, "certificate_reconciliation", "pending_domain_operations_failed", err)
+	}
 	rows, err := w.db.Queries().ListDueTunnelCertificateDomainsV1(ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: now, RowLimit: int32(limit)})
 	if err != nil {
 		return 0, err
