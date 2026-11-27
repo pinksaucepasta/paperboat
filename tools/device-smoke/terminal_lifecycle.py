@@ -29,6 +29,11 @@ import windows_target
 import winhost
 
 
+# A Windows shell's default prompt, cmd.exe (C:\dir>) or PowerShell (PS C:\dir>), once ConPTY's escapes are removed.
+WINDOWS_PROMPT = re.compile(rb'[A-Za-z]:\\[^<>:"|?*\r\n\x1b\x07]*>')
+TERMINAL_ESCAPES = re.compile(rb'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[78=>]')
+
+
 def wait_windows_shell(terminal, timeout=180):
     """A held terminal on a Windows target is ready only when its shell answers.
 
@@ -168,6 +173,19 @@ class Terminal:
             if time.monotonic() >= deadline:
                 raise RuntimeError('terminal did not enter raw mode within %d s' % timeout)
             if select.select([self.fd], [], [], 0.05)[0]:
+                self.drain()
+
+    def wait_windows_prompt(self, timeout=90):
+        """Wait until a Windows target's shell has shown its prompt: call it before the first keystroke of a new or
+        reattached terminal. ConPTY echoes what is typed before cmd.exe reads its input, but that line's Enter never runs
+        it (WA6, 28 Nov: the typed marker stayed at the prompt). A reattach replays the screen, prompt included. It only
+        reads: what it read stays there for expect()."""
+        self.wait_raw()  # and ssh -tt on a Windows client must have its pty raw, or CR arrives as LF
+        deadline = time.monotonic() + timeout
+        while not WINDOWS_PROMPT.search(TERMINAL_ESCAPES.sub(b'', self.output)):
+            if time.monotonic() >= deadline:
+                raise RuntimeError('the Windows shell did not show its prompt within %d s' % timeout)
+            if select.select([self.fd], [], [], 0.1)[0]:
                 self.drain()
 
     def marker(self, label, prefix=''):
@@ -345,7 +363,7 @@ def windows_phases(terminal, check, status_bar, cwd_leaf=None):
         terminal.send(windows_target.typed_marker(token) + '\r')
         return token
 
-    terminal.wait_raw()  # before ssh -tt is raw the pty's own line discipline turns CR into LF, which cmd.exe ignores
+    terminal.wait_windows_prompt()
     if status_bar == 'on':
         terminal.expect(STATUS_BAR_DRAWN)
     terminal.expect(say('READY'))

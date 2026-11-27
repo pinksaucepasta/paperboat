@@ -8,7 +8,10 @@ class FakeClient(matrix.Client):
     """A client whose terminal answers the readiness marker only after `lose` Enter presses were lost."""
 
     def __init__(self, lose, closes=False):
-        self.sent, self.lose, self.closes, self.waits = [], lose, closes, 0
+        self.sent, self.lose, self.closes, self.waits, self.sent_before_prompt = [], lose, closes, 0, None
+
+    def wait_windows_prompt(self, timeout=90):
+        self.sent_before_prompt = len(self.sent)
 
     def send(self, data):
         self.sent.append(data)
@@ -43,6 +46,7 @@ class Ready(unittest.TestCase):
             client.ready(timeout=60)
         self.assertEqual(['\r', '\r'], client.sent[1:])  # the marker line once, then only Enter, never the line again
         self.assertEqual(3, client.waits)
+        self.assertEqual(0, client.sent_before_prompt)  # nothing is typed before the prompt is shown
 
     def test_a_closed_terminal_is_not_retried(self):
         with mock.patch.object(matrix, 'win', return_value=True):

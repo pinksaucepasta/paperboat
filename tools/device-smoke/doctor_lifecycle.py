@@ -35,6 +35,7 @@ def terminal_works(target):
     terminal = Terminal(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     try:
         if windows_target.is_windows(PB, target):  # cmd.exe under ConPTY: no bracketed paste, no stty, exit ends it
+            terminal.wait_windows_prompt()
             token = 'PB_READY_' + uuid.uuid4().hex
             terminal.send(windows_target.typed_marker(token) + '\r')
             terminal.expect(token, timeout=60)

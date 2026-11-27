@@ -47,6 +47,7 @@ def windows_marker(terminal, token, nonce, timeout):
 def establish(terminal, nonce, windows):
     """Sets the session's shell variable and returns the shell's pid."""
     if windows:
+        terminal.wait_windows_prompt()
         deadline = time.monotonic() + 120
         # Not a Paperboat drop (2026-11-11, runner target, Linux test machine client): the host writes the line to the ConPTY (echoed) and cmd.exe's
         # startup discards it before its first read. Typed 0 s after first output it arrives 1/3 times with `pb connect`, 0/3 with plain
@@ -71,6 +72,7 @@ def establish(terminal, nonce, windows):
 def confirm(terminal, nonce, windows):
     """After the idle time: the shell variable and the shell's pid, as the reattached session reports them."""
     if windows:
+        terminal.wait_windows_prompt()
         return windows_marker(terminal, 'PB_BACK', nonce, 90)
     terminal.expect(b'\x1b[?2004h', timeout=90)
     terminal.send("printf '\\nPB_BACK_%s_%s\\n' \"$PB_IDLE\" \"$$\"\r")

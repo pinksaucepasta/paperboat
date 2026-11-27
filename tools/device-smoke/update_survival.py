@@ -160,6 +160,7 @@ def main():
                     held.expect(b'\x1b[?2004h')
                     held.expect(held.marker('READY', 'stty -echo; '))
                 else:  # no bracketed paste under cmd.exe: wait for a printed marker, not for a quiet pty (typed bytes before attach are swallowed)
+                    held.wait_windows_prompt()
                     wait_windows_shell(held)
                 shell_pid = shell_identity('SHELL')
                 if not shell_pid.isdigit():

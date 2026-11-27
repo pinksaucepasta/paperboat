@@ -114,6 +114,7 @@ class Client(Terminal):
 
     def ready(self, timeout=90):
         if win():  # cmd.exe announces no bracketed paste and has no stty; its console always echoes
+            self.wait_windows_prompt(timeout)
             token = 'PB_READY_' + uuid.uuid4().hex
             self.send(windows_target.typed_marker(token) + '\r')
             # A new ConPTY session is silent for about 12 s on a hosted runner and the Enter typed into it can be

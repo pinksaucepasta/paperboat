@@ -15,7 +15,7 @@ class Typed:
         self.expected.append(text)
         self.timeouts.append(timeout)
 
-    def wait_raw(self):
+    def wait_windows_prompt(self):
         self.raw += 1
         self.sent.append('<raw>')
 
@@ -38,7 +38,7 @@ class SessionLifecycleShell(unittest.TestCase):
         for foreign in ('stty', 'printf', '$PB_DURABLE', "PB_DURABLE='", 'powershell'):
             self.assertNotIn(foreign, typed)
         self.assertIn('set PB_DURABLE=abc123\r', typed)
-        self.assertTrue(typed.startswith('<raw>'), 'nothing is typed before ssh has put the pty in raw mode')
+        self.assertTrue(typed.startswith('<raw>'), 'nothing is typed before the Windows prompt is shown')
         # The caret keeps the echoed command line from matching the marker the line prints; %VAR% expands when it runs.
         self.assertIn('echo PB_^DURABLE_%PB_DURABLE%\r', typed)
         self.assertIn('echo PB_^REATTACHED_%PB_DURABLE%\r', typed)

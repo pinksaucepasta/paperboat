@@ -84,6 +84,7 @@ class Session:
             self.terminal = Terminal(winhost.terminal_argv(PB, [*arguments, '--status-bar', status_bar]), env=winhost.terminal_env(PB))
             try:
                 if self.windows:
+                    self.terminal.wait_windows_prompt()
                     wait_windows_shell(self.terminal)
                 else:
                     self.terminal.expect(self.terminal.marker('READY', 'stty -echo; '), timeout=90)

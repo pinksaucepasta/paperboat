@@ -2424,6 +2424,9 @@ class RemainingFamilyPlumbing(unittest.TestCase):
             def __init__(self, arguments, env=None):
                 self.sent, self.expected, self.output = [], [], bytearray()
 
+            def wait_windows_prompt(self):
+                pass
+
             def send(self, data):
                 self.sent.append(data)
 
