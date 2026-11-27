@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
@@ -127,5 +128,32 @@ func TestInstallShowsWhyTheSuppliedExecutableWasRefused(t *testing.T) {
 	// The refusal is about the file, not the arguments: no usage text after it (stg-m1).
 	if failure.kind == commandUsage {
 		t.Fatal("a refused executable is reported as a usage error and prints the usage text")
+	}
+}
+
+// L30: a recipe install without root or passwordless sudo is refused by pb install itself, before anything is
+// installed, with pb pair's message in full on stderr (the installer runs pb install --json first).
+func TestInstallRefusesARecipeWithoutRootBeforeInstalling(t *testing.T) {
+	t.Setenv("PB_RECIPE", "pbr_"+strings.Repeat("a", 63))
+	noSystemd := hostruntimecmd.NoSystemd
+	t.Cleanup(func() { hostruntimecmd.NoSystemd = noSystemd })
+	hostruntimecmd.NoSystemd = func() bool { return false }
+	command := platformInstallCommand()
+	ctx := withInstallDependencies(t.Context(), func(d *installDependencies) {
+		d.runningSource = func() (string, installsource.Source, error) {
+			t.Fatal("pb install went on after the refusal")
+			return "", installsource.Source{}, nil
+		}
+	})
+	command.SetContext(withAuthDependencies(ctx, func(d *authDependencies) {
+		d.recipeInstallPreflight = func(context.Context) error { return errors.New("needs root") }
+	}))
+	var stderr bytes.Buffer
+	command.SetOut(&bytes.Buffer{})
+	command.SetErr(&stderr)
+	command.SetArgs([]string{"--json"})
+	err := command.Execute()
+	if err == nil || err.Error() != hostruntimecmd.RecipeNeedsRootMessage || !strings.Contains(stderr.String(), hostruntimecmd.RecipeNeedsRootMessage) {
+		t.Fatalf("err = %v, stderr = %q", err, stderr.String())
 	}
 }

@@ -17,6 +17,11 @@ reset)
   printf '{"ok":false,"error":{"message":"private fixture detail"}}\n'
   exit 19 ;;
 install)
+  if [ "$SCENARIO" = recipe-refusal ]; then
+    echo 'Installing needs root or passwordless sudo, and this shell has neither.' >&2
+    printf '{"ok":false,"error":{"message":"Installing needs root or passwordless sudo, and this shell has neither."}}\n'
+    exit 1
+  fi
   if [ "$SCENARIO" = install-failure ]; then
     printf '{"ok":false,"error":{"message":"private fixture detail"}}\n'
     exit 19
@@ -265,6 +270,21 @@ func TestInstallerPairsFromARecipeAndRefusesAMalformedToken(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(calls + ".recipe"); strings.TrimSpace(string(got)) != token {
 		t.Fatal("pair did not receive PB_RECIPE")
+	}
+}
+
+// L30: pb install refuses a recipe install without root or passwordless sudo and prints why; the installer then
+// stops without its generic "approve administrator access" line, and never pairs.
+func TestInstallerPrintsPBInstallsRecipeRefusal(t *testing.T) {
+	skipOnWindows(t)
+	r := linuxRelease(t)
+	calls := filepath.Join(r.root, "calls")
+	output, err := r.run(t, nil, "PB_RECIPE=pbr_"+strings.Repeat("a", 63), "SCENARIO=recipe-refusal", "CALLS="+calls, "PAPERBOAT_INSTALL_DIR="+filepath.Join(r.root, "dir"))
+	if err == nil || !strings.Contains(output, "Installing needs root or passwordless sudo") || strings.Contains(output, "approve administrator access") {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	if got, _ := os.ReadFile(calls); string(got) != "install\n" {
+		t.Fatalf("calls = %q, want install only", got)
 	}
 }
 

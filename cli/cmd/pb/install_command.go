@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/spf13/cobra"
 )
@@ -23,6 +24,9 @@ func platformInstallCommand() *cobra.Command {
 	command := &cobra.Command{Use: "install", Short: "Install this executable and its local service", Args: commandArgs(cobra.NoArgs), SilenceUsage: true, SilenceErrors: true,
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := refuseMacRootInstall(runtime.GOOS, os.Geteuid()); err != nil {
+				return err
+			}
+			if err := refuseRecipeInstallWithoutRoot(c); err != nil {
 				return err
 			}
 			executable, source, err := installDependenciesOf(c.Context()).runningSource()
@@ -89,4 +93,23 @@ func refuseMacRootInstall(platform string, euid int) error {
 		return commandRejection{reason: commandRejectMacRootInstall}
 	}
 	return nil
+}
+
+// refuseRecipeInstallWithoutRoot is pb pair's recipe preflight, run by pb install too: install.sh installs before it
+// pairs, so a recipe install (PB_RECIPE) without root or passwordless sudo got sudo's password errors here and never
+// reached pair's clear refusal (L30). Under --json the refusal is also printed in full on stderr, which the
+// installer shows: the JSON message is cut at 240 characters.
+func refuseRecipeInstallWithoutRoot(c *cobra.Command) error {
+	// Without systemd (a container) pb install only places the binary, without sudo, and pb pair skips the preflight.
+	if os.Getenv("PB_RECIPE") == "" || hostruntimecmd.NoSystemd() {
+		return nil
+	}
+	err := authDependenciesOf(c.Context()).recipeInstallPreflight(c.Context())
+	if err == nil {
+		return nil
+	}
+	if asJSON, _ := c.Flags().GetBool("json"); asJSON {
+		fmt.Fprintln(c.ErrOrStderr(), hostruntimecmd.RecipeNeedsRootMessage)
+	}
+	return usageError{err: err, publicMessage: hostruntimecmd.RecipeNeedsRootMessage, refusal: true}
 }

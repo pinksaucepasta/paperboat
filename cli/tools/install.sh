@@ -191,6 +191,15 @@ installer_pb=$product_file
 
 # Linux without systemd (a container): pb install only places the binary and pb pair prints how to run
 # `pb daemon --foreground`. A reset would stop and remove a service this machine cannot have.
+# pb_error_message prints the user-facing error.message (never a secret) of a failed `pb ... --json` result.
+pb_error_message() {
+  if [ "$os" = darwin ] && [ -x /usr/bin/plutil ]; then
+    /usr/bin/plutil -extract error.message raw -o - "$1" 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["error"]["message"])' "$1" 2>/dev/null || true
+  fi
+}
+
 no_systemd=false
 if [ "$os" = linux ] && [ ! -d /run/systemd/system ]; then no_systemd=true; fi
 
@@ -200,12 +209,7 @@ if [ "$pair" = true ] && [ "$no_systemd" = false ]; then
   "$installer_pb" reset --confirmation 'RESET PAPERBOAT' --hostname "$host" --enrollment-token-file "$token_file" --json > "$temporary/reset.json" || {
     status=$?
     # pb's user-facing error message (never a secret) names why reset failed; the token stays in its file.
-    reason=
-    if [ "$os" = darwin ] && [ -x /usr/bin/plutil ]; then
-      reason=$(/usr/bin/plutil -extract error.message raw -o - "$temporary/reset.json" 2>/dev/null || true)
-    elif command -v python3 >/dev/null 2>&1; then
-      reason=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["error"]["message"])' "$temporary/reset.json" 2>/dev/null || true)
-    fi
+    reason=$(pb_error_message "$temporary/reset.json")
     echo "pb installer: pb reset failed${reason:+: $reason}; rerun this installer to retry machine enrollment" >&2
     exit "$status"
   }
@@ -259,6 +263,9 @@ else
     "$installer_pb" install --json > "$install_result"
   fi || {
     status=$?
+    # pb install printed its refusal of a recipe install without root or passwordless sudo, which says what to do
+    # (L30); other install errors can carry captured privileged-step details, so they stay unprinted.
+    case $(pb_error_message "$install_result") in "Installing needs root or passwordless sudo"*) exit "$status" ;; esac
     echo "pb installer: pb install failed; rerun this installer and approve administrator access when prompted" >&2
     exit "$status"
   }
