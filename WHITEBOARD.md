@@ -4,6 +4,12 @@ Everything here is after launch unless its group says otherwise (user decision 2
 
 ## Soon: right after the smoke
 
+### Refresh vs ban row-lock order (found in L36 review)
+WorkOS session refresh locks the session row (FOR UPDATE OF s, held across the WorkOS call) and then updates the users row; operator ban locks users FOR UPDATE and then revokes sessions. Postgres resolves the rare deadlock by aborting one side; if refresh loses, the rotated refresh token is rolled back and that user is signed out once. Fix: take the users row lock first in refresh (separate lock before the session row), or update users in a second transaction. Already there before L36; impact is one sign-out of an account being banned.
+
+### email_not_verified shows as "provider unavailable"
+WorkOSVerificationError{Reason:"email_not_verified"} has HTTPStatus 0, so the callback handler answers 503 provider_unavailable instead of a clear "verify your email" message. Map it to its own 403 code and console text.
+
 ### Recovery path when a user's WorkOS identity changes (L36)
 Sign-in refuses a new WorkOS subject whose canonical address already has an account (F13-07, no alias merge). If WorkOS ever gives a real user a new subject for the same address (user deleted and recreated), they get email_already_registered with no way back in. Rare; after launch add a support-driven re-link (verified exact-address match, audited).
 
