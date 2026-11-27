@@ -34,7 +34,9 @@ HOST = os.environ.get("STAGING_HOST") or get_setting("staging_host")
 PROD = os.environ.get("STAGING_PROD_HOST") or get_setting("deployment_host")
 DIR = "pb-release-staging"                     # on HOST, relative to its home
 REGION, INSTANCE = get_setting("staging_region", "staging"), "slot-01"
-PUBLIC_LABEL = "pub"
+# "pub2", not "pub": Let's Encrypt's duplicate-certificate limit (per exact name set, per week) refused *.pub.stg after
+# many staging resets (issuer_rate_limited, 2026-11-27); a new name set issues at once. Bump again if it recurs.
+PUBLIC_LABEL = "pub2"
 # The regional domain is "stg." under the production API host's parent domain (read from the prod server env at init,
 # kept in the stack's .env): no domain is written in code.
 PORT = int(os.environ.get("STAGING_PORT", "18443"))           # inside the staging host's open public range 10000-59999
