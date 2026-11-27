@@ -193,6 +193,10 @@ type SessionConfig struct {
 	Random              io.Reader
 	Now                 func() time.Time
 	OnRenew             func(Lease)
+	// Interrupt, when canceled, also ends the wait between create retries, for a caller
+	// whose Start context is detached from user cancellation. It never cancels a create
+	// already in flight. Nil means only Start's context.
+	Interrupt context.Context
 	// Stderr receives one line per create retry; nil means os.Stderr.
 	Stderr io.Writer
 	// sleep waits between create retries; tests replace it.
@@ -218,6 +222,11 @@ func createLeaseRetryingUnreachable(ctx context.Context, config *SessionConfig, 
 	if sleep == nil {
 		sleep = sleepWithContext
 	}
+	waitCtx, stopWaiting := context.WithCancel(ctx)
+	defer stopWaiting()
+	if config.Interrupt != nil {
+		defer context.AfterFunc(config.Interrupt, stopWaiting)()
+	}
 	var waited time.Duration
 	for attempt := 1; ; attempt++ {
 		lease, err := config.LeaseClient.Create(ctx, *request)
@@ -237,8 +246,8 @@ func createLeaseRetryingUnreachable(ctx context.Context, config *SessionConfig, 
 			return lease, err
 		}
 		fmt.Fprintf(stderr, "Preview machine or its edge was not reachable; retrying in %s (attempt %d of %d)...\n", wait, attempt+1, unreachableCreateAttempts)
-		if !sleep(ctx, wait) {
-			return lease, err
+		if !sleep(waitCtx, wait) {
+			return Lease{}, waitCtx.Err() // canceled by the user, not "machine unreachable"
 		}
 		waited += wait
 		request.IdempotencyKey, config.IdempotencyKey = key, key

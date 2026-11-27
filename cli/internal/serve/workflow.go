@@ -278,6 +278,7 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 				Target:     target,
 				AccessMode: config.AccessMode, UserDeadline: config.UserDeadline,
 				Duration: config.Duration, LeaseLifecycle: lifecycle,
+				Interrupt: ctx, // sessionCtx is detached from Ctrl-C
 			})
 		}
 	}

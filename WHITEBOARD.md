@@ -381,3 +381,10 @@ ac1095ce while both go.mod files pin 2d32e5f0.
   a new case; after launch, one shared cancel/outcome path for all steps.
 - **Sign-up and email verification (2026-11-27):** `signup_policy` create-new branch doesn't check `EmailVerified`;
   relies on AuthKit's default email verification.
+- **Preview unreachable faults can flood Sentry (2026-11-27):** `machine_unreachable` files a support/Sentry fault per
+  attempt (httpapi `captureSupportWarning`, up to 3 per user create through the CLI retry). Check its Sentry level and
+  grouping, so an edge outage does not flood Sentry.
+- **`pb preview` retry budget (2026-11-27):** the 10 s budget counts only the waits, not the requests.
+- **Pool runner host keys (2026-11-27):** `linuxpool.sh` trusts pool hosts by `accept-new`
+  (`~/.ssh/linuxpool_known_hosts`). Record each runner's host-key fingerprint at start (from the runner's own log) and
+  connect with strict checking, so a replaced or foreign VM on a slot is refused (linuxpool-9, 2026-11-27).
