@@ -215,30 +215,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 		}
 		return commitPreparedInstallationLocked(ctx, request, paths, true)
 	case "rollback-supplied":
-		journal, err := readRollbackJournal(paths)
-		if err != nil {
-			return err
-		}
-		if bound {
-			// The current image may already be serving. Restoring its pathname
-			// alone does not replace the running supervisor or its worker.
-			// This process holds the activation lock (nativeLock): the nested steps must not take it again.
-			if err = stopUnix(ctx, request, true); err != nil {
-				return err
-			}
-		}
-		if err = rollbackFiles(paths, journal); err != nil {
-			return hostInstallFailure("Paperboat installation rollback is incomplete and runtime services may be stopped; retry pb install using the same installer executable to recover the retained installation journal", err)
-		}
-		if bound {
-			restored, err := loadInstallMetadata(paths.metadata, input.UID)
-			if err != nil {
-				return err
-			}
-			restored.Executable = paths.worker
-			return restorePriorNativeRuntime(ctx, restored, true)
-		}
-		return nil
+		return rollbackSupplied(ctx, paths, request, bound, input.UID)
 	default:
 		return ErrInvalidRequest
 	}
@@ -372,3 +349,43 @@ const suppliedRollbackWait = 10 * time.Second
 
 // suppliedWaitOutput is the root step's stderr, which the invoking pb prints; tests replace it.
 var suppliedWaitOutput io.Writer = os.Stderr
+
+// rollbackStop and rollbackRestore are the nested steps of a bound rollback; tests replace them to see the lock flag.
+var (
+	rollbackStop    = stopUnix
+	rollbackRestore = restoreAfterRollback
+)
+
+// rollbackSupplied undoes a pending supplied installation. Its caller (SuppliedBinary) holds the activation lock for
+// the whole run, so the nested stop and restore must not take it again: flock refuses a second descriptor even in
+// one process, and they waited out the CLI's recovery context instead of restoring.
+func rollbackSupplied(ctx context.Context, paths installPaths, request Request, bound bool, uid int) error {
+	journal, err := readRollbackJournal(paths)
+	if err != nil {
+		return err
+	}
+	if bound {
+		// The current image may already be serving. Restoring its pathname
+		// alone does not replace the running supervisor or its worker.
+		if err = rollbackStop(ctx, request, true); err != nil {
+			return err
+		}
+	}
+	if err = rollbackFiles(paths, journal); err != nil {
+		return hostInstallFailure("Paperboat installation rollback is incomplete and runtime services may be stopped; retry pb install using the same installer executable to recover the retained installation journal", err)
+	}
+	if !bound {
+		return nil
+	}
+	return rollbackRestore(ctx, paths, uid, true)
+}
+
+// restoreAfterRollback restarts the installation the rollback put back.
+func restoreAfterRollback(ctx context.Context, paths installPaths, uid int, nativeLockHeld bool) error {
+	restored, err := loadInstallMetadata(paths.metadata, uid)
+	if err != nil {
+		return err
+	}
+	restored.Executable = paths.worker
+	return restorePriorNativeRuntime(ctx, restored, nativeLockHeld)
+}

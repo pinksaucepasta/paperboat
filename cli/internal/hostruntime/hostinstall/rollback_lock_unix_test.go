@@ -5,6 +5,10 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -34,5 +38,36 @@ func TestNestedStepsOfAHeldActivationLockDoNotWaitForThemselves(t *testing.T) {
 	// Closing the borrowed lock must not release the holder's.
 	if _, err := updated.TryLockUnixNativeInstall(paths.updateState); !errors.Is(err, updated.ErrActivationPending) {
 		t.Fatalf("after the nested step, the holder's lock = %v, want still held", err)
+	}
+}
+
+// The bound rollback-supplied path itself hands its held lock to both nested steps (stop, then restore after the
+// files are put back): calling Stop/RestorePriorNativeRuntime there waited for its own lock.
+func TestBoundRollbackSuppliedPassesItsHeldLockToStopAndRestore(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root: the install journal must be root-owned")
+	}
+	root := t.TempDir()
+	paths := installPaths{journal: filepath.Join(root, "state", "journal.json"), metadata: filepath.Join(root, "metadata.json"),
+		worker: filepath.Join(root, "pb"), workerNext: filepath.Join(root, "pb.next"), workerRollback: filepath.Join(root, "pb.rollback")}
+	if err := writeJournal(paths.journal, installJournal{Schema: journalSchemaV1, Stage: "services_started"}); err != nil {
+		t.Fatal(err)
+	}
+	previousStop, previousRestore := rollbackStop, rollbackRestore
+	t.Cleanup(func() { rollbackStop, rollbackRestore = previousStop, previousRestore })
+	var steps []string
+	rollbackStop = func(_ context.Context, _ Request, held bool) error {
+		steps = append(steps, "stop held="+strconv.FormatBool(held))
+		return nil
+	}
+	rollbackRestore = func(_ context.Context, _ installPaths, _ int, held bool) error {
+		steps = append(steps, "restore held="+strconv.FormatBool(held))
+		return nil
+	}
+	if err := rollbackSupplied(context.Background(), paths, Request{}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"stop held=true", "restore held=true"}; !reflect.DeepEqual(steps, want) {
+		t.Fatalf("bound rollback steps = %v, want %v", steps, want)
 	}
 }
