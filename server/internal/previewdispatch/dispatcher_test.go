@@ -464,3 +464,35 @@ func TestDispatchLocalDialerFailureIsNotUnreachable(t *testing.T) {
 		t.Fatalf("local dialer failure = %#v", err)
 	}
 }
+
+// A dial that times out on its own (net.Dialer.Timeout) while the request is
+// still alive wrote nothing: certain, even joined with another edge's refusal.
+func TestDispatchDialTimeoutIsCertainUnreachable(t *testing.T) {
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		// What net.Dialer returns when its own Timeout fires (Go >= 1.23 wraps
+		// context.DeadlineExceeded); the request ctx is still alive.
+		timeoutErr := &net.OpError{Op: "dial", Net: "tcp", Err: context.DeadlineExceeded}
+		refused := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		return nil, errors.Join(timeoutErr, refused)
+	}}}
+	_, err := l41Dispatcher(t, client, "https://machine.rt.example.test").Dispatch(context.Background(), testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || dispatchErr.Uncertain || dispatchErr.Code != "machine_unreachable" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("dial timeout = %#v (%v)", err, err)
+	}
+}
+
+// The dispatch's own deadline expiring during the dial keeps the old timeout class.
+func TestDispatchRequestDeadlineDuringDialStaysUncertain(t *testing.T) {
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		<-ctx.Done()
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: ctx.Err()}
+	}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := l41Dispatcher(t, client, "https://machine.rt.example.test").Dispatch(ctx, testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || !dispatchErr.Uncertain || dispatchErr.Code != "timeout" {
+		t.Fatalf("request deadline = %#v", err)
+	}
+}

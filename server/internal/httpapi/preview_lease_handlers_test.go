@@ -664,5 +664,8 @@ func TestPreviewDispatchUnreachedMachineIsNotAServerError(t *testing.T) {
 		if w.Code != http.StatusConflict || w.Header().Get("Retry-After") != retryAfter || !strings.Contains(w.Body.String(), `"`+code+`"`) {
 			t.Fatalf("%s: status=%d Retry-After=%q body=%s", code, w.Code, w.Header().Get("Retry-After"), w.Body.String())
 		}
+		if code == "machine_unreachable" && !strings.Contains(w.Body.String(), "the machine or its edge could not be reached") {
+			t.Fatalf("machine_unreachable message: %s", w.Body.String())
+		}
 	}
 }

@@ -606,7 +606,7 @@ func writePreviewDispatchError(w http.ResponseWriter, r *http.Request, err error
 	case "machine_unreachable":
 		// Dial or TLS handshake failed before any request byte was sent (L41).
 		w.Header().Set("Retry-After", "2")
-		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The machine could not be reached and nothing was sent; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
+		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The preview request was not sent: the machine or its edge could not be reached; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
 	case "route_unavailable":
 		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusServiceUnavailable, dispatch.Code, "control_unavailable", "The selected machine route is unavailable. Refresh the machine connection, then create a new preview with a new Idempotency-Key.", "changed", false, "refresh_machine", err)
 	case "lease_expired":

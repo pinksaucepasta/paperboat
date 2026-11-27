@@ -316,7 +316,9 @@ var errRemoteResponseInvalid = errors.New("preview dispatch response is invalid"
 // cancels, route moves and local failures (the PostgreSQL route lookup in the
 // edge dialer) are not, and keep their usual classification.
 func networkUnreached(err error, tlsStarted bool) bool {
-	if errors.Is(err, runtimeattachment.ErrRouteMoving) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	// A dial's own timeout (net.Dialer.Timeout) wraps context.DeadlineExceeded
+	// but wrote nothing; the caller checks that the request context is alive.
+	if errors.Is(err, runtimeattachment.ErrRouteMoving) || errors.Is(err, context.Canceled) {
 		return false
 	}
 	var connectErr *pgconn.ConnectError
