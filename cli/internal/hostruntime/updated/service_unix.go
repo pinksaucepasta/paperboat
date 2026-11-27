@@ -81,7 +81,7 @@ type Config struct {
 	Participants          UnixParticipants
 	Environment           map[string]string
 	// RefreshManuals runs the committed executable's bundled-manual extractor.
-	// Failure keeps the existing committed transaction pending for recovery.
+	// Failure is a warning only; it never fails the committed update.
 	PriorOwnerRecorded func(context.Context, workerupdate.Release) (bool, error)
 	RefreshManuals     func(context.Context) error
 	// SessionOwners resolves the protected installed account metadata for owner
@@ -152,19 +152,7 @@ func New(config Config) (*Service, error) {
 	service.managerConfig.ApplyPrepared = service.applyPrepared
 	service.managerConfig.RecoverPrepared = service.recoverPrepared
 	service.managerConfig.RecoveryExecutable = config.RecoveryExecutable
-	service.managerConfig.FinalizePrepared = func(ctx context.Context, committed installsource.Source) error {
-		if config.FinalizePrepared != nil {
-			if err := config.FinalizePrepared(ctx, committed); err != nil {
-				return err
-			}
-		}
-		if config.RefreshManuals != nil {
-			if err := config.RefreshManuals(ctx); err != nil {
-				return err
-			}
-		}
-		return autoupdate.ClearOwnerMaintenance(filepath.Join(config.StateRoot, "owner-maintenance.json"))
-	}
+	service.managerConfig.FinalizePrepared = service.finalizePrepared
 	manager, err := service.newManager(config.Active)
 	if err != nil {
 		return nil, err
@@ -610,4 +598,17 @@ func handoffCandidate(handoff *unixActivationHandoff) string {
 		return ""
 	}
 	return handoff.Candidate
+}
+
+// finalizePrepared runs after the durable native commit. Manual pages are best effort.
+func (s *Service) finalizePrepared(ctx context.Context, committed installsource.Source) error {
+	if s.config.FinalizePrepared != nil {
+		if err := s.config.FinalizePrepared(ctx, committed); err != nil {
+			return err
+		}
+	}
+	if s.config.RefreshManuals != nil {
+		warnManualRefresh(s.config.RefreshManuals(ctx))
+	}
+	return autoupdate.ClearOwnerMaintenance(filepath.Join(s.config.StateRoot, "owner-maintenance.json"))
 }

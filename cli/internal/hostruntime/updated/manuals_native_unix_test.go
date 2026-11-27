@@ -58,16 +58,18 @@ func TestNativeManualCommitUsesCommittedBinary(t *testing.T) {
 	if got, _ := os.ReadFile(page); !bytes.Equal(got, previous) || calls != 0 {
 		t.Fatal("precommit rollback changed manuals")
 	}
-	// A blocked target leaves the postcommit refresh pending, without undoing
-	// runtime commit. The same gate can be retried by journal recovery.
+	// A blocked target only warns; the runtime commit completes and the next
+	// commit refreshes the manuals.
 	if err := os.Remove(page); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(directory, "missing"), page); err != nil {
 		t.Fatal(err)
 	}
-	if err := gate.Commit(ctx, req); err == nil {
-		t.Fatal("manual failure was reported as complete")
+	manualWarnings = io.Discard
+	defer func() { manualWarnings = os.Stderr }()
+	if err := gate.Commit(ctx, req); err != nil {
+		t.Fatal("manual failure blocked the runtime commit", err)
 	}
 	if err := os.Remove(page); err != nil {
 		t.Fatal(err)

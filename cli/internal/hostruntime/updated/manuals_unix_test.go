@@ -3,12 +3,15 @@
 package updated
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
 )
 
@@ -28,8 +31,13 @@ func TestManualCommitOrderingRetryAndRollbackPreservation(t *testing.T) {
 	inner := &manualInnerGate{}
 	writes := 0
 	failure := errors.New("manual storage unavailable")
-	gate := &manualCommitGate{ActivationGate: inner, refresh: func(_ context.Context, r workerupdate.Release) error {
-		if inner.commits == 0 || r.Version != "candidate" {
+	gate := &manualCommitGate{ActivationGate: inner, verify: func(r workerupdate.Release) error {
+		if r.Version != "candidate" {
+			t.Fatal("wrong candidate verified")
+		}
+		return nil
+	}, refresh: func(context.Context) error {
+		if inner.commits == 0 {
 			t.Fatal("manuals refreshed before matching runtime commit")
 		}
 		writes++
@@ -47,11 +55,32 @@ func TestManualCommitOrderingRetryAndRollbackPreservation(t *testing.T) {
 		t.Fatal("manuals modified before commit", err)
 	}
 	inner.err = nil
-	if err := gate.Commit(ctx, req); !errors.Is(err, failure) {
-		t.Fatal("refresh failure was hidden", err)
+	var warnings bytes.Buffer
+	manualWarnings = &warnings
+	defer func() { manualWarnings = os.Stderr }()
+	// macpool-5 11-27: a refused manual directory failed every finish until the
+	// journal was quarantined as commit_failed. It must only warn.
+	if err := gate.Commit(ctx, req); err != nil || writes != 1 || !strings.Contains(warnings.String(), failure.Error()) {
+		t.Fatal("manual refresh failure blocked the runtime commit", err, warnings.String())
 	}
 	if err := gate.Commit(ctx, req); err != nil || writes != 2 || inner.rollbacks != 1 {
-		t.Fatal("commit retry did not repair manuals", err)
+		t.Fatal("later commit did not refresh manuals", err)
+	}
+}
+
+func TestFinalizePreparedCompletesWhenManualRefreshFails(t *testing.T) {
+	var warnings bytes.Buffer
+	manualWarnings = &warnings
+	defer func() { manualWarnings = os.Stderr }()
+	root := t.TempDir()
+	s := &Service{config: Config{StateRoot: root, RefreshManuals: func(context.Context) error {
+		return errors.New("manual refresh remains pending")
+	}}}
+	if err := s.finalizePrepared(context.Background(), installsource.Source{}); err != nil {
+		t.Fatal("manual refresh failure failed the activation finish", err)
+	}
+	if !strings.Contains(warnings.String(), "manual refresh remains pending") {
+		t.Fatal("manual refresh failure was not reported", warnings.String())
 	}
 }
 
