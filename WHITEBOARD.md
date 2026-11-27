@@ -377,3 +377,7 @@ ac1095ce while both go.mod files pin 2d32e5f0.
   cleanup returned an invalid result", and never says the old version was restored. On an installed but not signed-in
   Mac, `machineguard` stayed on the new version after the rollback and `pb install` did not replace it; not known
   whether Ctrl-C causes that (next check: the same rollback without Ctrl-C).
+- **One cancel path (2026-11-27):** Ctrl-C handling is per-step (install, update, restore, preview), so each review finds
+  a new case; after launch, one shared cancel/outcome path for all steps.
+- **Sign-up and email verification (2026-11-27):** `signup_policy` create-new branch doesn't check `EmailVerified`;
+  relies on AuthKit's default email verification.
