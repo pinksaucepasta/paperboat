@@ -6,8 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
+	"strings"
+	"syscall"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 
@@ -153,6 +158,10 @@ func installMachineGuardReversible(ctx context.Context, request Request, units *
 		return nil, nil
 	}
 	log.Printf("paperboat: replacing machine guard: %v", readyErr)
+	// A guard that is simply not running (fresh machine) is expected and is not a cause of a later failure.
+	if machineGuardNotRunning(readyErr) {
+		readyErr = nil
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, hostInstallFailure("machine guard installation canceled", readyErr, err, context.Cause(ctx))
 	}
@@ -188,6 +197,25 @@ func finishMachineGuard(ctx context.Context, undo guardUndo, installErr error) e
 	defer cancel()
 	if err := undo.Restore(restoreCtx); err != nil {
 		return service.RollbackIncomplete(hostInstallFailure("restore the previous Paperboat machine guard", err))
+	}
+	return nil
+}
+
+// machineGuardNotRunning reports a probe miss that only means no guard is serving yet.
+func machineGuardNotRunning(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// ErrNoServerURL is returned when an installation has no Paperboat API URL.
+var ErrNoServerURL = errors.New("this pb build has no Paperboat server URL; run pb with --server https://<your Paperboat API host>")
+
+// ValidateControlURL fails early, before any service is touched, when the control URL is empty or invalid.
+func ValidateControlURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return ErrNoServerURL
+	}
+	if _, err := config.NormalizeServerURL(raw); err != nil {
+		return fmt.Errorf("invalid Paperboat server URL; run pb with --server https://<your Paperboat API host>: %w", err)
 	}
 	return nil
 }

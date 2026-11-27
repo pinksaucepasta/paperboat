@@ -3150,6 +3150,9 @@ func Validate(request Request, _ int) error {
 	if request.EnrollmentPending {
 		return hostInstallFailure("enrollment is pending", ErrInvalidRequest)
 	}
+	if err := ValidateControlURL(request.ControlURL); err != nil {
+		return hostInstallFailure(err.Error(), ErrInvalidRequest, err)
+	}
 	listenHost, listenPort, listenErr := net.SplitHostPort(request.HelperListenAddress)
 	if listenErr != nil || listenPort == "" || net.ParseIP(listenHost) == nil || !net.ParseIP(listenHost).IsLoopback() {
 		return hostInstallFailure("helper listen address", ErrInvalidRequest)

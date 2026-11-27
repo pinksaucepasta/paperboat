@@ -6,6 +6,7 @@ Custom test builds deliberately have no release URL and cannot auto-update.
 The manifest appears only after all three binaries and compressed archives succeed.
 """
 import argparse
+import urllib.parse
 import hashlib
 import json
 import lzma
@@ -22,6 +23,16 @@ def git(*args):
     return subprocess.check_output(['git', '-C', str(ROOT), *args], text=True).strip()
 
 
+def api_url(value):
+    parsed = urllib.parse.urlsplit(value.strip())
+    host = (parsed.hostname or '').lower()
+    if parsed.scheme != 'https' or not host or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
+        raise argparse.ArgumentTypeError('--server-url must be the https Paperboat API URL')
+    if host.startswith(('app.', 'console.')):
+        raise argparse.ArgumentTypeError('--server-url must be the API, not the console host ' + host)
+    return parsed.scheme + '://' + parsed.netloc
+
+
 def build(args):
     commit = git('rev-parse', args.revision + '^{commit}')
     version = 'dev-' + git('rev-parse', '--short', commit)
@@ -31,7 +42,7 @@ def build(args):
     if manifest.exists():
         raise RuntimeError('committed build already exists; use its manifest instead of rebuilding')
     values = dict(Version=version, Commit=commit, ProtocolVersion='1',
-                  DefaultServerURL=args.server_url, DefaultReleaseURL='')
+                  DefaultServerURL=args.server_url, DefaultReleaseURL=args.server_url)
     flags = ' '.join('-X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.' + key + '=' + value
                      for key, value in values.items())
     with tempfile.TemporaryDirectory(prefix='paperboat-device-source-') as directory:
@@ -61,6 +72,6 @@ def build(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--revision', default='HEAD')
-    parser.add_argument('--server-url', required=True)
+    parser.add_argument('--server-url', required=True, type=api_url)
     parser.add_argument('--output', type=Path, required=True)
     build(parser.parse_args())

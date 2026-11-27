@@ -102,6 +102,9 @@ func Validate(request Request, sudoUID int) error {
 	if !pathListValid(request.Path) {
 		return hostInstallFailure("service PATH", ErrInvalidRequest)
 	}
+	if err := ValidateControlURL(request.ControlURL); err != nil {
+		return hostInstallFailure(err.Error(), ErrInvalidRequest, err)
+	}
 	parsed, err := url.Parse(request.ControlURL)
 	if err != nil {
 		return hostInstallFailure("control URL", ErrInvalidRequest, err)

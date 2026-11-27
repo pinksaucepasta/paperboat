@@ -135,8 +135,13 @@ func pairCommand() *cobra.Command {
 			if fresh && serverURL == "" {
 				serverURL = strings.TrimSpace(buildinfo.DefaultServerURL)
 			}
-			if fresh && serverURL == "" {
-				return localArgumentError("fresh pairing requires --server")
+			if fresh {
+				if serverURL, err = pairPreflightServerURL(serverURL); err != nil {
+					return err
+				}
+				if err := checkServerIsAPI(command.Context(), authDependenciesOf(command.Context()).httpClient(), serverURL); err != nil {
+					return err
+				}
 			}
 			if fresh {
 				token, _ := command.Flags().GetString("enrollment-token")
