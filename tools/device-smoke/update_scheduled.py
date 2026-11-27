@@ -11,7 +11,7 @@ downloaded ahead).
      still on its version; after T2 it is on the newest official release (the `latest_version` that
      `pb update check` reported), doctor is healthy, the guard runs the same version, activation is done
      and the next maintenance moved to the next day. While the activation is still pending, and again after it,
-     a small file arrives within 30 s both ways: from the PEER machine into this one and from this one to the peer
+     a 1 MiB file arrives within 30 s both ways: from the PEER machine into this one and from this one to the peer
   3. the original settings are restored, also when a step fails.
 """
 import argparse
@@ -19,11 +19,11 @@ import datetime
 import json
 import os
 import pathlib
-import tempfile
 import time
 
 import pairing_lifecycle as p
 import update_health
+import windows_target
 import winhost
 
 PB = winhost.pb_path()
@@ -106,9 +106,9 @@ def wait_until(deadline, condition, what):
 def transfers(me, peer, phase):
     """A small file arrives within SEND_SECONDS both ways: the peer sends into this machine, this machine sends out."""
     name = 'updcheck-%s.bin' % phase
-    with tempfile.TemporaryDirectory() as folder:
-        path = pathlib.Path(folder, name)
-        path.write_bytes(os.urandom(65536))
+    with winhost.workdir('updcheck') as folder:  # on the device pb runs on: that is the file `pb send` reads
+        path = folder / name
+        winhost.write_random(path, 1 << 20)
         for direction, args in (
                 ('into this machine', ('exec', peer, '--timeout', '%ds' % SEND_SECONDS, '--', 'sh', '-c', PEER_SEND, name, me)),
                 ('out of this machine', ('send', str(path), '--to', peer))):
@@ -119,7 +119,12 @@ def transfers(me, peer, phase):
                                      % (phase, direction, SEND_SECONDS, error)) from None
     # best effort: the received copies are this check's own files
     p.command_result(PB, 'exec', peer, '--', 'sh', '-c', 'rm -f "$HOME/Paperboat/Inbox/$0"', name, timeout=30)
-    pathlib.Path.home().joinpath('Paperboat', 'Inbox', name).unlink(missing_ok=True)
+    device = winhost.device()
+    if device:
+        device.ps('remove received file', "Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path %s %s)"
+                  % (windows_target.INBOX, winhost.ps_quote(name)))
+    else:
+        pathlib.Path.home().joinpath('Paperboat', 'Inbox', name).unlink(missing_ok=True)
 
 
 def activation_pending():
