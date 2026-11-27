@@ -22,13 +22,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 	"github.com/spf13/cobra"
 )
 
 // The protected installer authenticates bundles against its own retained TUF
 // state. Staging here grants neither official provenance nor rollback permission.
-func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
+func actionUpdateFrom(command *cobra.Command, input string, force bool) (resultErr error) {
 	approval, _ := command.Flags().GetString("approve")
 	if approval != "" {
 		return commandRejection{reason: commandRejectUpdateFlags}
@@ -39,12 +40,28 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	if err != nil {
 		return stagingFailure(err, err)
 	}
-	defer os.RemoveAll(directory)
+	defer func() {
+		// A root step still finishing in the background (an install or rollback past pb's bound) reads the staged
+		// update after pb exits: removing it made that step fail before it restored anything (device check 11-27).
+		// The system temporary directory's own cleanup removes it later.
+		if !stillFinishing(resultErr) {
+			_ = os.RemoveAll(directory)
+		}
+	}()
 	staged, err := installsource.StageInput(ctx, input, directory, nil)
 	if err != nil {
 		return stagingFailure(err, commandRejection{reason: commandRejectUpdateSource, detail: err.Error()})
 	}
-	return installStagedUpdateSource(command, ctx, staged.Path, force)
+	return installStaged(command, ctx, staged.Path, force)
+}
+
+// installStaged installs the staged update; tests replace it.
+var installStaged = installStagedUpdateSource
+
+// stillFinishing reports a failure whose privileged step is still running in the background.
+func stillFinishing(err error) bool {
+	var failure *hostruntimecmd.CommandFailure
+	return errors.As(err, &failure) && failure.StillFinishing()
 }
 
 // stagingFailure says "disk full" when the copy of the update into the temporary directory (or creating that directory)

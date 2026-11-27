@@ -279,7 +279,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 			if link != nil {
 				linkErr = link.Rollback()
 			}
-			return "", StillFinishingFailure(fmt.Sprintf("The update failed and Paperboat is still restoring the previous version in the background after %s. Run `pb status` to see when it is done, then run `pb install` again to finish restoring this computer's Paperboat service.", suppliedRollbackBound), cause, binaryErr, linkErr)
+			return "", StillFinishingFailure(fmt.Sprintf("The update failed and Paperboat is still restoring the previous version in the background after %s. Wait a few minutes for it to finish, then run `pb install` to make sure the previous version is fully restored.", suppliedRollbackBound), cause, binaryErr, linkErr)
 		}
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), suppliedRecoveryBound)
 		defer cancel()
