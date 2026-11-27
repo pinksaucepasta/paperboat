@@ -51,7 +51,7 @@ func TestAReadyGuardOnAnotherVersionIsReplaced(t *testing.T) {
 		existingMachineGuardReady, prepareMachineGuardForInstall, installMissingMachineGuard = oldProbe, oldPrepare, oldInstall
 	})
 	running := "dev-e71c7180"
-	existingMachineGuardReady = func(_ context.Context, version string) error {
+	existingMachineGuardReady = func(_ context.Context, version string, _ int) error {
 		if running != version {
 			return errors.New("machine guard runs another version")
 		}

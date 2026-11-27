@@ -52,7 +52,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		installMissingMachineGuard = oldInstall
 	})
 	var probed, prepared, installed int
-	existingMachineGuardReady = func(ctx context.Context, _ string) error {
+	existingMachineGuardReady = func(ctx context.Context, _ string, _ int) error {
 		probed++
 		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
 			t.Fatal("guard readiness probe is not bounded")
@@ -79,7 +79,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		t.Fatal("invalid supplied source reached guard readiness or mutation")
 	}
 	request.Source = source
-	existingMachineGuardReady = func(context.Context, string) error { probed++; return errors.New("unavailable") }
+	existingMachineGuardReady = func(context.Context, string, int) error { probed++; return errors.New("unavailable") }
 	if err := installMachineGuard(context.Background(), request, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,14 @@ func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
 		guard    machineguard.RuntimeStatus
 		version  string
 		notOlder bool
+		revision int // the candidate build's guard revision; 0 means r
 	}{
+		// 2026-11-27: official pb 2026.11.26.21 running `pb update --from <dev build>` kept its own guard because the
+		// decision used the running installer's revision, not the candidate's.
+		"official guard replaced by a dev build of a newer revision":    {machineguard.RuntimeStatus{Version: "2026.11.26.21", Revision: r}, "dev-x", false, r + 1},
+		"official guard kept by a dev build of the same revision":       {machineguard.RuntimeStatus{Version: "2026.11.26.21", Revision: r}, "dev-x", true, r},
+		"dev guard of a higher revision replaced by an older dev build": {machineguard.RuntimeStatus{Version: "dev-a", Revision: r + 1}, "dev-x", false, r},
+		"dev guard replaced by a release of a newer revision":           {machineguard.RuntimeStatus{Version: "dev-a", Revision: r + 1}, "2026.11.16.0", false, r + 2},
 		"same version":                    {machineguard.RuntimeStatus{Version: "2026.11.16.0"}, "2026.11.16.0", true},
 		"newer release kept":              {machineguard.RuntimeStatus{Version: "2026.11.17.2"}, "2026.11.16.0", true},
 		"older release replaced":          {machineguard.RuntimeStatus{Version: "2026.11.13.0"}, "2026.11.16.0", false},
@@ -114,8 +121,25 @@ func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
 		"dev guard replaced by a release": {machineguard.RuntimeStatus{Version: "dev-76b5e9764", Revision: r}, "2026.11.16.0", false},
 		"dev guard of a lower revision":   {machineguard.RuntimeStatus{Version: "dev-a344bd52b", Revision: r - 1, Features: machineguard.Features()}, "dev-de73faa7f", false},
 	} {
-		if got := MachineGuardNotOlder(c.guard, c.version); got != c.notOlder {
+		revision := c.revision
+		if revision == 0 {
+			revision = r
+		}
+		if got := MachineGuardNotOlder(c.guard, c.version, revision); got != c.notOlder {
 			t.Errorf("%s: not older = %v", name, got)
 		}
+	}
+}
+
+// The installing process may be another (older) build: readiness is judged against the candidate units' revision.
+func TestCandidateGuardRevisionIsTheUnits(t *testing.T) {
+	if got := candidateGuardRevision(&machineguard.UnitSet{Revision: machineguard.Revision + 5}); got != machineguard.Revision+5 {
+		t.Fatalf("candidate revision = %d", got)
+	}
+	if got := candidateGuardRevision(nil); got != machineguard.Revision {
+		t.Fatalf("own build revision = %d", got)
+	}
+	if got := candidateGuardRevision(&machineguard.UnitSet{}); got != machineguard.Revision {
+		t.Fatalf("unknown revision = %d", got)
 	}
 }

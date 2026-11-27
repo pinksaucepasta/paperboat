@@ -22,7 +22,7 @@ func useFakeGuard(t *testing.T, version, domain string, installFails bool) (*str
 		existingMachineGuardReady, existingMachineGuardDomain, prepareMachineGuardForInstall, installMissingMachineGuard = oldReady, oldDomain, oldPrepare, oldInstall
 	})
 	running, undo := version, &recordingUndo{}
-	existingMachineGuardReady = func(_ context.Context, want string) error {
+	existingMachineGuardReady = func(_ context.Context, want string, _ int) error {
 		if running != want {
 			return errors.New("machine guard runs " + running)
 		}

@@ -58,7 +58,7 @@ func TestGuardInstallRecordsTheServersLocalAccessDomain(t *testing.T) {
 			t.Cleanup(func() {
 				existingMachineGuardReady, prepareMachineGuardForInstall, installMissingMachineGuard = oldReady, oldPrepare, oldInstall
 			})
-			existingMachineGuardReady = func(context.Context, string) error { return errors.New("machine guard requires upgrade") }
+			existingMachineGuardReady = func(context.Context, string, int) error { return errors.New("machine guard requires upgrade") }
 			prepareMachineGuardForInstall = func() error { return nil }
 			var installedDomain string
 			installMissingMachineGuard = func(_ context.Context, _, domain string, _ *machineguard.UnitSet) (guardUndo, error) {
@@ -84,7 +84,7 @@ func TestGuardInstallFailsClearlyWhenTheServerDomainIsUnavailable(t *testing.T) 
 	t.Cleanup(func() {
 		existingMachineGuardReady, prepareMachineGuardForInstall, installMissingMachineGuard = oldReady, oldPrepare, oldInstall
 	})
-	existingMachineGuardReady = func(context.Context, string) error { return errors.New("guard absent") }
+	existingMachineGuardReady = func(context.Context, string, int) error { return errors.New("guard absent") }
 	prepareMachineGuardForInstall = func() error { return nil }
 	installMissingMachineGuard = func(context.Context, string, string, *machineguard.UnitSet) (guardUndo, error) {
 		t.Fatal("the guard was installed without a local access domain")

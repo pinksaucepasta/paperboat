@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"log"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/cli/internal/selfupdate"
@@ -57,7 +59,7 @@ func readMachineGuardDomain(ctx context.Context) string {
 // install replaced the fleet's newer guard). Newer guards stay compatible with older clients, which
 // send a request field only when the guard lists its feature. Prior art: Windows Installer does not
 // downgrade a shared component unless told to (MSI component rules / file versioning rules).
-func readyMachineGuard(ctx context.Context, version string) (resultErr error) {
+func readyMachineGuard(ctx context.Context, version string, revision int) (resultErr error) {
 	client, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
 	if err != nil {
 		return err
@@ -72,15 +74,20 @@ func readyMachineGuard(ctx context.Context, version string) (resultErr error) {
 	if err := validateMachineGuardStatus(status); err != nil {
 		return err
 	}
-	if !MachineGuardNotOlder(status, version) {
-		return fmt.Errorf("machine guard runs %s, older than this installation (%s)", status.Version, version)
+	if !MachineGuardNotOlder(status, version, revision) {
+		return fmt.Errorf("machine guard runs %s (revision %d), not the guard of this installation (%s, revision %d)", status.Version, status.Revision, version, revision)
 	}
 	return nil
 }
 
-// MachineGuardNotOlder (also pb doctor's mismatch test): the same version, a release not older, or (for development builds, whose
-// versions do not order) a guard whose code revision is not lower than this build's.
-func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string) bool {
+// MachineGuardNotOlder (also pb doctor's mismatch test) reports whether a running guard may stay for the build
+// of the given version whose guard code is revision (the build being installed, not the running process: an
+// older pb installing a newer build must judge the guard against the new build). It is true for the same
+// version or a release not older. Development versions do not order, so a development build keeps only a
+// guard of its own revision (an official guard with another revision is replaced, 2026-11-27: pb 2026.11.26.21
+// updating to a dev build kept its own guard), and a release keeps a development guard only when that guard
+// carries newer guard code (canaries 2026-11-26: custom -> official kept the custom build's guard).
+func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string, revision int) bool {
 	if status.Version == version {
 		return true
 	}
@@ -88,11 +95,18 @@ func MachineGuardNotOlder(status machineguard.RuntimeStatus, version string) boo
 		return order >= 0
 	}
 	if _, err := selfupdate.CompareVersions(version, version); err == nil {
-		// A release replaces a development guard unless that guard carries newer guard code (canaries
-		// 2026-11-26: custom -> official kept the custom build's guard).
-		return status.Revision > machineguard.Revision
+		return status.Revision > revision
 	}
-	return status.Revision >= machineguard.Revision
+	return status.Revision == revision
+}
+
+// candidateGuardRevision is the guard revision of the build being installed: the units' own, or this
+// process's when the units are this build's (nil) or do not say (an older build's).
+func candidateGuardRevision(units *machineguard.UnitSet) int {
+	if units != nil && units.Revision != 0 {
+		return units.Revision
+	}
+	return machineguard.Revision
 }
 
 func validateMachineGuardStatus(status machineguard.RuntimeStatus) error {
@@ -128,11 +142,12 @@ func installMachineGuardReversible(ctx context.Context, request Request, units *
 		return nil, hostInstallFailure("verify Paperboat machine guard executable", err)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	readyErr := existingMachineGuardReady(probeCtx, request.Source.Version)
+	readyErr := existingMachineGuardReady(probeCtx, request.Source.Version, candidateGuardRevision(units))
 	cancel()
 	if readyErr == nil {
 		return nil, nil
 	}
+	log.Printf("paperboat: replacing machine guard: %v", readyErr)
 	if err := ctx.Err(); err != nil {
 		return nil, hostInstallFailure("machine guard installation canceled", readyErr, err, context.Cause(ctx))
 	}

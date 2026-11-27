@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 )
 
 // probeDoctorGuardVersion reports a machine guard older than pb: the guard ships with pb and every installation,
@@ -27,7 +28,7 @@ func probeDoctorGuardVersion(ctx context.Context) doctorpkg.Check {
 		check.Recovery = "Run `pb install` again to reinstall the machine guard, then run `pb doctor` again."
 		return check
 	}
-	if !hostinstall.MachineGuardNotOlder(status, buildinfo.Version) {
+	if !hostinstall.MachineGuardNotOlder(status, buildinfo.Version, machineguard.Revision) {
 		check.Status = doctorpkg.StatusWarning
 		check.Summary = "The machine guard runs " + status.Version + ", pb is " + buildinfo.Version + "."
 		check.Recovery = "Run `pb install` again to install the matching machine guard, then run `pb doctor` again."
