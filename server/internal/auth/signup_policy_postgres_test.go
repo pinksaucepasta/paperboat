@@ -58,17 +58,30 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		}
 		return n
 	}
-	// Order 1: x+tag first, then x and other aliases are refused, never merged.
-	first, session, err := login("first", strings.ToUpper(prefix)+".One+first@EXAMPLE.TEST")
+	refusedAlias := func(t *testing.T, err error, canonical string) {
+		t.Helper()
+		var alias *EmailAliasNotAllowedError
+		if !errors.As(err, &alias) || alias.Canonical != canonical || alias.Error() != "Sign-up with a plus address is not allowed. Sign up with "+canonical+"." {
+			t.Fatalf("want plus-address refusal for %s, got %v", canonical, err)
+		}
+	}
+	canonical := prefix + ".one@example.test"
+	// Order 1: x+tag first is refused outright, so it can never claim x; then x signs up.
+	start := countUsers(t)
+	_, tagSession, err := login("tag-first", strings.ToUpper(prefix)+".One+first@EXAMPLE.TEST")
+	refusedAlias(t, err, canonical)
+	if tagSession.Token != "" || countUsers(t) != start {
+		t.Fatal("a refused plus-address sign-up created an account or session")
+	}
+	first, session, err := login("first", strings.ToUpper(prefix)+".One@EXAMPLE.TEST")
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonical := prefix + ".one@example.test"
 	if session.UserID != first.ID {
 		t.Fatal("initial session has wrong account")
 	}
-	// The contact address is the exact verified address, never its canonical form.
-	if first.PrimaryEmail != prefix+".one+first@example.test" {
+	// The contact address is the exact verified address (lowercased).
+	if first.PrimaryEmail != canonical {
 		t.Fatalf("contact address = %q, want the exact address", first.PrimaryEmail)
 	}
 	before := countUsers(t)
@@ -83,7 +96,7 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		t.Fatal("a refused sign-up created an account")
 	}
 	// The existing account is unchanged and still signs in with its own identity.
-	again, againSession, err := login("first", strings.ToUpper(prefix)+".One+first@EXAMPLE.TEST")
+	again, againSession, err := login("first", strings.ToUpper(prefix)+".One@EXAMPLE.TEST")
 	if err != nil || again.ID != first.ID || again.PrimaryEmail != first.PrimaryEmail || againSession.UserID != first.ID {
 		t.Fatalf("existing account changed or cannot sign in: %v", err)
 	}
@@ -143,10 +156,14 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	if _, _, err := refresher.AuthenticateRequest(ctx, request); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("changed provider subject survived refresh: %v", err)
 	}
-	// A legacy row whose stored address is a +tag is left as is; a new alias is refused.
+	// A legacy row whose stored address is a +tag is left as is and its own
+	// identity still signs in; a new alias of it is refused.
 	legacy := prefix + "legacy"
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, legacy, prefix+".old+tag@example.test"); err != nil {
 		t.Fatal(err)
+	}
+	if got, _, err := login("legacy", prefix+".old+tag@example.test"); err != nil || got.ID != legacy || got.PrimaryEmail != prefix+".old+tag@example.test" {
+		t.Fatalf("existing plus-address account cannot sign in: %v", err)
 	}
 	_, _, err = login("legacy-alias", prefix+".old+other@example.test")
 	refused(t, err, prefix+".old@example.test")
@@ -154,14 +171,14 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT primary_email FROM paperboat.users WHERE id=$1`, legacy).Scan(&legacyEmail); err != nil || legacyEmail != prefix+".old+tag@example.test" {
 		t.Fatalf("legacy account changed: %q %v", legacyEmail, err)
 	}
-	// Concurrent first-use aliases: exactly one account, the other refused.
+	// Concurrent first sign-ups of one address: exactly one account, the other refused.
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	for i := range 2 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, _, err := login(fmt.Sprintf("race%d", i), fmt.Sprintf("%srace+%d@example.test", prefix, i))
+			_, _, err := login(fmt.Sprintf("race%d", i), prefix+"race@example.test")
 			errs <- err
 		}(i)
 	}

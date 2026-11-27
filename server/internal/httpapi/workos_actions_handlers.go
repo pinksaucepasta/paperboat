@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 )
 
 const workOSActionTolerance = 5 * time.Minute
@@ -59,6 +61,8 @@ func workOSRegistrationAction(checker RegistrationAliasChecker, secret string, n
 		}
 		if exists {
 			verdict, message = "Deny", "An account for "+canonical+" already exists. Sign in with that address."
+		} else if local, _, _ := strings.Cut(strings.TrimSpace(action.UserData.Email), "@"); strings.Contains(local, "+") {
+			verdict, message = "Deny", (&auth.EmailAliasNotAllowedError{Canonical: canonical}).Error()
 		}
 		signed, err := signWorkOSActionResponse(verdict, message, secret, now())
 		if err != nil {

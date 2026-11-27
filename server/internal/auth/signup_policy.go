@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/emailpolicy"
+	"strings"
 )
 
 // EmailAlreadyRegisteredError refuses a new provider identity whose canonical
@@ -16,6 +17,20 @@ type EmailAlreadyRegisteredError struct{ Canonical string }
 
 func (e *EmailAlreadyRegisteredError) Error() string {
 	return "An account for " + e.Canonical + " already exists. Sign in with that address."
+}
+
+// EmailAliasNotAllowedError refuses a new sign-up whose address has a +tag
+// (F13-07, coordinator decision 2026-11-27): a +tag can be a different
+// mailbox, so it may never claim the base address first.
+type EmailAliasNotAllowedError struct{ Canonical string }
+
+func (e *EmailAliasNotAllowedError) Error() string {
+	return "Sign-up with a plus address is not allowed. Sign up with " + e.Canonical + "."
+}
+
+func hasPlusTag(email string) bool {
+	local, _, _ := strings.Cut(strings.TrimSpace(email), "@")
+	return strings.Contains(local, "+")
 }
 
 // Resolve verified provider identities before account creation. A known
@@ -53,6 +68,9 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 	err = tx.QueryRow(ctx, `SELECT id FROM paperboat.users WHERE canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1
  ORDER BY (canonical_email=$1) DESC NULLS LAST,created_at,id LIMIT 1`, canonical).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if hasPlusTag(profile.Email) {
+			return "", "", &EmailAliasNotAllowedError{Canonical: canonical}
+		}
 		return canonical, newID("user"), nil
 	}
 	if err != nil {

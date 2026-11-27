@@ -77,10 +77,17 @@ func TestWorkOSRegistrationActionDeniesAnAliasOfAnExistingAccount(t *testing.T) 
 func TestWorkOSRegistrationActionAllowsAnythingElse(t *testing.T) {
 	now := time.Now()
 	handler := workOSRegistrationAction(&aliasCheckerFake{canonical: "new@example.test"}, workOSActionTestSecret, func() time.Time { return now })
+	plainBody := strings.Replace(registrationBody, "Tester+1234@example.test", "New@example.test", 1)
 	w := httptest.NewRecorder()
-	handler(w, workOSActionRequest(t, registrationBody, now, workOSActionTestSecret))
+	handler(w, workOSActionRequest(t, plainBody, now, workOSActionTestSecret))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `\"verdict\":\"Allow\"`) && !strings.Contains(w.Body.String(), `"verdict":"Allow"`) || strings.Contains(w.Body.String(), "error_message") {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	// A plus address is refused even when no account has its base address (F13-07).
+	w = httptest.NewRecorder()
+	handler(w, workOSActionRequest(t, registrationBody, now, workOSActionTestSecret))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Deny") || !strings.Contains(w.Body.String(), "Sign-up with a plus address is not allowed. Sign up with new@example.test.") {
+		t.Fatalf("plus address not refused: status=%d body=%s", w.Code, w.Body)
 	}
 }
 
