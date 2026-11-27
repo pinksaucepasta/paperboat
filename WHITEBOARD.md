@@ -353,3 +353,7 @@ ac1095ce while both go.mod files pin 2d32e5f0.
   on staging that day (see CHECKLIST.md F21-37). A row, if ever written, must refuse to run from an outdated checkout.
 - **Mac tests touch the real daemon (2026-11-27):** some `cli` `hostruntimecmd` tests on macOS act on the real
   `paperboatd` launchd job. Make them use a test-only label or a fake, so a test run never disturbs an installed pb.
+- **Ctrl-C false failure on Linux (2026-11-27, rare):** Ctrl-C at a narrow moment of `pb install` / `pb update` can print
+  "failed ... privileged cleanup returned an invalid result" although the new version installed and is ready. From code
+  reading: the cancel check in `install_running_unix.go` reads a context cancelled later (`context.AfterFunc`), and the
+  install's commit is not checked before calling it failed.
