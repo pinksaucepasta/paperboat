@@ -1408,7 +1408,7 @@ fixture_check() {
 # recipe_checks_run: PLAN F26 (CHECKLIST F26-01..08, X-47) through recipe_checks.py, one run (one throwaway account and
 # creator container on SMOKE_FIXTURE_HOST) that prints a receipt line per row. A real Linux, macOS or Windows row needs a clean
 # throwaway machine (SMOKE_RECIPE_<OS>_SSH, no Paperboat on it); without one it is NOT RUN.
-RECIPE_CHECKS="recipe-lifecycle recipe-errors recipe-vaults recipe-api-tokens recipe-lifetimes recipe-install:container"
+RECIPE_CHECKS="recipe-lifecycle recipe-errors recipe-vaults recipe-api-tokens recipe-lifetimes recipe-install:container recipe-apply:container"
 RECIPE_MACHINE_CHECKS="recipe-install:linux recipe-install:macos recipe-install:windows"
 # account_rows.py (same harness, an account of its own: a vault reset replaces the account's ENV keys): F10-07
 # env-vault-reset-locked, F27-05 held-web-ports, F1-03 pair-token-refusals (waits out a token's 10 minute lifetime).
