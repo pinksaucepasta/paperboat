@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The checks that need operator fixtures (README.md "Fixtures"): free-plan, config-team-default, team-business, recording-key-rotation.
 
-usage: fixture_checks.py free-plan|config-team-default|team-business|recording-key-rotation
+usage: fixture_checks.py free-plan|config-team-default|team-business|recording-key-rotation|fresh-install-window
 Each check makes its own throwaway machines in Docker containers on SMOKE_FIXTURE_HOST (fixture_machine.sh: paired as the
 account of a stored console session), runs the unchanged check script against them and revokes them on every exit path.
 Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"}; exit 0 only for PASS.
@@ -15,6 +15,9 @@ Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"}
                        target) and the member's pb as a profile in the first machine's container. The console start (the only place
                        a recording starts) runs on this controller, which holds node, Chromium and the owner's session; the
                        container asks for it through files (console_start_bridge.py). Everything is removed at the end (the member leaves; deleting the owner's account deletes the team and cancels its subscription).
+  fresh-install-window (AU4)  after release SMOKE_RELEASE_NEW is Latest: a machine of the owner (SMOKE_OPERATOR_STATE) on SMOKE_AU4_HOST
+                       installs release SMOKE_RELEASE_OLD's official asset in a zone where today's 04:00 window passed, and keeps it
+                       for SMOKE_AU4_OBSERVE s (default 1800).
 preflight_fixtures.py verifies the fixtures first (smoke.sh and windows_checks.py run it); setup is never retried here.
 """
 import contextlib
@@ -68,16 +71,17 @@ class Machines(contextlib.ExitStack):
         self.env = dict(os.environ, ORIGIN=ENV['SMOKE_CONSOLE_ORIGIN'], PW_CHROMIUM=path('SMOKE_PW_CHROMIUM'), SMOKE_CT_DOCKER=DOCKER,
                         **({'PW_MODULE': path('SMOKE_PW_MODULE')} if ENV.get('SMOKE_PW_MODULE') else {}))
 
-    def machine(self, label, state_key=None, state=None):
+    def machine(self, label, state_key=None, state=None, binary=None, zone=None, host=None, name=None):
         """(name, machine id, prefix) of a machine paired as the account of the stored session (a setting, or a state file path);
-        prefix runs a command there (stdin passes)."""
-        name = 'fx-%s-%s' % (label, self.run_id)
-        done = run([str(HERE / 'fixture_machine.sh'), 'up', HOST, name, path('SMOKE_FIXTURE_PB'), state or path(state_key)], timeout=900, check=False, env=self.env)
+        prefix runs a command there (stdin passes). binary: the build to install (default SMOKE_FIXTURE_PB); zone: its local time zone."""
+        host, name = host or HOST, name or 'fx-%s-%s' % (label, self.run_id)
+        env = dict(self.env, **({'SMOKE_CT_TZ': zone} if zone else {}))
+        done = run([str(HERE / 'fixture_machine.sh'), 'up', host, name, binary or path('SMOKE_FIXTURE_PB'), state or path(state_key)], timeout=900, check=False, env=env)
         if done.returncode:
-            self.callback(run, [str(HERE / 'fixture_machine.sh'), 'down', HOST, name], check=False, env=self.env)
+            self.callback(run, [str(HERE / 'fixture_machine.sh'), 'down', host, name], check=False, env=self.env)
             raise RuntimeError('fixture machine %s: %s' % (name, done.stderr.strip()[-300:]))
         made = json.loads(done.stdout.strip().splitlines()[-1])
-        self.callback(run, [str(HERE / 'fixture_machine.sh'), 'down', HOST, name, made['machine_id']], check=False, env=self.env, timeout=300)
+        self.callback(run, [str(HERE / 'fixture_machine.sh'), 'down', host, name, made['machine_id']], check=False, env=self.env, timeout=300)
         return name, made['machine_id'], made['prefix'].replace(' exec ', ' exec -i ', 1)
 
     def at(self, prefix, command, **kw):
@@ -341,7 +345,78 @@ def leave_team(m, prefix, team, machine_id):
         m.leftovers.append('team machine %s was NOT removed from the team: %s' % (machine_id, str(error)[-150:]))
 
 
-CHECKS = {'free-plan': free_plan, 'config-team-default': config_team_default, 'team-business': team_business, 'recording-key-rotation': recording_key_rotation}
+REPOSITORY = 'pinksaucepasta/paperboat'
+ZONES = ('Asia/Kolkata', 'Europe/Berlin', 'America/New_York', 'Asia/Tokyo', 'America/Los_Angeles', 'Pacific/Auckland', 'Europe/London')
+
+
+def fetch(url, timeout=120):
+    import urllib.request
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'paperboat-smoke'}), timeout=timeout) as response:
+        return response.read()
+
+
+def past_window_zone(now=None):
+    """A zone where today's 04:00 update window passed two or more hours ago and the next one is two or more hours away."""
+    import datetime
+    import zoneinfo
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    for zone in ZONES:
+        if 6 <= now.astimezone(zoneinfo.ZoneInfo(zone)).hour <= 21:
+            return zone
+    raise RuntimeError('no zone in %s has its local time between 06:00 and 21:59' % (ZONES,))
+
+
+def fresh_install_window(m):
+    """AU4: a machine installed with release A while B is already Latest, after today's 04:00 window in its own zone, keeps A
+    until the next window (smoke 11-26: a fresh install updated itself to Latest ~30 s later). Precondition: B is Latest."""
+    import hashlib
+    old, new = os.environ['SMOKE_RELEASE_OLD'], os.environ['SMOKE_RELEASE_NEW']
+    observe = int(os.environ.get('SMOKE_AU4_OBSERVE', '1800'))
+    latest = json.loads(fetch('https://api.github.com/repos/%s/releases/latest' % REPOSITORY))['tag_name']
+    if latest != new:
+        return False, 'precondition: release %s must be Latest, Latest is %s' % (new, latest)
+    host = os.environ.get('SMOKE_AU4_HOST') or HOST
+    arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}[run(['ssh', '-o', 'BatchMode=yes', host, 'uname -m']).stdout.strip()]
+    asset = 'pb-linux-' + arch
+    base = 'https://github.com/%s/releases/download/%s/' % (REPOSITORY, old)
+    body = fetch(base + asset, timeout=600)
+    sums = dict(reversed(line.split()) for line in fetch(base + 'SHA256SUMS').decode().splitlines() if line and not line.startswith('#'))
+    if sums.get(asset) != hashlib.sha256(body).hexdigest():
+        return False, '%s of %s does not match its SHA256SUMS' % (asset, old)
+    folder = Path(tempfile.mkdtemp(prefix='au4-'))
+    m.callback(shutil.rmtree, folder, ignore_errors=True)
+    binary = folder / 'pb'
+    binary.write_bytes(body)
+    binary.chmod(0o755)
+    zone = past_window_zone()
+    name, _, prefix = m.machine('au4', 'SMOKE_OPERATOR_STATE', binary=str(binary), zone=zone, host=host, name=os.environ.get('SMOKE_AU4_NAME'))
+    def pb(*args):
+        done = m.at(prefix, '%s %s --json' % (PB, ' '.join(args)), timeout=180)
+        value = json.loads(done.stdout)
+        return value.get('data', value)
+    local_hour = int(m.at(prefix, 'date +%H').stdout.strip())
+    if not 6 <= local_hour <= 21:
+        return False, 'the machine local time is not in %s (hour %d): the window would not have passed' % (zone, local_hour)
+    installed = pb('--version')['version']
+    if installed != old:
+        return False, 'installed %s, not release %s' % (installed, old)
+    check = pb('update', 'check')
+    if check.get('latest_version') != new or not check.get('update_available'):
+        return False, 'the machine does not see %s as available: %r' % (new, {k: check.get(k) for k in ('latest_version', 'update_available')})
+    began, samples = time.monotonic(), 0
+    while time.monotonic() - began < observe:
+        seen = pb('--version')['version']
+        samples += 1
+        if seen != old:
+            return False, 'installed %s %d s after a fresh install of %s in %s (local hour %d), outside the window' % (seen, round(time.monotonic() - began), old, zone, local_hour)
+        time.sleep(60)
+    status = pb('update', 'status')
+    return True, 'fresh install of %s in %s (local hour %d, window 04:00 passed) stayed on it for %d s (%d samples) with %s Latest; next maintenance %s' % (
+        old, zone, local_hour, observe, samples, new, status.get('next_maintenance_at'))
+
+
+CHECKS = {'free-plan': free_plan, 'config-team-default': config_team_default, 'team-business': team_business, 'recording-key-rotation': recording_key_rotation,
+          'fresh-install-window': fresh_install_window}
 
 
 def main(argv):

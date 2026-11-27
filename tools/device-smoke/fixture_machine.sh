@@ -8,7 +8,7 @@
 #         failure it removes what it made, says why on stderr (token-like strings redacted) and exits 1.
 #   down  the machine revokes itself by exact id (its own session, `pb machine revoke ID`, then --confirm TOKEN), then the container
 #         goes. No MACHINE_ID: only the container. Exit 1 when the revoke failed. Safe to run twice.
-# env: ORIGIN, PW_CHROMIUM, [PW_MODULE] (as mint_enrollment_token.mjs); SMOKE_CT_* as in ct_env.sh. The enrollment token goes from
+# env: ORIGIN, PW_CHROMIUM, [PW_MODULE] (as mint_enrollment_token.mjs); SMOKE_CT_* as in ct_env.sh; [SMOKE_CT_TZ] the local zone. The enrollment token goes from
 # the controller into the container's stdin; it is never printed.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -45,7 +45,14 @@ up() {
   fail() { echo "fixture_machine: $1" >&2; down "${2:-}"; exit 1; }
   ensure_image || fail "could not build the container image on $HOST"
   stage_binary "$bin" "$HOST" "/tmp/$NAME.pb" || fail "could not stage the build on $HOST"
-  ssh -n "$HOST" "$CT_DOCKER rm -f $NAME >/dev/null 2>&1; $CT_DOCKER run -d --name $NAME --hostname $NAME --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null && sleep 8 \
+  # SMOKE_CT_TZ: the container's local time zone (the host's zone file becomes its /etc/localtime; the image has no tzdata),
+  # set before anything of Paperboat starts, so its update window is in that zone.
+  local zone=""
+  if [ -n "${SMOKE_CT_TZ:-}" ]; then
+    [[ "$SMOKE_CT_TZ" =~ ^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$ ]] || fail "SMOKE_CT_TZ is not a zone name"
+    zone="&& $CT_DOCKER exec $NAME rm -f /etc/localtime && $CT_DOCKER cp -L /usr/share/zoneinfo/$SMOKE_CT_TZ $NAME:/etc/localtime"
+  fi
+  ssh -n "$HOST" "$CT_DOCKER rm -f $NAME >/dev/null 2>&1; $CT_DOCKER run -d --name $NAME --hostname $NAME --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null && sleep 8 $zone \
     && $CT_DOCKER exec $NAME loginctl enable-linger $CT_USER && $CT_DOCKER exec $NAME systemctl start user@$CT_UID.service \
     && $CT_DOCKER cp /tmp/$NAME.pb $NAME:$CT_HOME/pb && rm -f /tmp/$NAME.pb && $CT_DOCKER exec $NAME sh -c 'chown $CT_USER:$CT_USER $CT_HOME/pb && chmod 755 $CT_HOME/pb' \
     && $X ./pb install >/dev/null" 2>&1 | redact >&2

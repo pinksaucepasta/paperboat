@@ -1142,7 +1142,7 @@ test_update_scheduled() {
       record "$id" FAIL 0 "could not stage the device fixture"
       continue
     fi
-    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_scheduled.py --me $(printf %q "$device") --peer $(printf %q "$SMOKE_UPDATE_PEER")" 2>&1); status=$?
+    out=$(device_py "$device" update_scheduled.py --me "$(printf %q "$device")" --peer "$(printf %q "$SMOKE_UPDATE_PEER")" 2>&1); status=$?  # Windows: on this host
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-scheduled" and r["status"]=="PASS" and r["disabled_stayed_put"] and r["settings_restored"] and r["transfers_both_ways"]' "$out" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "disabled stayed put; at the configured time the machine reached $(python3 -c 'import json,sys;print(json.loads(sys.argv[1].strip().splitlines()[-1])["to"])' "$out") by itself; files arrived both ways during and after activation; doctor healthy; settings restored"
     else
@@ -1153,7 +1153,7 @@ test_update_scheduled() {
 
 # F14-06b: a signed release waits for the update window (no install right after an install, an updater restart or a
 # manual pb update --from) and a missed window catches up on wake (update_window_hold.py; smoke 11-26 mp5/lp12).
-# Runs only when SMOKE_UPDATE_WINDOW names the scenario (hold or missed) for this shard's device, a paired official
+# Runs only when SMOKE_UPDATE_WINDOW names the scenario (hold or missed) for this shard's device (Unix or the Windows target), a paired official
 # install of SMOKE_RELEASE_OLD; it waits (SMOKE_UPDATE_WINDOW_WAIT s, default 3600) for SMOKE_RELEASE_NEW to be published.
 # hold leaves the machine a custom install: give each scenario its own device.
 test_update_window() {
@@ -1172,13 +1172,21 @@ test_update_window() {
       record "$id" FAIL 0 "could not stage the device fixture"
       continue
     fi
-    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_window_hold.py --scenario $scenario --installed $(printf %q "$SMOKE_RELEASE_OLD") --latest $(printf %q "$SMOKE_RELEASE_NEW") --wait-latest ${SMOKE_UPDATE_WINDOW_WAIT:-3600}" 2>&1); status=$?
+    out=$(device_py "$device" update_window_hold.py --scenario $scenario --installed "$(printf %q "$SMOKE_RELEASE_OLD")" --latest "$(printf %q "$SMOKE_RELEASE_NEW")" --wait-latest "${SMOKE_UPDATE_WINDOW_WAIT:-3600}" 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-window-"+sys.argv[2] and r["status"]=="PASS" and r["samples"];assert sys.argv[2]!="hold" or r["stayed_on"]==r["installed"];assert sys.argv[2]!="missed" or r["samples"][-1]["version"]==r["latest"]' "$out" "$scenario" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "$(python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);print(("stayed on %s through an updater restart, a failed and a same-version pb update --from, past the %s window" % (r["installed"], r["window"])) if "stayed_on" in r else ("asleep across the %s window; %s installed %d s after waking" % (r["window"], r["latest"], r["seconds_to_catch_up"])))' "$out")"
     else
       record_command_failure "$id" $(( $(now)-t0 )) "$out"
     fi
   done
+}
+
+# AU4: a fresh install of SMOKE_RELEASE_OLD after SMOKE_RELEASE_NEW is Latest keeps OLD until the next window (fixture_checks.py
+# fresh-install-window: its own container on SMOKE_AU4_HOST, in a zone whose 04:00 window passed). Only when SMOKE_AU4=1.
+test_update_fresh_install() {
+  skipped fresh-install-window && return
+  [ "${SMOKE_AU4:-}" = 1 ] || { record fresh-install-window "NOT RUN" 0 "$(release_gap "not this shard (SMOKE_AU4=1)")"; return 0; }
+  fixture_check fresh-install-window
 }
 
 # F14-07: a minimum supported version blocks an old official build, never a custom build. Runs against STAGING only (never
@@ -1501,6 +1509,7 @@ fixture_check team-business
 fixture_check recording-key-rotation
 test_update_scheduled
 test_update_window
+test_update_fresh_install
 test_update_floor
 
 # ---------------------------------------------------------------- report
