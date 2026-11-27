@@ -48,7 +48,7 @@ the team machine that records) and the member's pb as a profile in the first mac
 the owner's session) is on the controller: the container asks for it through files and the controller runs `console_record_start.mjs`
 (`console_start_bridge.py`). The member leaves the team, machines are revoked, and deleting the owner's account deletes the team and cancels its subscription; both accounts are gone when the run ends; a record that cannot be removed is reported as
 `LEFT BEHIND` and fails the check.
-`billing-console`, `bandwidth-throttle-send` and `plus-alias-signup` (`billing_checks.py`) each make their own throwaway accounts and delete them
+`billing-console`, `bandwidth-throttle-send`, `plus-alias-signup` and `billing-team-lifecycle` (`billing_checks.py`) each make their own throwaway accounts and delete them
 (which cancels the subscription). Money safety: nothing is typed into a Stripe page unless it is a test-mode one (a `cs_test_` Checkout or a `test_`
 portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 test card is used.
 
@@ -56,6 +56,7 @@ portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 tes
 |---|---|---|
 | `billing-console` | F13-04C, F13-06, F13-04B | live console: Free plan screen and allowance card, Checkout to Pro monthly, paid card, portal switch to yearly and back with seeded spend (bandwidth window, billing day, allowance and spent bytes unchanged) |
 | `bandwidth-throttle-send` | F13-03S, F13-06 | two containers, UDP blocked (relay only), fair-use amount used up: `pb send` finishes intact at 512 kbit/s and says why (the plan-limit cut was removed, 02e55fb13); the console card says "Slowed" |
+| `billing-team-lifecycle` | F13-04 (part), F13-04C (Team monthly) | team bought on console Checkout; a seat added mid-cycle (charged at once: one more paid invoice) and removed, billing date unchanged; cancel and keep in the portal. Not covered: failed payment, grace, suspension, recovery (Stripe test clock and test API key needed) |
 | `plus-alias-signup` | F13-07 | sign-ups with plus addresses of an existing account are refused by name; a plus address with no base account signs up; the base address signing up afterwards must not land in that account |
 
 When a console session has expired, preflight says which one: sign it in again with `console_session.mjs` (operator) or

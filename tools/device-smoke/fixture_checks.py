@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The checks that need operator fixtures (README.md "Fixtures"): free-plan, config-team-default, team-business, recording-key-rotation.
 
-usage: fixture_checks.py free-plan|config-team-default|team-business|recording-key-rotation|fresh-install-window|billing-console|bandwidth-throttle-send|plus-alias-signup
+usage: fixture_checks.py free-plan|config-team-default|team-business|recording-key-rotation|fresh-install-window|billing-console|bandwidth-throttle-send|plus-alias-signup|billing-team-lifecycle
        fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail|console-recording-replay   (console_rows.py)
 Each check makes its own throwaway machines in Docker containers on SMOKE_FIXTURE_HOST (fixture_machine.sh: paired as the
 account of a stored console session), runs the unchanged check script against them and revokes them on every exit path.
@@ -10,7 +10,7 @@ Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"}
   config-team-default  the smoke team's owner (SMOKE_OPERATOR_STATE): config_team_default.py TEAM SMOKE_CONFIG_REPO on its machine.
   team-business        two machines of the owner and a per-run S3 store (versitygw, official image, filesystem backend, in the
                        machine's network namespace) with the keys of ~/.f19-s3ak and ~/.f19-s3sk; team_business.py runs from here.
-  billing-console, bandwidth-throttle-send, plus-alias-signup  billing_checks.py (F13-03S, F13-04B, F13-04C, F13-06, F13-07)
+  billing-console, bandwidth-throttle-send, plus-alias-signup, billing-team-lifecycle  billing_checks.py (F13-03S, F13-04, F13-04B, F13-04C, F13-06, F13-07)
   recording-key-rotation  a recording key only grows, so every run needs a team without one: two throwaway console accounts (owner,
                        member; fresh_account.mjs), a paid team the owner makes with `pb team create` and pays in Stripe's SANDBOX
                        Checkout with the 4242 test card (stripe_checkout.mjs), the member invited and accepting, two machines of the owner (one runs recordings_key_rotation.py, the other is its team

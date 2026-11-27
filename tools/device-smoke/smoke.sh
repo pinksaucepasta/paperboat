@@ -1435,7 +1435,7 @@ for text in sys.argv[1].splitlines():
 
 # ---------------------------------------------------------------- run
 # Preflight: every operator fixture of the checks about to run exists, or nothing starts (preflight_fixtures.py names what is missing).
-fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation console-team-admin console-signout-switch console-invite-mail console-recording-replay billing-console bandwidth-throttle-send plus-alias-signup $RECIPE_CHECKS $RECIPE_MACHINE_CHECKS; do skipped "$id" || printf '%s,' "$id"; done)
+fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation console-team-admin console-signout-switch console-invite-mail console-recording-replay billing-console bandwidth-throttle-send plus-alias-signup billing-team-lifecycle $RECIPE_CHECKS $RECIPE_MACHINE_CHECKS; do skipped "$id" || printf '%s,' "$id"; done)
 [ -z "$fixture_ids" ] || python3 "$HERE/preflight_fixtures.py" --checks "${fixture_ids%,}" || exit 2
 IFS=, read -r -a TLIST <<<"$TARGETS"
 echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARGETS"
@@ -1551,6 +1551,7 @@ recipe_checks_run
 fixture_check billing-console
 fixture_check bandwidth-throttle-send
 fixture_check plus-alias-signup
+fixture_check billing-team-lifecycle
 test_update_scheduled
 test_update_window
 test_update_fresh_install

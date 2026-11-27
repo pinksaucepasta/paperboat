@@ -5,6 +5,10 @@
 //   checkout                    F13-04C: Upgrade (Pro, monthly) on the console, Stripe test card, back to the paid overview
 //   portal month|year           Manage billing: switch the billing interval in Stripe's portal, back to the console
 //   portal cancel|keep          Cancel plan / Keep plan in Stripe's portal, back to the console
+//   team-checkout TEAM SEATS    Create team (monthly) on the console, pay on test-mode Checkout, the team's paid overview
+//   seats N                     the team's billing page: set N seats, read what it costs now, buy or remove
+//   invoices                    the Stripe portal's invoice history; the step "invoices" carries the number of paid ones in "paid"
+// With BILLING_TEAM=<team id> the plan, seats, portal and invoice commands act on that team's workspace instead of the personal one.
 // Prints one JSON line {"steps":[{"step","ok","detail"}]}: every step is tried, none stops the rest. Exit 1 when one failed.
 // Stripe pages are refused unless they are test-mode ones (stripe_pay.mjs; the portal: a test_ session AND the "Sandbox" badge).
 import { readFileSync } from "node:fs"
@@ -27,6 +31,9 @@ export function parseBytes(text) {
 
 // A shown amount matches the API's: the page rounds to three digits and reads a moment apart from the check.
 export const near = (shown, bytes) => Math.abs(parseBytes(shown) - bytes) <= Math.max(0.05 * bytes, 1000)
+
+// "$12.50" -> 12.5, "-$3" -> -3
+export const amount = (text) => Number(text.replace(/[$,]/g, ""))
 
 export const speed = (mbit) => (mbit < 1 ? `${Math.round(mbit * 1000)} kbit/s` : `${mbit} Mbit/s`)
 
@@ -68,11 +75,15 @@ export function cardRows(text, throttledAttr, billing, hosted) {
 export const testPortalURL = (url) => /^https:\/\/billing\.stripe\.com\/p\/session(\/[^?#]*)?\?([^#]*&)?secret=test_/.test(url ?? "")
 
 async function main(argv) {
-  const [command, argument] = argv
+  const [command, argument, extra] = argv
+  const team = process.env.BILLING_TEAM ?? ""
   const origin = process.env.ORIGIN
   const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
   const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM })
-  const page = await (await browser.newContext({ storageState: process.env.STATE, viewport: { width: 1280, height: 1600 } })).newPage()
+  const context = await browser.newContext({ storageState: process.env.STATE, viewport: { width: 1280, height: 1600 } })
+  // the console's selected workspace is a cookie of its own
+  if (team) await context.addCookies([{ name: "pb-workspace", value: team, url: origin }])
+  const page = await context.newPage()
   const steps = []
   const add = (step, ok, detail = "") => steps.push({ step, ok: Boolean(ok), detail: String(detail).slice(0, 220) })
   const get = async (path) => {
@@ -83,7 +94,7 @@ async function main(argv) {
       await page.waitForTimeout(5000) // the live console's dev server drops a connection now and then
     }
   }
-  const overview = () => get("billing/workspaces/personal")
+  const overview = (id = team) => get(id ? `billing/workspaces/teams/${id}` : "billing/workspaces/personal")
   const main_ = () => page.locator("main").last()
   const open = async (path, ready) => {
     for (let attempt = 0; ; attempt++) {
@@ -162,13 +173,100 @@ async function main(argv) {
     add("the test webhook made the subscription active", billing.state === "active" && billing.product_code === "pro-month", `state=${billing.state} product=${billing.product_code}`)
   }
 
+  // Nothing is clicked on a Stripe page unless it is the test-mode portal.
+  async function enteredPortal() {
+    await page.waitForURL((u) => u.hostname === "billing.stripe.com", { timeout: 90000, waitUntil: "commit" })
+    const sandbox = await page.getByText("Sandbox", { exact: true }).first().waitFor({ timeout: 60000 }).then(() => true, () => false)
+    if (!sandbox || !testPortalURL(page.url())) throw new Error("refusing to continue: not a Stripe test-mode customer portal")
+  }
+
+  async function openPortal() {
+    await openPlan()
+    await main_().getByRole("button", { name: "Manage billing" }).click({ timeout: 60000 })
+    await enteredPortal()
+  }
+
+  async function teamCheckout(id, seats) {
+    await open("/team", () => main_().getByRole("button", { name: "Create team" }).first().waitFor({ timeout: 90000 }))
+    const dialog = page.getByRole("dialog")
+    for (let i = 0; i < 5 && !(await dialog.count()); i++) {
+      await main_().getByRole("button", { name: "Create team" }).first().click()
+      await page.waitForTimeout(2000)
+    }
+    await dialog.locator("#team-id").fill(id)
+    for (let i = 1; i < seats; i++) await dialog.getByRole("button", { name: "More seats" }).click()
+    const pay = dialog.getByRole("button", { name: "Continue to payment" })
+    add("a new team needs the purchase terms ticked before payment", await pay.isDisabled())
+    await dialog.getByRole("checkbox").first().click()
+    await pay.click()
+    await page.waitForURL((u) => u.hostname === "checkout.stripe.com", { timeout: 90000, waitUntil: "commit" })
+    add("Continue to payment opens a Stripe test-mode Checkout", /\/pay\/cs_test_/.test(page.url()))
+    await payTestCheckout(page) // refuses anything but a sandbox session
+    await page.waitForURL((u) => u.href.startsWith(origin + "/team"), { timeout: 180000, waitUntil: "commit" })
+    add("Checkout returns to the console's team page", true)
+    // the team exists when Stripe's test webhook reaches the server
+    let billing
+    for (let i = 0; i < 60 && !(billing?.state === "active"); i++) {
+      const reply = await page.request.get(`${origin}/api/v1/billing/workspaces/teams/${id}`).catch(() => undefined)
+      billing = reply?.ok() ? (await reply.json()).data : undefined
+      if (billing?.state !== "active") await page.waitForTimeout(3000)
+    }
+    add("the test webhook made the team and its subscription active", billing?.state === "active" && billing.seats_bought === seats, `state=${billing?.state} seats=${billing?.seats_bought}`)
+    await context.addCookies([{ name: "pb-workspace", value: id, url: origin }])
+    await openPlan()
+    const paid = await settled(main_(), (t) => /Plan\s+Team · \$\d+\/month/.test(t) && /of \d+ GB used/.test(t))
+    add("the paid team overview shows Team, monthly, its renewal and the per-seat allowance", /Plan\s+Team · \$\d+\/month/.test(paid) && /Renews\s+\w{3} \d{1,2}, \d{4}/.test(paid) && paid.includes(`of ${seats * 100} GB used`), paid.replace(/\s+/g, " ").slice(0, 200))
+  }
+
+  async function seats(wanted) {
+    const before = await overview()
+    const more = wanted > before.seats_bought
+    await openPlan()
+    const button = main_().getByRole("button", { name: more ? "Add a seat" : "Remove a seat" })
+    await button.waitFor({ timeout: 60000 })
+    for (let i = 0; i < Math.abs(wanted - before.seats_bought); i++) await button.click()
+    const text = await settled(main_(), (t) => /now · then/.test(t))
+    const preview = /(-?\$[\d,.]+) now · then (-?\$[\d,.]+) on (\w{3} \d{1,2})/.exec(text.replace(/\s+/g, " "))
+    add("the change shows what it costs now and from which date", Boolean(preview), preview?.[0] ?? text.replace(/\s+/g, " ").slice(0, 200))
+    if (preview) add(more ? "an added seat is charged now" : "a removed seat charges nothing now", more ? amount(preview[1]) > 0 : amount(preview[1]) <= 0, preview[0])
+    await main_().getByRole("button", { name: more ? "Buy seats" : "Remove seats", exact: true }).click()
+    // an added seat is there at once; a removed one stays paid and usable until the billing date, where the lower count is scheduled
+    const done = (b) => (more ? b.seats_bought === wanted : b.scheduled_seats === wanted)
+    let after = before
+    for (let i = 0; i < 40 && !done(after); i++) {
+      await page.waitForTimeout(3000)
+      after = await overview()
+    }
+    if (more) {
+      add(`the team has ${wanted} seats`, done(after), `seats ${before.seats_bought} -> ${after.seats_bought}`)
+    } else {
+      add(`the removal is scheduled for the billing date: ${wanted} seats from then`, done(after) && after.scheduled_seats_at === before.period_end,
+        `scheduled ${after.scheduled_seats} at ${after.scheduled_seats_at}, billing date ${before.period_end}`)
+      add("the removed seat stays paid until then", after.seats_bought === before.seats_bought && after.allowance_bytes === before.allowance_bytes, `seats ${after.seats_bought}, allowance ${after.allowance_bytes}`)
+    }
+    add("the billing date did not move", after.period_end === before.period_end && after.period_start === before.period_start, `${before.period_end} -> ${after.period_end}`)
+    if (more) {
+      await openPlan()
+      const shown = await settled(main_(), (t) => new RegExp(`${wanted} seats?`).test(t))
+      add("the billing page shows the new seat count", new RegExp(`${wanted} seats?`).test(shown))
+    }
+  }
+
+  async function invoices() {
+    await openPortal()
+    const text = await settled(page.locator("body"), (t) => /Invoice history/i.test(t))
+    await page.waitForTimeout(3000)
+    const history = (await page.locator("body").innerText()).split(/invoice history/i)[1] ?? ""
+    const paid = (history.match(/\bPaid\b/g) ?? []).length
+    add("invoices", paid > 0, `${paid} paid: ${history.replace(/\s+/g, " ").slice(0, 180)}`)
+    steps.at(-1).paid = paid
+  }
+
   async function portal(action) {
     await openPlan()
     const label = { month: /^Switch to monthly/, year: /^Switch to yearly/, cancel: "Cancel plan", keep: "Keep plan" }[action]
     await main_().getByRole("button", { name: label }).click({ timeout: 60000 })
-    await page.waitForURL((u) => u.hostname === "billing.stripe.com", { timeout: 90000, waitUntil: "commit" })
-    const sandbox = await page.getByText("Sandbox", { exact: true }).first().waitFor({ timeout: 60000 }).then(() => true, () => false)
-    if (!sandbox || !testPortalURL(page.url())) throw new Error("refusing to continue: not a Stripe test-mode customer portal")
+    await enteredPortal()
     add(`'${action}' opens Stripe's test-mode portal`, true)
     const click = (locator) => locator.first().click({ timeout: 60000 })
     if (action === "month" || action === "year") {
@@ -199,7 +297,10 @@ async function main(argv) {
     if (command === "card") await card(argument)
     else if (command === "checkout") await checkout()
     else if (command === "portal") await portal(argument)
-    else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep")
+    else if (command === "team-checkout") await teamCheckout(argument, Number(extra))
+    else if (command === "seats") await seats(Number(argument))
+    else if (command === "invoices") await invoices()
+    else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | invoices")
   } catch (error) {
     const where = page.url().split("?")[0].replace(origin, "").slice(0, 60)
     add(`${command} ${argument ?? ""} completed`, false, `${String(error?.message ?? error).split("\n")[0].slice(0, 160)} (on ${where})`)

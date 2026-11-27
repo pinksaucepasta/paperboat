@@ -90,6 +90,19 @@ class Receipt(unittest.TestCase):
         self.assertEqual(b.parse_steps('noise\n{"steps":[{"step":"a","ok":true}]}\n'), [{'step': 'a', 'ok': True}])
 
 
+class RelaySeries(unittest.TestCase):
+    def test_only_hosted_relay_bytes_count(self):
+        paths = [{'mode': 'relay', 'hosting': 'managed', 'upload_bytes': 3, 'download_bytes': 4}, {'mode': 'relay', 'hosting': 'self_hosted', 'upload_bytes': 100, 'download_bytes': 0},
+                 {'mode': 'direct', 'hosting': 'managed', 'upload_bytes': 50, 'download_bytes': 0}]
+        self.assertEqual(b.hosted_relay_bytes({'totals': {'by_path': paths}}), 7)
+
+
+class TeamLifecycle(unittest.TestCase):
+    def test_the_invoice_count_comes_from_the_invoices_step(self):
+        self.assertEqual(b.paid_invoices([{'step': 'a', 'ok': True}, {'step': 'invoices', 'ok': True, 'paid': 2}]), 2)
+        self.assertIsNone(b.paid_invoices([{'step': 'invoices completed', 'ok': False}]))
+
+
 class Fence(unittest.TestCase):
     def test_only_a_fresh_throwaway_account_can_be_touched(self):
         sql = workspace_usage.script(USER, 'cap')

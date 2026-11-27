@@ -10,6 +10,10 @@ TEST-MODE pages with the test card, and deletes the account at the end (which ca
                             never cut off): with the fair-use amount used up, `pb send` over a relay path finishes, intact, at the slowed
                             speed, and says why and where to act; the console's card says "Slowed" (F13-06).
   plus-alias-signup         F13-07: plus_alias_signup.mjs.
+  billing-team-lifecycle    F13-04, the transitions that need no clock: a team bought on the console's Checkout (upgrade), a seat added mid-cycle
+                            (charged at once, one more paid invoice, billing date unchanged) and removed (nothing charged, date unchanged), the
+                            plan cancelled and kept in Stripe's portal. Not here: failed payment -> grace -> suspension -> recovery (needs a
+                            Stripe test clock and the test API key, which only the server holds).
 
 Each prints its failed steps in the receipt and keeps every step in the results directory. A step that fails never stops the others.
 """
@@ -64,16 +68,24 @@ def calm(limit=MAX_LOAD):
         time.sleep(20)
 
 
-def browser(m, steps, cell, state, script, *args, timeout=900):
+def browser(m, steps, cell, state, script, *args, timeout=900, team=None):
+    """Runs one browser script and records its steps under `cell`; returns them (all recorded, a failed one stops none)."""
     calm()
     try:
-        done = m.node(script, *args, state=state, check=False, timeout=timeout)
+        env = dict(m.env, **({'STATE': state} if state else {}), **({'BILLING_TEAM': team} if team else {}))
+        done = fx.run(['node', str(fx.HERE / script), *args], env=env, check=False, timeout=timeout)
         found = parse_steps(done.stdout + done.stderr)
     except subprocess.TimeoutExpired:
         found = [{'step': 'the browser script finished', 'ok': False, 'detail': 'no result in %d s' % timeout}]
     label = ' '.join(a for a in args if not a.startswith('/'))
-    # a list, not a generator: every step is recorded even after a failed one
-    return all([steps.add(cell, '%s: %s' % (label, s['step']) if label else s['step'], s['ok'], s.get('detail', '')) for s in found])
+    for s in found:
+        steps.add(cell, '%s: %s' % (label, s['step']) if label else s['step'], s['ok'], s.get('detail', ''))
+    return found
+
+
+def paid_invoices(found):
+    """The number of paid invoices the `invoices` command saw, or None."""
+    return next((s['paid'] for s in found if 'paid' in s), None)
 
 
 def api(m, state, path):
@@ -231,9 +243,27 @@ def bandwidth_throttle_send(m):
         steps.add('F13-03S', '--json: ' + step, ok, detail)
     ok, detail = relay_ping(m, prefix, peer, 60)
     steps.add('F13-03S', 'the path is still the relay', ok, detail)
-    time.sleep(90)  # the relayed bytes reach the usage ledger with the machines' usage reports
+    # a machine reports its relayed bytes at most every five minutes (cli/internal/bandwidth batchInterval): wait for them, so the
+    # card's relay series is compared with real traffic
+    relayed = 0
+    deadline = time.monotonic() + 480
+    while True:
+        relayed = hosted_relay_bytes(api(m, state, usage_path(overview, datetime.datetime.now(datetime.timezone.utc))))
+        if relayed >= SEND_BYTES or time.monotonic() > deadline:
+            break
+        time.sleep(60)
+    steps.add('F13-06', 'the relayed sends are counted in the relay series', relayed >= SEND_BYTES, '%d relayed bytes counted, each send is %d' % (relayed, SEND_BYTES))
     browser(m, steps, 'F13-06', state, 'billing_console.mjs', 'card', 'throttled')
     return steps.result('bandwidth-throttle-send', 'capped workspace: relayed pb send finishes intact at 512 kbit/s and says why; the console card says Slowed')
+
+
+def usage_path(billing, now):
+    """The usage query of the allowance window, as the console asks it."""
+    return '/v1/usage?start=%s&end=%s&limit=200&workspace=personal' % (billing['allowance_period_start'], now.strftime('%Y-%m-%dT%H:%M:%SZ'))
+
+
+def hosted_relay_bytes(usage):
+    return sum(p['upload_bytes'] + p['download_bytes'] for p in usage['totals']['by_path'] if p['mode'] == 'relay' and p['hosting'] == 'managed')
 
 
 def plus_alias_signup(m):
@@ -254,4 +284,38 @@ def delete_if_made(m, directory):
         m.leftovers.append('a sign-up that never reached the console may remain at the identity provider; its disposable address is in %s/account.json' % directory)
 
 
-CHECKS = {'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}
+def billing_team_lifecycle(m):
+    steps = Steps()
+    _, state = m.account('team')
+    team = 'pbbill-' + m.run_id
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'team-checkout', team, '2')
+    path = '/v1/billing/workspaces/teams/' + team
+    try:
+        bought = api(m, state, path)
+    except RuntimeError as error:
+        steps.add('F13-04', 'a paid team to change', False, 'not run: %s' % error)
+        return steps.result('billing-team-lifecycle', '')
+    on_team = {'team': team}
+    invoices = paid_invoices(browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'invoices', **on_team))
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'seats', '3', **on_team)
+    grown = api(m, state, path)
+    steps.add('F13-04', 'three seats pool three seats of allowance', grown['allowance_bytes'] == 3 * bought['allowance_bytes'] // 2,
+              '%s -> %s' % (bought['allowance_bytes'], grown['allowance_bytes']))
+    later = paid_invoices(browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'invoices', **on_team))
+    steps.add('F13-04', 'the added seat was charged at once: one more paid invoice', None not in (invoices, later) and later == invoices + 1, '%s -> %s paid invoices' % (invoices, later))
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'seats', '2', **on_team)
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'portal', 'cancel', **on_team)
+    cancelled = api(m, state, path)
+    steps.add('F13-04', 'cancelling ends the plan at the billing date, not now', cancelled['cancel_at_period_end'] and cancelled['state'] == 'active' and cancelled['period_end'] == bought['period_end'],
+              'state=%s cancel_at_period_end=%s ends %s' % (cancelled['state'], cancelled['cancel_at_period_end'], cancelled['period_end']))
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'portal', 'keep', **on_team)
+    kept = api(m, state, path)
+    steps.add('F13-04', 'keeping the plan renews it on the same date', not kept['cancel_at_period_end'] and kept['state'] == 'active' and kept['period_end'] == bought['period_end'],
+              'state=%s cancel_at_period_end=%s renews %s' % (kept['state'], kept['cancel_at_period_end'], kept['period_end']))
+    # the seat removed above was never given back by the owner: undoing the cancellation must not undo the removal
+    steps.add('F13-04', 'keeping the plan keeps the scheduled seat removal: 2 seats from the billing date', kept.get('scheduled_seats') == 2,
+              'scheduled_seats=%s, seats billed now %s' % (kept.get('scheduled_seats'), kept.get('seats_bought')))
+    return steps.result('billing-team-lifecycle', 'team bought on console Checkout, seat added (invoiced at once) and removed on a fixed billing date, cancelled and kept')
+
+
+CHECKS = {'billing-team-lifecycle': billing_team_lifecycle, 'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}

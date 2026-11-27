@@ -40,6 +40,7 @@ NEEDS = {
     'billing-console': ['console_tools', 'workspace_db'],
     'bandwidth-throttle-send': ['console_tools', 'fixture_host', 'workspace_db'],
     'plus-alias-signup': ['console_tools'],
+    'billing-team-lifecycle': ['console_tools'],
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
 NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],
