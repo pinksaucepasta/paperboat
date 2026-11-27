@@ -65,11 +65,17 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 	}
 	err = tx.QueryRow(ctx, `SELECT id FROM paperboat.users WHERE canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1
  ORDER BY (canonical_email=$1) DESC NULLS LAST,created_at,id LIMIT 1`, canonical).Scan(&id)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", err
+	}
+	// A new account is created only for a verified address, so an unverified
+	// identity can never claim an address and lock its owner out, and learns
+	// nothing about which addresses have accounts.
+	if !profile.EmailVerified {
+		return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return canonical, newID("user"), nil
-	}
-	if err != nil {
-		return "", "", err
 	}
 	// F13-07: only a plus address, or the exact address itself, is refused when
 	// the canonical address has an account. A plain address whose canonical
@@ -81,10 +87,6 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 	}
 	if !hasPlusTag(profile.Email) && !exact {
 		return canonical, newID("user"), nil
-	}
-	// An unverified address must not learn whether an account exists.
-	if !profile.EmailVerified {
-		return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
 	}
 	// The existing account's id is returned with the refusal so the caller can
 	// report a ban on it first; it is never used to sign in.
