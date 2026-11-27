@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/spf13/cobra"
 )
 
 // doctorDependencies are the edges pb doctor reads that tests replace: the host service and machine guard live at
@@ -26,6 +28,8 @@ type doctorDependencies struct {
 	guardStartFailure func() string
 	// renewalRefused reads whether the daemon recorded that the server refused this machine's identity renewal (401).
 	renewalRefused func() bool
+	// machineRecord reads one machine's current record from the server.
+	machineRecord func(context.Context, *cobra.Command, string) (api.UserMachine, error)
 }
 
 func defaultDoctorDependencies() doctorDependencies {
@@ -35,6 +39,7 @@ func defaultDoctorDependencies() doctorDependencies {
 		guardStatus:       readRunningMachineGuardStatus,
 		guardStartFailure: machineguard.StartFailure,
 		renewalRefused:    renewalRefusedInState,
+		machineRecord:     doctorMachineRecord,
 	}
 }
 
@@ -49,6 +54,24 @@ func readRunningMachineGuardStatus(ctx context.Context) (machineguard.RuntimeSta
 	}
 	defer client.Close()
 	return client.Status(ctx)
+}
+
+// doctorMachineRecord asks outside any workspace, as the daemon's machine list does: scoped to the selected one,
+// the server answers 404 for a machine of another.
+func doctorMachineRecord(ctx context.Context, command *cobra.Command, machineID string) (api.UserMachine, error) {
+	commandContext := actionContext(command, []string{machineID})
+	commandContext.Context = ctx
+	d, err := buildDeps(commandContext)
+	if err != nil {
+		return api.UserMachine{}, err
+	}
+	credential, err := d.auth.Credential()
+	if err != nil {
+		return api.UserMachine{}, err
+	}
+	client := api.New(d.cfg.ServerURL, credential, nil)
+	client.SetCredentialSource(d.auth)
+	return client.GetUserMachine(ctx, machineID)
 }
 
 func renewalRefusedInState() bool {

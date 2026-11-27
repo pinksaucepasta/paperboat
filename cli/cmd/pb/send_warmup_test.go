@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
@@ -26,7 +27,27 @@ func TestPeerWarmupSkipsWithoutPeerOrIdentity(t *testing.T) {
 		t.Fatal("a complete identity must warm")
 	}
 	// Without a peer nothing is dialed and nothing is started: the call returns with no goroutine to wait for.
-	warmPeerSessionBeforeDescriptor(context.Background(), nil, "machine_dst", "environment_dst", 7)
+	warmPeerSessionBeforeDescriptor(context.Background(), nil, warmDestination(true))
+}
+
+func warmDestination(online bool) api.UserMachine {
+	return api.UserMachine{ID: "machine_dst", EnvironmentID: "environment_dst", InstallationGeneration: 7, Online: online}
+}
+
+// Smoke 11-26: `pb send --to` a sleeping machine dialed it before the server refused the send, and the failed dial
+// left a "No path" record on this computer.
+func TestPeerWarmupDoesNotDialAnOfflineDestination(t *testing.T) {
+	probed := make(chan struct{}, 1)
+	peer := daemonProbeFunc(func(context.Context, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
+		probed <- struct{}{}
+		return localapi.PeerProbeResult{}, nil
+	})
+	warmPeerSessionBeforeDescriptor(context.Background(), peer, warmDestination(false))
+	select {
+	case <-probed:
+		t.Fatal("the warmup dialed a machine listed offline")
+	case <-time.After(500 * time.Millisecond):
+	}
 }
 
 // With an identity the warmup probes the peer on a health_probe stream in the
@@ -44,7 +65,7 @@ func TestPeerWarmupProbesTheDestinationPeer(t *testing.T) {
 	defer cancel()
 	returned := make(chan struct{})
 	go func() {
-		warmPeerSessionBeforeDescriptor(ctx, peer, "machine_dst", "environment_dst", 7)
+		warmPeerSessionBeforeDescriptor(ctx, peer, warmDestination(true))
 		close(returned)
 	}()
 	select {

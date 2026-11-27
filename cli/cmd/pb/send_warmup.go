@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 )
 
@@ -16,9 +17,11 @@ const peerWarmupTimeout = 10 * time.Second
 // them. Best effort: any error (offline destination, busy daemon) is dropped and the send proceeds exactly as without
 // it. The health_probe consumer dials the peer path and opens no stream (as `pb ping` does); the transfer lease still
 // does the full admission once the descriptor arrives.
-func warmPeerSessionBeforeDescriptor(ctx context.Context, peer peerProber, machineID, environmentID string, generation int64) {
-	target, ok := peerWarmupTarget(machineID, environmentID, generation)
-	if !ok || peer == nil || ctx == nil {
+// A destination listed offline is not dialed: the dial can only fail, and the daemon then records that this computer
+// could not reach it, which pb status shows for two minutes.
+func warmPeerSessionBeforeDescriptor(ctx context.Context, peer peerProber, destination api.UserMachine) {
+	target, ok := peerWarmupTarget(destination.ID, destination.EnvironmentID, destination.InstallationGeneration)
+	if !ok || !destination.Online || peer == nil || ctx == nil {
 		return
 	}
 	warmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), peerWarmupTimeout)

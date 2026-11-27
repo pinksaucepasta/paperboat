@@ -121,7 +121,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	}
 	if destination.ID != sourceMachineID && dependencies.peerLocal != nil {
 		// The destination is known: its peer session dial overlaps hashing and the prepare call.
-		warmPeerSessionBeforeDescriptor(ctx.Context, dependencies.peerLocal, destination.ID, destination.EnvironmentID, destination.InstallationGeneration)
+		warmPeerSessionBeforeDescriptor(ctx.Context, dependencies.peerLocal, destination)
 	}
 	preparedPaths := make([]string, len(paths))
 	for i, path := range paths {

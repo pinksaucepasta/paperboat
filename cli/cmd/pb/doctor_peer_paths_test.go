@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/spf13/cobra"
@@ -23,7 +25,7 @@ func TestDoctorReportsNoPathToAPeerAsUnhealthy(t *testing.T) {
 		{ID: "machine_idle", Alias: "idle", SelectedPath: "none"},
 	}}
 	var check doctor.Check
-	for _, probe := range doctorProbes(&cobra.Command{}, snapshot, nil) {
+	for _, probe := range doctorProbes(commandWithMachineRecord(func(string) (api.UserMachine, error) { return api.UserMachine{}, errors.New("unreachable") }), snapshot, nil) {
 		if probe.Code == "peer_paths" {
 			check = probe.Run(context.Background())
 		}

@@ -96,16 +96,24 @@ func machineNoPath(machine localapi.MachineStatus) (localapi.HealthItem, bool) {
 }
 
 // doctorPeerPathsCheck reports, with no machine selected, the path to every machine in use: a machine this
-// computer failed to reach is a failure (a test Mac 2026-11-05: pb doctor said healthy while pb status said
-// Path none and every connection failed).
+// computer failed to reach is a failure while Paperboat lists it online (a test Mac 2026-11-05: pb doctor said
+// healthy while pb status said Path none and every connection failed). One it lists offline is only named: it is
+// asleep or shut down, and this computer is not at fault (smoke 11-26: a sleeping test Mac made a healthy computer
+// unhealthy). A removed machine is not reported.
 func doctorPeerPathsCheck(machines []localapi.MachineStatus, now time.Time) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "transport", Code: "peer_paths", Status: doctorpkg.StatusPass}
-	var unreachable, paths []string
+	var unreachable, offline, paths []string
 	recovery := ""
 	for _, machine := range machines {
 		if item, ok := machineNoPath(machine); ok {
-			unreachable = append(unreachable, machine.Alias)
-			recovery = item.Recovery
+			switch machine.RuntimeState {
+			case "offline", "stopped":
+				offline = append(offline, machine.Alias)
+			case "failed": // revoked or deleted
+			default:
+				unreachable = append(unreachable, machine.Alias)
+				recovery = item.Recovery
+			}
 		} else if machine.SelectedPath != "none" {
 			paths = append(paths, machine.Alias+" "+machine.SelectedPath) // relay detail stays in pb status
 		}
@@ -125,6 +133,12 @@ func doctorPeerPathsCheck(machines []localapi.MachineStatus, now time.Time) doct
 		check.Status = doctorpkg.StatusWarning
 		check.Summary = fmt.Sprintf("No online machine was reached in the last %d minutes; the last attempt to %s failed.", config.PeerReachWindowMinutes, example)
 		check.Recovery = "Run pb doctor " + example + " for a live check of that machine, and pb doctor <machine> for any other."
+	}
+	switch {
+	case len(offline) == 1:
+		check.Summary += " " + offline[0] + " is offline."
+	case len(offline) > 1:
+		check.Summary += " " + strings.Join(offline, ", ") + " are offline."
 	}
 	if len(check.Summary) > 512 {
 		check.Summary = check.Summary[:509] + "..."
@@ -169,6 +183,8 @@ const (
 	doctorRunTimeout              = 20 * time.Second
 	doctorProbeTimeout            = 10 * time.Second
 	doctorPathReachabilityTimeout = 8 * time.Second
+	// doctorPresenceTimeout bounds all of peer_paths' server lookups, inside its probe timeout.
+	doctorPresenceTimeout = 5 * time.Second
 )
 
 // repairEnrolled runs the privileged repair only for a paired installation. A computer that is not installed or
@@ -334,9 +350,44 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
 	} else {
-		probes = append(probes, doctorpkg.Probe{Code: "peer_paths", Run: func(context.Context) doctorpkg.Check { return doctorPeerPathsCheck(snapshot.Machines, time.Now()) }})
+		record := doctorDependenciesOf(command.Context()).machineRecord
+		probes = append(probes, doctorpkg.Probe{Code: "peer_paths", Run: func(ctx context.Context) doctorpkg.Check {
+			machines := doctorServerPresence(ctx, snapshot.Machines, func(ctx context.Context, id string) (api.UserMachine, error) { return record(ctx, command, id) })
+			return doctorPeerPathsCheck(machines, time.Now())
+		}})
 	}
 	return probes
+}
+
+// doctorServerPresence gives each machine this computer failed to reach, inside either window peer_paths reads, the
+// presence the server lists now: the daemon's list lags it by up to its 5-minute safety re-list, because a presence
+// change publishes no event. A machine the server does not answer for keeps what the daemon last saw.
+func doctorServerPresence(ctx context.Context, machines []localapi.MachineStatus, record func(context.Context, string) (api.UserMachine, error)) []localapi.MachineStatus {
+	ctx, cancel := context.WithTimeout(ctx, doctorPresenceTimeout)
+	defer cancel()
+	current := slices.Clone(machines)
+	window := time.Duration(config.PeerReachWindowMinutes) * time.Minute
+	for i := range current {
+		_, noPath := machineNoPath(current[i])
+		failed := current[i].LastFailedAt != nil && time.Since(*current[i].LastFailedAt) < window
+		if !noPath && !failed {
+			continue
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		machine, err := record(ctx, current[i].ID)
+		switch {
+		case api.IsMachineRemoved(err):
+			current[i].RuntimeState = "failed"
+		case err != nil:
+		case machine.Online:
+			current[i].RuntimeState = "ready"
+		default:
+			current[i].RuntimeState = "offline"
+		}
+	}
+	return current
 }
 
 // doctorDaemonHealthProbes turns every daemon health item at warning or error (a failing or retrying daemon
