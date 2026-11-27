@@ -37,6 +37,9 @@ func TestCLIReference(t *testing.T) {
 		}
 		c.DisableAutoGenTag = true
 		c.InitDefaultHelpFlag()
+		// Cobra adds --version only when a command with Version set executes, so the
+		// generator must add it too or pb daemon's reference omits the flag its help shows.
+		c.InitDefaultVersionFlag()
 		// An inherited --json flag does not mean a raw/interactive command can
 		// encode its payload. Mirror prepareJSONCommand's capability boundary.
 		if c.Long == "" {
