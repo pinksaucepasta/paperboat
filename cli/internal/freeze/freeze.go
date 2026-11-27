@@ -117,6 +117,8 @@ func WithTimeout(parent context.Context, d time.Duration) (context.Context, cont
 	begin := time.Now()
 	var mu sync.Mutex
 	var timer *time.Timer
+	// The callback reads timer: it is assigned under the same lock, since a short window can fire before AfterFunc returns.
+	mu.Lock()
 	timer = time.AfterFunc(d, func() {
 		mu.Lock()
 		defer mu.Unlock()
@@ -127,6 +129,7 @@ func WithTimeout(parent context.Context, d time.Duration) (context.Context, cont
 		}
 		ctx.finish(context.DeadlineExceeded, context.DeadlineExceeded)
 	})
+	mu.Unlock()
 	// The parent ending ends this context with the parent's error; the cause stays the parent's.
 	stopParent := context.AfterFunc(inner, func() { ctx.finish(parent.Err(), context.Cause(parent)) })
 	if parent.Err() != nil {
