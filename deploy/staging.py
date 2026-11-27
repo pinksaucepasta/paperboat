@@ -13,7 +13,8 @@ Run from the build host; each remote step uses SSH to the configured staging hos
   enroll <name>        print one machine enrollment token on stdout only (TOKEN_CMD for tools/probe/canary-setup.sh)
   edge <image>         register and run the managed staging edge (carrier on TCP 18445); it also holds the host's TCP 443
                        and 80 and the first public TCP tunnel ports. STAGING_PUBLIC_TCP_IDLE_SECONDS (60-86400) shortens
-                       the public TCP/TLS idle limit; unset keeps the edge's default
+                       the public TCP/TLS idle limit; unset keeps the edge's default. STAGING_EDGE_HOST_WEB=0 leaves host
+                       443 and 80 to another service (18446, 18447 and the public TCP ports stay published)
   edge-b <image>       the same for a second managed edge (carrier on TCP 18455, HTTPS probe port 18456; high ports only)
   relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside the staging host) for the staging account
   reset                new empty database from main's migrations (refuses an image not on origin/main); the regional certificate is kept
@@ -448,11 +449,15 @@ def edge(image, second=False):
     Unchanged deployments keep their running process and certificate distribution epoch.
     Managed ingress uses container port 443. Public URLs and public TCP tunnels carry no edge-specific port and the public
     wildcard names the host, so the first edge alone also holds host 443, 80 and EDGE_PUBLIC_TCP_PORTS; host port 18446
-    (18456 for the second edge) reaches one named edge. No HTTP/3 (UDP is closed)."""
+    (18456 for the second edge) reaches one named edge. STAGING_EDGE_HOST_WEB=0 skips host 443 and 80 (public URLs then
+    reach the edge only on 18446). No HTTP/3 (UDP is closed)."""
     idle = os.environ.get("STAGING_PUBLIC_TCP_IDLE_SECONDS", "")
     # Refused here, before the running edge is removed: the edge itself would only fail at its next start.
     if idle and not (idle.isascii() and idle.isdigit() and 60 <= int(idle) <= 86400):
         raise SystemExit("staging: STAGING_PUBLIC_TCP_IDLE_SECONDS must be whole seconds from 60 to 86400")
+    host_web = os.environ.get("STAGING_EDGE_HOST_WEB", "")
+    if host_web not in ("", "0", "1"):
+        raise SystemExit("staging: STAGING_EDGE_HOST_WEB must be 0 or 1")
     EDGE_NAME, EDGE_DIR, EDGE_PORT, EDGE_QUIC_PORT = globals()["EDGE_NAME"], globals()["EDGE_DIR"], globals()["EDGE_PORT"], globals()["EDGE_QUIC_PORT"]
     https_port, http_port, edge_node = 18446, 18447, "stg_managed_edge"
     # One installation (and its pool) per node, as a claim makes it: the server finds a node by its installation's
@@ -499,7 +504,8 @@ def edge(image, second=False):
         if "src" not in route[:-1]:
             raise SystemExit("staging: the staging host has no routed IPv4 address")
         source = route[route.index("src") + 1]
-        publish += ["443:443", f"80:{http_port}", f"{source}:{EDGE_PUBLIC_TCP_PORTS}:{EDGE_PUBLIC_TCP_PORTS}"]
+        publish += ["443:443", f"80:{http_port}"] if host_web != "0" else []
+        publish.append(f"{source}:{EDGE_PUBLIC_TCP_PORTS}:{EDGE_PUBLIC_TCP_PORTS}")
     published = " ".join(publish)
     files = {
         "runtime.credential": credential, "jwks.json": jwks,

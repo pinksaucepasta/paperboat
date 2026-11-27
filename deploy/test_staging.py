@@ -243,10 +243,10 @@ class RegistrationTest(unittest.TestCase):
 class EdgePublicPortsTest(unittest.TestCase):
     register = RegistrationTest.register
 
-    def run_edge(self, second=False, idle=None):
+    def run_edge(self, second=False, idle=None, host_web=None):
         from unittest.mock import patch
         written = {}
-        with patch.dict(os.environ, {'STAGING_PUBLIC_TCP_IDLE_SECONDS': idle or ''}):
+        with patch.dict(os.environ, {'STAGING_PUBLIC_TCP_IDLE_SECONDS': idle or '', 'STAGING_EDGE_HOST_WEB': host_web or ''}):
             _, commands = self.register(lambda image: staging.edge(image, second), 'paperboat-edge:stg-test', written=written)
         run = next(c for c in commands if c.startswith('docker run '))
         return re.findall(r' -p (\S+)', run), json.loads(written['edge-b/deployment.json' if second else 'edge/deployment.json'])
@@ -257,6 +257,27 @@ class EdgePublicPortsTest(unittest.TestCase):
         low, high = map(int, staging.EDGE_PUBLIC_TCP_PORTS.split('-'))
         self.assertTrue(10000 <= low <= high <= 59999 and high < staging.PORT)
         self.assertEqual(self.run_edge(second=True)[0], ['18455:18455', '18458:18458/udp', '18456:443', '18457:18457'])
+
+    def test_host_web_ports_can_be_left_to_another_service_and_the_rest_stays_published(self):
+        from unittest.mock import patch
+        self.assertEqual(self.run_edge(host_web='0')[0], ['18445:18445', '18448:18448/udp', '18446:443', '18447:18447',
+                                                          '10.0.0.7:10000-10049:10000-10049'])
+        self.assertEqual(self.run_edge(host_web='1')[0], self.run_edge()[0])
+        self.assertEqual(self.run_edge(second=True, host_web='0')[0], self.run_edge(second=True)[0])
+        for bad in ('no', 'false', '2'):
+            with patch.dict(os.environ, {'STAGING_EDGE_HOST_WEB': bad}), \
+                    patch.object(staging, 'remote', side_effect=AssertionError('host touched')):
+                with self.assertRaisesRegex(SystemExit, 'STAGING_EDGE_HOST_WEB'):
+                    staging.edge('paperboat-edge:stg-test')
+
+    def test_the_unchanged_check_covers_a_change_of_the_web_ports(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {'STAGING_EDGE_HOST_WEB': '0'}):
+            without = self.register(staging.edge, 'paperboat-edge:stg-test')[1]
+        labels = [shlex.split(next(c for c in commands if c.startswith('docker run '))) for commands in
+                  (without, self.register(staging.edge, 'paperboat-edge:stg-test')[1])]
+        first, second = (argv[argv.index('--label') + 1] for argv in labels)
+        self.assertNotEqual(first, second)
 
     def test_the_idle_limit_is_written_only_when_set_and_a_bad_one_is_refused_before_the_host_is_touched(self):
         from unittest.mock import patch
