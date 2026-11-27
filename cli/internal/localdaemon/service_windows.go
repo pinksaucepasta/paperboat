@@ -438,7 +438,13 @@ func startWindowsLocalDaemonServiceNamed(ctx context.Context, name string) error
 	}
 	defer item.Close()
 	err = item.Start()
-	if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) || errors.Is(err, windows.ERROR_SERVICE_REQUEST_TIMEOUT) {
+	if errors.Is(err, windows.ERROR_SERVICE_REQUEST_TIMEOUT) {
+		// The service did not report in time; it may still come up, so callers keep
+		// waiting for readiness. Record it so pb doctor can say a start stalled.
+		recordServiceStartTimeout(ctx, name)
+		return nil
+	}
+	if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
 		return nil
 	}
 	return err

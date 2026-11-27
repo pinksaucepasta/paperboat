@@ -159,6 +159,11 @@ const (
 	localDaemonReadyPollInterval = 50 * time.Millisecond
 )
 
+// localDaemonSnapshotRequestTimeout bounds one readiness request: a daemon that
+// accepts the connection but does not answer must not hold the whole readiness
+// wait on a single read. A request that runs out is retried like a closed socket.
+var localDaemonSnapshotRequestTimeout = 5 * time.Second
+
 var localDaemonLaunchGate = make(chan struct{}, 1)
 
 // localDaemonRegistrationMatches reports whether this machine has a machine
@@ -260,9 +265,21 @@ func waitForLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 	ticker := time.NewTicker(localDaemonReadyPollInterval)
 	defer ticker.Stop()
 	for {
-		snapshot, err := client.Snapshot(ctx)
+		requestCtx, cancel := context.WithTimeout(ctx, localDaemonSnapshotRequestTimeout)
+		snapshot, err := client.Snapshot(requestCtx)
+		requestTimedOut := err != nil && ctx.Err() == nil && requestCtx.Err() != nil
+		cancel()
 		if err == nil {
 			return snapshot, nil
+		}
+		if requestTimedOut {
+			lastSocketErr = newLocalDaemonConnectError(ctx, socketPath, fmt.Errorf("the local daemon did not answer within %s: %w", localDaemonSnapshotRequestTimeout, err))
+			select {
+			case <-ctx.Done():
+				return localapi.Snapshot{}, errors.Join(lastSocketErr, ctx.Err())
+			case <-ticker.C:
+			}
+			continue
 		}
 		if contextErr := ctx.Err(); contextErr != nil {
 			if lastSocketErr == nil && localDaemonSocketUnavailable(err) {

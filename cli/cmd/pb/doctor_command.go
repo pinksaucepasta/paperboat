@@ -321,6 +321,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 		{Code: "clock", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorClock(ctx, command) }},
 		{Code: "machine_guard_version", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorGuardVersion(ctx) }},
 		{Code: "machine_credentials", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorCredentials(ctx) }},
+		{Code: "local_daemon_service_start", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorServiceStart(ctx) }},
 		{Code: "local_names", Run: func(ctx context.Context) doctorpkg.Check {
 			return doctorLocalNamesCheck(ctx, localAccessDomain(ctx), lookupLocalName)
 		}},
