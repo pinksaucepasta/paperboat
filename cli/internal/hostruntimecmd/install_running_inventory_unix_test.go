@@ -311,3 +311,43 @@ func TestUnfinishedRestoreIsReportedAndRunsNoInventory(t *testing.T) {
 		t.Fatalf("privileged steps = %v, want %v (no inventory)", operations, want)
 	}
 }
+
+// A rollback-supplied that uses its whole budget (waiting for the activation lock, then restarting the prior
+// services) must still leave the steps after it a live context: they shared one 45 s context, and the inventory
+// started already expired, leaving the new version's files behind.
+func TestRollbackThatUsesItsBudgetLeavesTheInventoryItsOwn(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(layout.Binary); err == nil {
+		t.Skip("a Paperboat installation exists on this machine; the test must not touch its services")
+	}
+	previousRollback, previousRecovery := suppliedRollbackBound, suppliedRecoveryBound
+	t.Cleanup(func() { suppliedRollbackBound, suppliedRecoveryBound = previousRollback, previousRecovery })
+	suppliedRollbackBound, suppliedRecoveryBound = 300*time.Millisecond, 300*time.Millisecond
+	original := privilegedInstallCommand
+	t.Cleanup(func() { privilegedInstallCommand = original })
+	var operations []string
+	var inventoryErr error
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		operation := arguments[len(arguments)-1]
+		operations = append(operations, operation)
+		switch operation {
+		case "rollback-supplied":
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null; sleep 5")
+		case "inventory":
+			inventoryErr = ctx.Err()
+			return exec.CommandContext(ctx, "/bin/true")
+		}
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null")
+	}
+	_, _ = InstallRunningBinary(t.Context(), executable, source, filepath.Join(home, "bin"), "")
+	if want := []string{"install-supplied", "rollback-supplied", "inventory"}; !reflect.DeepEqual(operations, want) {
+		t.Fatalf("privileged steps = %v, want %v", operations, want)
+	}
+	if inventoryErr != nil {
+		t.Fatalf("the inventory after a rollback that used its budget started with %v, want its own live context", inventoryErr)
+	}
+}

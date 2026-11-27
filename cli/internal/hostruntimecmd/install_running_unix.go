@@ -247,9 +247,13 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	link, err := installWorkerCommand(directory, layout.Binary)
 	var restoreService func(context.Context) error
 	rollback := func(cause error) (string, error) {
-		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
+		// Each recovery step has its own budget. rollback-supplied may wait for the activation lock and restarts the
+		// services; sharing one 45 s with it left the user service restore and the inventory an expired context.
+		rollbackCtx, cancelRollback := context.WithTimeout(context.WithoutCancel(ctx), suppliedRollbackBound)
+		binaryErr := invoke(rollbackCtx, "rollback-supplied")
+		cancelRollback()
+		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), suppliedRecoveryBound)
 		defer cancel()
-		binaryErr := invoke(recovery, "rollback-supplied")
 		if errors.Is(binaryErr, hostinstall.ErrNoPendingInstallation) {
 			// A bound update commits inside install-supplied, so there is no journal to undo and the new
 			// version stays installed: keep its command link and service, and report the step that failed
@@ -348,6 +352,13 @@ func suppliedCommitRequest(request hostinstall.Request, installed installsource.
 // installInventoryTimeout bounds one privileged install inventory: stopping leftovers takes at most a few
 // unit stops and a TERM/KILL wait, far below it.
 const installInventoryTimeout = 2 * time.Minute
+
+// suppliedRollbackBound bounds rollback-supplied (an activation lock wait, then stopping and restarting the prior
+// services); suppliedRecoveryBound bounds the user service restore after it. Variables so tests can shorten them.
+var (
+	suppliedRollbackBound = 2 * time.Minute
+	suppliedRecoveryBound = 45 * time.Second
+)
 
 // yieldInstallIO marks an update's context: its privileged children run at idle I/O and nice 10 (e4586fcee).
 type yieldInstallIO struct{}
