@@ -5,6 +5,7 @@ usage: fixture_checks.py free-plan|config-team-default|team-business|recording-k
        fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail|console-recording-replay   (console_rows.py)
        fixture_checks.py staging-edge-outage   (staging_edge_outage.py: STAGING only)
        fixture_checks.py staging-edge-idle     (staging_edge_idle.py: STAGING only, edges set to a 120 s idle limit first)
+       fixture_checks.py policy-cli|policy-token|machine-tags|policy-team|tunnel-ip-rules|preview-ip-rules|tunnel-route-rules|tunnel-create|tunnel-origin|tunnel-origin-proxies   (access_checks.py)
 Each check makes its own throwaway machines in Docker containers on SMOKE_FIXTURE_HOST (fixture_machine.sh: paired as the
 account of a stored console session), runs the unchanged check script against them and revokes them on every exit path.
 Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"}; exit 0 only for PASS.
@@ -448,8 +449,10 @@ CHECKS = {'free-plan': free_plan, 'config-team-default': config_team_default, 't
 
 
 def main(argv):
-    import billing_checks  # the billing and plan rows; it imports this module, so only here
+    import access_checks  # these two modules import this one, so only here
+    import billing_checks
     CHECKS.update(billing_checks.CHECKS)
+    CHECKS.update(access_checks.CHECKS)
     if len(argv) != 2 or argv[1] not in CHECKS:
         print(__doc__, file=sys.stderr)
         return 2

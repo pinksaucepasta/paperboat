@@ -10,6 +10,10 @@ TEST-MODE pages with the test card, and deletes the account at the end (which ca
   bandwidth-throttle-send   F13-03S as the product works today (the plan-limit cut was removed, 02e55fb13: past the allowance traffic is slowed,
                             never cut off): with the fair-use amount used up, `pb send` over a relay path finishes, intact, at the slowed
                             speed, and says why and where to act; the console's card says "Slowed" (F13-06).
+  billing-declined-card     F13-04: a declined test card on Checkout leaves the workspace Free and says why; the good card on the same
+                            Checkout recovers. (A failed RENEWAL needs a Stripe test clock or key: not here, see below.)
+  billing-topup             F13-04T: Free refused, quantity limits, 200 GB bought on the console and credited once; F13-06A: the
+                            allowance period; F13-03T: with the plan allowance used up, relayed traffic is taken from the top-up.
   plus-alias-signup         F13-07: plus_alias_signup.mjs.
   billing-team-lifecycle    F13-04, the transitions that need no clock: a team bought on the console's Checkout (upgrade), a seat added mid-cycle
                             (charged at once, one more paid invoice, billing date unchanged) and removed (nothing charged, date unchanged), the
@@ -331,4 +335,100 @@ def billing_team_lifecycle(m):
     return steps.result('billing-team-lifecycle', 'team bought on console Checkout, seat added (invoiced at once) and removed on a fixed billing date, cancelled and kept')
 
 
-CHECKS = {'billing-team-lifecycle': billing_team_lifecycle, 'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}
+TERMS_VERSION = '2026-11-19'  # server/internal/legalconsent: the wording a purchase request accepts
+
+
+def api_call(m, state, method, path, body=None):
+    """(status, body) of one console API call, a refusal included."""
+    calm()
+    arguments = ('console_api.mjs', method, path) + ((json.dumps(body),) if body is not None else ())
+    reply = json.loads(m.node(*arguments, state=state, timeout=180).stdout.strip().splitlines()[-1])
+    return reply['status'], reply['body']
+
+
+def billing_declined_card(m):
+    steps = Steps()
+    _, state = m.account('decl')
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'declined')
+    now = api(m, state, '/v1/billing/workspaces/personal')
+    steps.add('F13-04', 'the API shows one active Pro subscription after the recovery', now.get('state') == 'active' and now.get('product_code') == 'pro-month' and not now.get('renewal_grace_until'),
+              'state=%s product=%s grace=%s' % (now.get('state'), now.get('product_code'), now.get('renewal_grace_until')))
+    return steps.result('billing-declined-card', 'a declined card leaves the workspace Free with the reason shown; the good card on the same Checkout recovers')
+
+
+def topup_request(product, quantity, origin):
+    return {'product_code': product.get('code', ''), 'product_version': product.get('version', 0), 'quantity': quantity,
+            'success_url': origin + '/billing?checkout=done', 'cancel_url': origin + '/billing', 'terms_version': TERMS_VERSION}
+
+
+def spend_rows(before, after, sent):
+    """F13-03T after a relayed send on a workspace whose plan allowance is used up and which owns a top-up: [(step, ok, detail)].
+    A machine reports relayed bytes as upload and download hops, so a send is debited at least once its size."""
+    spent = before['topup_bytes_remaining'] - after['topup_bytes_remaining']
+    return [
+        ('the relayed bytes are taken from the top-up', sent <= spent <= 4 * sent + 2_000_000, 'top-up %s -> %s (-%d) for %d bytes sent' % (before['topup_bytes_remaining'], after['topup_bytes_remaining'], spent, sent)),
+        ('the bought amount stays on record', after['topup_bytes_purchased'] == before['topup_bytes_purchased'], '%s' % after['topup_bytes_purchased']),
+        ('with top-up left the workspace is not slowed', after['throttled'] is False, 'throttled=%s' % after['throttled']),
+    ]
+
+
+def billing_topup(m):
+    """F13-04T buy, F13-06A allowance period, F13-03T the plan is spent before the top-up."""
+    steps = Steps()
+    _, state = m.account('topup')
+    origin = m.env['ORIGIN']
+    free = api(m, state, '/v1/billing/workspaces/personal')
+    start, end = free.get('allowance_period_start'), free.get('allowance_period_end')
+    steps.add('F13-06A', 'a Free overview states its monthly allowance period around now',
+              bool(start and end) and when(start) <= datetime.datetime.now(datetime.timezone.utc) < when(end) and 27 <= (when(end) - when(start)).days <= 31, '%s..%s' % (start, end))
+    products = api(m, state, '/v1/billing/workspaces/personal/products')
+    product = next((p for p in products.get('items', []) if p.get('catalog_type') == 'top_up' and p.get('price_verified')), {})
+    steps.add('F13-04T', 'the catalog serves one verified top-up product of 100 GB units', product.get('unit_bytes') == 10**11 and product.get('max_quantity', 0) >= 1, json.dumps(product)[:200])
+    status, body = api_call(m, state, 'POST', '/v1/billing/workspaces/personal/topups', topup_request(product, 1, origin))
+    steps.add('F13-04T', 'a Free workspace cannot buy a top-up (409 paid_plan_required)', status == 409 and 'paid_plan_required' in json.dumps(body), '%s %s' % (status, json.dumps(body)[:200]))
+    browser(m, steps, 'F13-04C', state, 'billing_console.mjs', 'checkout')
+    paid = api(m, state, '/v1/billing/workspaces/personal')
+    if paid.get('product_code') != 'pro-month':
+        steps.add('F13-04T', 'a paid workspace to top up', False, 'not run: Checkout left product=%s' % paid.get('product_code'))
+        return steps.result('billing-topup', '')
+    steps.add('F13-06A', 'the paid overview states a monthly allowance period inside the paid period',
+              when(paid['allowance_period_start']) <= datetime.datetime.now(datetime.timezone.utc) < when(paid['allowance_period_end']) <= when(paid['period_end']),
+              '%s..%s, paid to %s' % (paid['allowance_period_start'], paid['allowance_period_end'], paid['period_end']))
+    for quantity in (0, product.get('max_quantity', 100) + 1):
+        status, body = api_call(m, state, 'POST', '/v1/billing/workspaces/personal/topups', topup_request(product, quantity, origin))
+        steps.add('F13-04T', 'quantity %d is refused' % quantity, status == 400, '%s %s' % (status, json.dumps(body)[:200]))
+    browser(m, steps, 'F13-04T', state, 'billing_console.mjs', 'topup', '2')
+    sender, _, prefix = m.machine('tsnd', state=state)
+    peer, _, peer_prefix = m.machine('trcv', state=state)
+    fx.ready(prefix, peer)
+    fx.remote('echo %s | %s exec -i -u root %s nft -f -' % (shlex.quote(BLOCK_UDP), fx.DOCKER, sender))
+    ok, detail = relay_ping(m, prefix, peer)
+    if not steps.add('F13-03T', 'with UDP blocked the sender reaches the peer over a relay', ok, detail):
+        return steps.result('billing-topup', '')
+    user = api(m, state, '/v1/me')['id']
+    capped = workspace_usage.run(user, 'cap')
+    m.callback(workspace_usage.run, user, 'restore', *map(str, capped['before']))
+    before = api(m, state, '/v1/billing/workspaces/personal')
+    steps.add('F13-03T', 'plan allowance used up with top-up left: not slowed', before['throttled'] is False and before['topup_bytes_remaining'] == 2 * 10**11,
+              'throttled=%s remaining=%s' % (before['throttled'], before.get('topup_bytes_remaining')))
+    time.sleep(45)  # the relay learns the account's allowance with its next lease
+    digest = make_file(m, prefix, 'topup.bin', SEND_BYTES)
+    code, out, err, seconds = machine_send(m, prefix, peer, 'topup.bin', False)
+    steps.add('F13-03T', 'the send over the relay runs at full speed and says nothing about a limit',
+              code == 0 and received(m, peer_prefix, 'topup.bin') == digest and 'throttled' not in out + err and seconds < SEND_BYTES / (FREE_SLOW_BYTES_PER_SECOND * 2),
+              'exit %s in %.1f s %s' % (code, seconds, ' '.join(err.split())[-150:]))
+    # a machine reports its relayed bytes at most every five minutes (cli/internal/bandwidth batchInterval)
+    deadline, after = time.monotonic() + 480, before
+    while time.monotonic() < deadline:
+        after = api(m, state, '/v1/billing/workspaces/personal')
+        if before['topup_bytes_remaining'] - after['topup_bytes_remaining'] >= SEND_BYTES:
+            break
+        time.sleep(45)
+    for step, ok, detail in spend_rows(before, after, SEND_BYTES):
+        steps.add('F13-03T', step, ok, detail)
+    shown = workspace_usage.run(user, 'show')
+    steps.add('F13-03T', 'the used-up plan counter does not go past its included amount', shown['consumed'] == shown['included'], 'consumed %s of %s' % (shown['consumed'], shown['included']))
+    return steps.result('billing-topup', 'Free refused, 200 GB bought once on Checkout, quantity limits, allowance period, and relayed traffic past the plan is taken from the top-up')
+
+
+CHECKS = {'billing-declined-card': billing_declined_card, 'billing-topup': billing_topup, 'billing-team-lifecycle': billing_team_lifecycle, 'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}

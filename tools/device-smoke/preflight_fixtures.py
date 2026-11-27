@@ -44,6 +44,13 @@ NEEDS = {
     'bandwidth-throttle-send': ['console_tools', 'fixture_host', 'workspace_db'],
     'plus-alias-signup': ['console_tools'],
     'billing-team-lifecycle': ['console_tools'],
+    'billing-declined-card': ['console_tools'],
+    'billing-topup': ['console_tools', 'fixture_host', 'workspace_db'],
+    # access_checks.py: throwaway accounts and containers
+    **{check: ['console_tools', 'fixture_host'] for check in ('policy-cli', 'policy-token', 'machine-tags', 'policy-team', 'tunnel-route-rules',
+                                                              'tunnel-create', 'tunnel-origin', 'tunnel-origin-proxies')},
+    'tunnel-ip-rules': ['console_tools', 'fixture_host', 'observer_host'],
+    'preview-ip-rules': ['console_tools', 'fixture_host', 'observer_host'],
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
 NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],
@@ -226,7 +233,20 @@ def workspace_db():
     return None
 
 
-VERIFIERS = {f.__name__: f for f in (workspace_db, team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
+def observer_host():
+    host = setting('SMOKE_OBSERVER_SSH')
+    if not host:
+        return 'set SMOKE_OBSERVER_SSH to a second host with curl and python3, with its own public address (the IP rule rows)'
+    try:
+        done = ssh(host, 'command -v curl python3 >/dev/null && echo ok')
+    except subprocess.TimeoutExpired:
+        done = None
+    if done is None or done.stdout.strip() != 'ok':
+        return 'the observer %s does not answer over ssh or lacks curl/python3' % host
+    return None
+
+
+VERIFIERS = {f.__name__: f for f in (observer_host, workspace_db, team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
                                       s3_keys, fixture_host, windows_rsync, console_tools, operator_password, staging_stack)}
 
 

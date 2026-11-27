@@ -17,6 +17,7 @@ import os
 import shlex
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -47,6 +48,36 @@ try:
 except OSError:
     print("refused")
 '''
+
+
+def stable_on_each(ips, probe, want, seconds, stable=STABLE, interval=0.2, clock=time.time, extra=180):
+    """Asks every edge address in parallel until each has answered `want` (probe(ip) returns (answer, value)) `stable` times in a
+    row. The rule applied on an edge when the first answer of that run was asked for: that moment must lie within `seconds`;
+    the confirming answers may come later, so an observer that is slow to reach is not measured as a slow rule.
+    Returns ({ip: seconds until applied}, {ip: last (answer, value)}); an address missing from the first did not make it."""
+    started, applied, last = clock(), {}, {}
+
+    def watch(ip):
+        streak, since = 0, 0.0
+        while streak < stable:
+            asked = clock()
+            if asked > started + seconds and (not streak or since > started + seconds or asked > started + seconds + extra):
+                return
+            last[ip] = probe(ip)
+            if last[ip][0] == want:
+                since = asked if not streak else since
+                streak += 1
+            else:
+                streak = 0
+            time.sleep(interval)
+        applied[ip] = round(since - started, 1)
+
+    threads = [threading.Thread(target=watch, args=(ip,)) for ip in ips]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return applied, last
 
 
 def find_url(value):
@@ -105,18 +136,7 @@ def main():
         # the rule counts as applied only when EVERY edge has answered `want` STABLE times in a row within the bound.
         host = url.split('://', 1)[1].split('/', 1)[0]
         ips = sorted({entry[4][0] for entry in socket.getaddrinfo(host, 443, socket.AF_INET)})
-        started = time.time()
-        deadline = started + (seconds or args.wait)
-        streak, stable_at, last = {ip: 0 for ip in ips}, {}, {}
-        while time.time() < deadline and len(stable_at) < len(ips):
-            for ip in ips:
-                if ip in stable_at:
-                    continue
-                last[ip] = fetch(observer, url, resolve=(host, ip))
-                streak[ip] = streak[ip] + 1 if last[ip][0] == want else 0
-                if streak[ip] >= STABLE:
-                    stable_at[ip] = round(time.time() - started, 1)
-            time.sleep(0.2)
+        stable_at, last = stable_on_each(ips, lambda ip: fetch(observer, url, resolve=(host, ip)), want, seconds or args.wait)
         if len(stable_at) < len(ips):
             raise Failure('%s: wanted HTTP %d on every edge within %ds, got %s (stable at %s)' % (label, want, seconds or args.wait, {ip: last[ip][0] for ip in last}, stable_at))
         latencies.append(max(stable_at.values()))
@@ -283,19 +303,9 @@ def main():
             def wait_for(observer, want, label, seconds=None):
                 # every edge address must give `want` STABLE times in a row within the bound (each edge applies a rule on its own refresh)
                 ips = sorted({entry[4][0] for entry in socket.getaddrinfo(host, port, socket.AF_INET)})
-                started = time.time()
-                deadline = started + (seconds or args.wait)
-                streak, stable_at, last = {ip: 0 for ip in ips}, {}, {}
-                while time.time() < deadline and len(stable_at) < len(ips):
-                    for ip in ips:
-                        if ip in stable_at:
-                            continue
-                        last[ip] = raw_answer(observer, host, port, mode, ip)
-                        streak[ip] = streak[ip] + 1 if last[ip] == want else 0
-                        if streak[ip] >= STABLE:
-                            stable_at[ip] = round(time.time() - started, 1)
+                stable_at, last = stable_on_each(ips, lambda ip: (raw_answer(observer, host, port, mode, ip), None), want, seconds or args.wait, interval=0)
                 if len(stable_at) < len(ips):
-                    raise Failure('%s: wanted %s on every edge within %ds, got %s' % (label, want, seconds or args.wait, last))
+                    raise Failure('%s: wanted %s on every edge within %ds, got %s' % (label, want, seconds or args.wait, {ip: last[ip][0] for ip in last}))
                 per_edge.append({'step': '%s %s' % (mode, label), 'seconds_to_stable_per_edge': stable_at})
             wait_for([], 'answered', 'baseline A', 180)
             wait_for(observer_b, 'answered', 'baseline B', 180)

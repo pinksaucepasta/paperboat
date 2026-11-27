@@ -60,6 +60,21 @@ portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 tes
 | (L37, L38 steps) | F13-04, F13-04C | `billing-console`: a Checkout left unpaid does not block the next one and can no longer be paid. `billing-team-lifecycle`: the removal survives cancel and keep, and the Seats section reads "3 seats until <date>, then 2." (" if you keep the plan" while cancelling), right after the removal and after a reload |
 | `plus-alias-signup` | F13-07 | sign-ups with plus addresses of an existing account are refused by name; a plus address with no base account signs up; the base address signing up afterwards must not land in that account |
 
+| `billing-declined-card` | F13-04 (failed payment at purchase), F13-05 (sandbox purchase) | a declined test card leaves the workspace Free and says why; the good card on the same Checkout recovers |
+| `billing-topup` | F13-04T, F13-03T, F13-06A | Free refused (409), quantity limits, 200 GB bought on the console and credited once; with the plan allowance used up, relayed traffic is taken from the top-up |
+
+### Access policy, API tokens, tunnel and preview rules (`access_checks.py`)
+
+Each check makes its own throwaway account(s) and containers on `SMOKE_FIXTURE_HOST`: `policy-cli` (F18-01, F18-10, C244-C253, C289, C290),
+`policy-token` (F18-06), `machine-tags` (F18-11, C262), `policy-team` (F18-02, F18-04, F18-05, F18-07, F18-08; a team paid in Stripe's
+sandbox), `tunnel-create` (C279), `tunnel-route-rules` (F8-16), `tunnel-ip-rules` (F8-13, C280), `preview-ip-rules` (F7-09, C281),
+`tunnel-origin` (F8-09..F8-12), `tunnel-origin-proxies` (F8-09). The two IP rule checks need `SMOKE_OBSERVER_SSH`, a second host with curl
+and python3 whose public address differs from the controller's.
+
+A controller that must not run a browser sets `SMOKE_PW_CHROMIUM` to `remote_chrome.sh` and `SMOKE_BROWSER_HOST` to a host with Chrome:
+the browser runs there, node and every session state stay on the controller. Stripe Checkout offers a buyer in the US a list of payment
+methods; `stripe_pay.mjs` picks "Card" there.
+
 When a console session has expired, preflight says which one: sign it in again with `console_session.mjs` (operator) or
 with the credentials in `free-account/account.json` (Free account).
 

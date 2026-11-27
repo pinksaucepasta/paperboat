@@ -19,15 +19,26 @@ export async function payTestCheckout(page, card = "4242424242424242") {
     throw new Error(`no ${what} on the Checkout page`)
   }
   const field = (placeholder) => find(`"${placeholder}" field`, (f) => f.getByPlaceholder(placeholder, { exact: true }))
+  // Where Stripe offers more than a card (a buyer it places in the US also gets Cash App, Klarna and bank debit), the methods are a
+  // list and the card fields exist only after "Card" is picked; such a form also asks for a ZIP code and may offer to save the buyer in Link.
+  await pickCard(page)
   const values = [["Card number", card], ["MM / YY", "1234"], ["Security code", "123"], ["First and last name", "Paperboat Smoke"]]
   // Stripe's masked inputs can drop a value written while the form is still settling ("Your card number is incomplete" on submit,
   // 2026-11-27): type each field key by key, then submit only after every field has kept its value on two reads a second apart.
+  for (const frame of page.frames()) {
+    const zip = frame.getByPlaceholder("ZIP code", { exact: true })
+    if ((await zip.count()) && !values.some(([name]) => name === "ZIP code")) values.push(["ZIP code", "94103"])
+    const email = frame.getByPlaceholder("you@example.com", { exact: true })
+    if ((await email.count()) && (await email.first().isEditable()) && !(await email.first().inputValue())) await email.first().fill("smoke@example.com")
+    const link = frame.locator('input[name="linkOptIn"]')
+    if ((await link.count()) && (await link.first().isChecked())) await link.first().uncheck({ force: true })
+  }
   await keepTyped(page, async (name) => await field(name), values)
   const terms = await find("terms checkbox", (f) => f.getByRole("checkbox", { name: /Start the service now/ }))
   // Stripe's consent box is a React-controlled input: right after the click its DOM state can still read unchecked, so
   // locator.check() reported "did not change its state" for a box that read checked a moment later (1 of 6 runs,
   // 2026-11-27). Click once, then wait for the state; fail only if it never turns checked.
-  await terms.click()
+  if (!(await terms.isChecked())) await terms.click() // a second attempt on the same page (a declined card) finds it ticked
   for (let i = 0; !(await terms.isChecked()); i++) {
     if (i >= 50) throw new Error("the terms checkbox did not turn checked within 5 s")
     await page.waitForTimeout(100)
@@ -36,6 +47,17 @@ export async function payTestCheckout(page, card = "4242424242424242") {
   await page.waitForURL((u) => u.hostname !== "checkout.stripe.com", { timeout: 120000, waitUntil: "commit" }).catch(async () => {
     throw new Error("Checkout did not accept the payment: " + (await whyStillThere(page)))
   })
+}
+
+export async function pickCard(page) {
+  for (let i = 0; i < 120; i++) {
+    for (const frame of page.frames()) {
+      if (await frame.getByPlaceholder("Card number", { exact: true }).count()) return
+      const choice = frame.getByRole("button", { name: /^(Pay with )?Card$/ })
+      if (await choice.count()) await choice.first().click({ force: true, timeout: 5000 }).catch(() => {})
+    }
+    await page.waitForTimeout(500)
+  }
 }
 
 // A masked input shows "4242 4242 4242 4242" or "12 / 34": spaces and slashes are the mask's.

@@ -9,6 +9,8 @@
 //   portal cancel|keep          Cancel plan / Keep plan in Stripe's portal, back to the console
 //   team-checkout TEAM SEATS    Create team (monthly) on the console, pay on test-mode Checkout, the team's paid overview
 //   seats N                     the team's billing page: set N seats, read what it costs now, buy or remove
+//   declined                    F13-04: Upgrade with a declined test card (workspace stays Free), then the good card on the same Checkout
+//   topup UNITS                 F13-04T: buy UNITS x 100 GB on the console, test-mode Checkout; credited once
 //   invoices                    the Stripe portal's invoice history; the step "invoices" carries the number of paid ones in "paid"
 // With BILLING_TEAM=<team id> the plan, seats, portal and invoice commands act on that team's workspace instead of the personal one.
 // Prints one JSON line {"steps":[{"step","ok","detail"}]}: every step is tried, none stops the rest. Exit 1 when one failed.
@@ -234,6 +236,59 @@ async function main(argv) {
     add("the test webhook made the subscription active", billing.state === "active" && billing.product_code === "pro-month", `state=${billing.state} product=${billing.product_code}`)
   }
 
+  // A card the issuer declines (Stripe's test number 4000 0000 0000 0002) leaves the workspace Free and the Checkout payable.
+  async function declined() {
+    const offer = await upgradeOffer()
+    await offer.consent.click()
+    await offer.offer.click()
+    await atStripe()
+    const refusal = await payTestCheckout(page, "4000000000000002").then(() => "the payment was accepted", (error) => String(error.message))
+    add("Checkout declines the card and says so", /declined/i.test(refusal), refusal)
+    add("the buyer is still on the same Checkout", testCheckoutURL(page.url()), page.url().split("?")[0].slice(0, 60))
+    await page.waitForTimeout(15000) // a webhook of the failed attempt, if any, has arrived
+    const billing = await overview()
+    add("after the declined card the workspace is still Free", billing.state === "free" && !billing.product_code, `state=${billing.state} product=${billing.product_code}`)
+    await payTestCheckout(page)
+    await page.waitForURL((u) => u.href.startsWith(origin + "/billing"), { timeout: 180000, waitUntil: "commit" })
+    const paid = await settled(main_(), (t) => /Plan\s+Pro · \$8\/month/.test(t) && !/Confirming payment/.test(t))
+    add("a good card on the same Checkout recovers: the paid overview shows Pro · $8/month", /Plan\s+Pro · \$8\/month/.test(paid), paid.replace(/\s+/g, " ").slice(0, 150))
+    const after = await overview()
+    add("no failed-payment state remains after the recovery", after.state === "active" && !after.renewal_grace_until && !/Payment failed/.test(paid), `state=${after.state} grace=${after.renewal_grace_until}`)
+  }
+
+  // F13-04T: a one-time top-up of UNITS x 100 GB bought on the console, paid on test-mode Checkout.
+  async function topup(units) {
+    const before = await overview()
+    await openPlan()
+    const buy = main_().getByRole("button", { name: "Buy", exact: true })
+    await buy.waitFor({ timeout: 60000 })
+    const consent = main_().getByRole("checkbox").last()
+    add("Buy is disabled until the purchase terms are ticked", await buy.isDisabled())
+    for (let i = 1; i < units; i++) await main_().getByRole("button", { name: "100 GB more" }).click()
+    const amountShown = await main_().getByRole("spinbutton", { name: "Gigabytes" }).inputValue()
+    add(`the form offers ${units * 100} GB`, Number(amountShown) === units * 100, amountShown)
+    await consent.click()
+    await buy.click()
+    await atStripe()
+    add("Buy opens a Stripe test-mode Checkout", testCheckoutURL(page.url()))
+    await payTestCheckout(page)
+    await page.waitForURL((u) => u.href.startsWith(origin + "/billing"), { timeout: 180000, waitUntil: "commit" })
+    let after = before
+    for (let i = 0; i < 40 && !((after.topup_bytes_purchased ?? 0) > (before.topup_bytes_purchased ?? 0)); i++) {
+      await page.waitForTimeout(3000)
+      after = await overview()
+    }
+    const gained = (after.topup_bytes_purchased ?? 0) - (before.topup_bytes_purchased ?? 0)
+    add(`the paid top-up credits ${units * 100} GB once`, gained === units * 1e11 && after.topup_bytes_remaining - (before.topup_bytes_remaining ?? 0) === units * 1e11, `purchased +${gained}, remaining ${after.topup_bytes_remaining}`)
+    add("the plan, its allowance and its billing dates are unchanged", after.product_code === before.product_code && after.allowance_bytes === before.allowance_bytes && after.period_end === before.period_end && after.allowance_period_end === before.allowance_period_end, `${after.product_code} ${after.allowance_bytes} ${after.period_end}`)
+    await openPlan()
+    const shown = await settled(main_(), (t) => /extra left/.test(t))
+    add("the billing page shows the extra bandwidth left", /[\d.]+ [GT]B extra left/.test(shown), /([\d.]+ \S?B) extra left/.exec(shown.replace(/\s+/g, " "))?.[0] ?? shown.replace(/\s+/g, " ").slice(0, 200))
+    await page.waitForTimeout(10000) // a replayed webhook must not credit twice
+    const later = await overview()
+    add("no second credit arrives for the same payment", later.topup_bytes_purchased === after.topup_bytes_purchased, `${later.topup_bytes_purchased}`)
+  }
+
   // Nothing is clicked on a Stripe page unless it is the test-mode portal.
   async function enteredPortal() {
     await page.waitForURL((u) => u.hostname === "billing.stripe.com", { timeout: 90000, waitUntil: "commit" })
@@ -372,6 +427,8 @@ async function main(argv) {
   try {
     if (command === "card") await card(argument)
     else if (command === "checkout") await checkout()
+    else if (command === "declined") await declined()
+    else if (command === "topup") await topup(Number(argument))
     else if (command === "portal") await portal(argument)
     else if (command === "team-checkout") await teamCheckout(argument, Number(extra))
     else if (command === "seats") await seats(Number(argument))
@@ -379,7 +436,7 @@ async function main(argv) {
     else if (command === "seat-note") {
       await openPlan()
       await expectNote(`L38: ${last}`, Number(argument), Number(extra), last === "cancelling")
-    } else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | seat-note BOUGHT THEN cancelling|renewing | invoices")
+    } else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | declined | topup UNITS | seat-note BOUGHT THEN cancelling|renewing | invoices")
   } catch (error) {
     const where = page.url().split("?")[0].replace(origin, "").slice(0, 60)
     const why = String(error?.message ?? error).split("\n")[0].replace(/(https?:\/\/[^\s?"']+)\?[^\s"']*/g, "$1").slice(0, 160)
