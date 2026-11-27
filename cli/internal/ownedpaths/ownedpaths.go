@@ -20,7 +20,7 @@ var hex32 = strings.Repeat("[0-9a-f]", 32)
 
 var diagnostics = Tree{
 	"writer.lock": nil, "events-*": nil, "sentry-flood.json": nil, ".sentry-flood-*": nil,
-	"last-unexpected-failure.txt": nil, "last-daemon-failure.txt": nil,
+	"last-unexpected-failure.txt": nil, "last-daemon-failure.txt": nil, "last-diagnostics-failure.txt": nil,
 }
 
 // profile is auth.profile_dir (default <config>/credentials).

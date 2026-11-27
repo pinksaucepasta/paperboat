@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
@@ -25,6 +27,7 @@ import (
 
 func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorreport.Reporter, stderr io.Writer) (context.Context, func()) {
 	var storageErr error
+	var directory string
 	var recorder *diagnostics.Recorder
 	command, _, findErr := newRootCommand().Find(args)
 	// Every step Paperboat itself re-runs as root through sudo (install, update, man pages, purge, ...) acts for
@@ -43,7 +46,6 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 		// Windows helper's protected completion status retains failure metadata.
 		recorder = diagnostics.NewMemoryRecorder()
 	} else {
-		var directory string
 		if directory = foregroundDiagnosticsDirectory(command, args); directory == "" {
 			directory, storageErr = processDiagnosticsDirectory(ctx, command)
 		}
@@ -54,6 +56,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	}
 	if storageErr != nil {
 		recorder = diagnostics.NewMemoryRecorder()
+		directory = "" // refused storage gets no failure file either
 	}
 	ctx = diagnostics.WithRecorder(ctx, recorder)
 	restoreLogger := configureProcessLogging(args, recorder, supportref.FromContext(ctx))
@@ -72,19 +75,16 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	}
 	return ctx, func() {
 		// Command-owned producers have stopped before this process cleanup. One
-		// deadline bounds asynchronous logs, disk persistence and SDK flushing.
+		// deadline bounds asynchronous logs and SDK flushing, and disk persistence
+		// has its own: a slow export must not use up the time to save.
 		stopRuntimeCapture()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
 		defer restoreLogger()
 		defer restoreFaultObserver()
-		// Leave a short part of the shared budget for persisting the SDK result.
-		// A drained SDK queue is evidence of finished attempts, not receipt.
-		deadline, _ := shutdownCtx.Deadline()
-		exportCtx, stopExport := context.WithDeadline(shutdownCtx, deadline.Add(-250*time.Millisecond))
+		exportCtx, stopExport := context.WithTimeout(context.Background(), exportShutdownLimit)
 		queueErr := diagnosticlog.Flush(exportCtx)
 		reporter.Flush(exportCtx)
 		stopExport()
+		// A drained SDK queue is evidence of finished attempts, not receipt.
 		severity := "info"
 		if reporter.FlushStatus() == "timed_out" || reporter.SDKSubmissionsDropped() != 0 || reporter.SDKHTTPFailures() != 0 {
 			severity = "warning"
@@ -95,11 +95,45 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 			"sdk_submissions_dropped": strconv.FormatUint(reporter.SDKSubmissionsDropped(), 10),
 			"sdk_http_failures":       strconv.FormatUint(reporter.SDKHTTPFailures(), 10),
 		})
-		storageErr := recorder.Flush(shutdownCtx)
-		closeErr := recorder.CloseContext(shutdownCtx)
-		if queueErr != nil || storageErr != nil || closeErr != nil {
-			fmt.Fprintf(stderr, "pb: Some local diagnostics could not be saved before shutdown. Run `pb doctor` to check diagnostic storage. Support reference: %s.\n", supportref.FromContext(ctx))
+		saveCtx, stopSave := context.WithTimeout(context.Background(), saveShutdownLimit)
+		defer stopSave()
+		storageErr := recorder.Flush(saveCtx)
+		closeErr := recorder.CloseContext(saveCtx)
+		reportShutdownSave(stderr, directory, supportref.FromContext(ctx), queueErr, storageErr, closeErr)
+	}
+}
+
+const (
+	exportShutdownLimit = 1750 * time.Millisecond
+	saveShutdownLimit   = 2 * time.Second
+)
+
+// reportShutdownSave keeps which step failed, and why, in the diagnostics directory. The user hears only of a storage
+// fault: a step that ran out of time waited behind another pb process or a slow disk, and the command succeeded.
+func reportShutdownSave(stderr io.Writer, directory, reference string, queueErr, storageErr, closeErr error) {
+	var failed []error
+	fault := false
+	for _, step := range []struct {
+		name string
+		err  error
+	}{{"queue", queueErr}, {"storage", storageErr}, {"close", closeErr}} {
+		if step.err == nil {
+			continue
 		}
+		failed = append(failed, fmt.Errorf("%s: %w", step.name, step.err))
+		fault = fault || !diagnostics.SaveDelayed(step.err)
+	}
+	if len(failed) == 0 {
+		return
+	}
+	// directory is empty without disk diagnostics. A plain write: a disk too slow to save the ring must not hold the
+	// exit for another sync, and a directory an uninstall removed is not created again.
+	if directory != "" {
+		note := time.Now().UTC().Format(time.RFC3339) + " diagnostics_shutdown " + reference + "\n" + causetext.Text(errors.Join(failed...)) + "\n"
+		_ = os.WriteFile(filepath.Join(directory, "last-diagnostics-failure.txt"), []byte(note), 0o600)
+	}
+	if fault {
+		fmt.Fprintf(stderr, "pb: Some local diagnostics could not be saved before shutdown. Run `pb doctor` to check diagnostic storage. Support reference: %s.\n", reference)
 	}
 }
 

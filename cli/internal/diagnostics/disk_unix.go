@@ -84,6 +84,14 @@ type DiskRing struct {
 	persistenceAvailable atomic.Bool
 	workerContext        context.Context
 	cancelWorker         context.CancelFunc
+	// unrepaired marks a ring opened without recovery. Only the writer goroutine touches it once started.
+	unrepaired bool
+}
+
+// SaveDelayed reports an error that only says saving did not finish within its time: another pb held writer.lock, or
+// the disk was slow. It is not a storage fault the user can act on.
+func SaveDelayed(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 func NewDiskRing(config DiskConfig) (*DiskRing, error) {
@@ -118,9 +126,13 @@ func NewDiskRing(config DiskConfig) (*DiskRing, error) {
 	ring := &DiskRing{config: config, owner: owner, queue: make(chan diskRecord, config.QueueCapacity), done: make(chan struct{})}
 	ring.persistenceAvailable.Store(true)
 	ring.workerContext, ring.cancelWorker = context.WithCancel(context.Background())
+	// When another pb keeps the lock past the bound, open anyway: the first append does the tail repair instead.
 	if err := ring.recover(); err != nil {
-		ring.cancelWorker()
-		return nil, err
+		if !SaveDelayed(err) {
+			ring.cancelWorker()
+			return nil, err
+		}
+		ring.unrepaired = true
 	}
 	go ring.run()
 	return ring, nil
@@ -173,7 +185,7 @@ func (r *DiskRing) CloseContext(ctx context.Context) error {
 	case <-r.done:
 	case <-ctx.Done():
 		r.cancelWorker()
-		return ctx.Err()
+		return r.timedOut(ctx)
 	}
 	r.cancelWorker()
 	r.mu.Lock()
@@ -186,8 +198,8 @@ func (r *DiskRing) Flush(ctx context.Context) error {
 	if r == nil || ctx == nil {
 		return ErrInvalid
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	if ctx.Err() != nil {
+		return r.timedOut(ctx)
 	}
 	barrier := make(chan struct{})
 	retry := time.NewTicker(time.Millisecond)
@@ -208,7 +220,7 @@ func (r *DiskRing) Flush(ctx context.Context) error {
 				r.mu.Unlock()
 				return err
 			case <-ctx.Done():
-				return ctx.Err()
+				return r.timedOut(ctx)
 			}
 		default:
 			r.mu.Unlock()
@@ -217,10 +229,20 @@ func (r *DiskRing) Flush(ctx context.Context) error {
 		// stalls. Retrying the durability barrier is bounded by the caller deadline.
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return r.timedOut(ctx)
 		case <-retry.C:
 		}
 	}
+}
+
+// timedOut is the result of a flush or close that ran out of time. A storage fault already seen outranks the delay.
+func (r *DiskRing) timedOut(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil && !SaveDelayed(r.err) {
+		return r.err
+	}
+	return ctx.Err()
 }
 
 func (r *DiskRing) Stats() DiskStats {
@@ -288,7 +310,9 @@ func (r *DiskRing) persistRecords(encoded []byte, count uint64) {
 	if err := r.persist(encoded); err != nil {
 		r.persistenceAvailable.Store(false)
 		r.mu.Lock()
-		r.err = err
+		if r.err == nil || !SaveDelayed(err) {
+			r.err = err
+		}
 		r.mu.Unlock()
 		r.failedRecords.Add(count)
 		r.droppedRecords.Add(count)
@@ -298,17 +322,39 @@ func (r *DiskRing) persistRecords(encoded []byte, count uint64) {
 	}
 }
 
-func (r *DiskRing) persist(encoded []byte) (result error) {
+// persist appends one batch under writer.lock and syncs it after releasing the lock. Every pb process of the user
+// (daemons, each command and its SSH helpers) shares the ring: a sync under the lock made all of them wait out each
+// slow disk flush (4.4 s on a Raspberry Pi's SD card), so commands lost their records at exit.
+func (r *DiskRing) persist(encoded []byte) error {
+	file, err := r.appendLocked(encoded)
+	if err != nil {
+		return err
+	}
+	// The batch is already visible to other writers, so a failed sync is reported and never truncated away.
+	if err := errors.Join(syncDiagnosticFile(file), file.Close()); err != nil {
+		return err
+	}
+	r.persistedBytes.Add(uint64(len(encoded)))
+	return nil
+}
+
+// appendLocked returns the segment it appended to, still open for the caller to sync and close.
+func (r *DiskRing) appendLocked(encoded []byte) (appended *os.File, result error) {
 	ctx, cancel := context.WithTimeout(r.workerContext, diskOperationTimeout)
 	defer cancel()
 	unlock, err := acquireDiskLock(ctx, filepath.Join(r.config.Directory, "writer.lock"), r.owner)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { result = errors.Join(result, unlock()) }()
+	defer func() {
+		if result = errors.Join(result, unlock()); result != nil && appended != nil {
+			result = errors.Join(result, appended.Close())
+			appended = nil
+		}
+	}()
 	segments, total, err := r.segments()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Enforce age retention during normal operation, not only at startup.
 	cutoff := r.config.Clock().UTC().Add(-r.config.Retention)
@@ -316,7 +362,7 @@ func (r *DiskRing) persist(encoded []byte) (result error) {
 	for _, segment := range segments {
 		if segment.expired(cutoff) {
 			if err := removeDiagnosticFile(segment.path, r.owner); err != nil {
-				return err
+				return nil, err
 			}
 			total -= segment.size
 			continue
@@ -324,15 +370,22 @@ func (r *DiskRing) persist(encoded []byte) (result error) {
 		kept = append(kept, segment)
 	}
 	segments = kept
+	if r.unrepaired {
+		// Appending after a crashed writer's partial record would join the two into one corrupt line.
+		if err := r.repairTail(segments); err != nil {
+			return nil, err
+		}
+		r.unrepaired = false
+	}
 	for total+int64(len(encoded)) > r.config.MaximumBytes && len(segments) > 0 {
 		if err := removeDiagnosticFile(segments[0].path, r.owner); err != nil {
-			return err
+			return nil, err
 		}
 		total -= segments[0].size
 		segments = segments[1:]
 	}
 	if int64(len(encoded)) > r.config.MaximumBytes-total {
-		return errors.New("diagnostic ring capacity exhausted")
+		return nil, errors.New("diagnostic ring capacity exhausted")
 	}
 	path := ""
 	if len(segments) > 0 {
@@ -347,29 +400,29 @@ func (r *DiskRing) persist(encoded []byte) (result error) {
 	if path == "" {
 		path, err = r.createSegment()
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	file, err := openDiagnosticAppend(path, r.owner)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	before, statErr := file.Stat()
 	if statErr != nil {
-		return errors.Join(statErr, file.Close())
+		return nil, errors.Join(statErr, file.Close())
 	}
 	written, writeErr := file.Write(encoded)
 	if written != len(encoded) && writeErr == nil {
 		writeErr = io.ErrShortWrite
 	}
-	syncErr := syncDiagnosticFile(file)
+	if writeErr == nil {
+		return file, nil
+	}
 	var rollbackErr error
-	if writeErr != nil || syncErr != nil {
-		if truncateErr := file.Truncate(before.Size()); truncateErr != nil {
-			rollbackErr = truncateErr
-		} else {
-			rollbackErr = file.Sync()
-		}
+	if truncateErr := file.Truncate(before.Size()); truncateErr != nil {
+		rollbackErr = truncateErr
+	} else {
+		rollbackErr = file.Sync()
 	}
 	closeErr := file.Close()
 	if rollbackErr != nil {
@@ -377,11 +430,7 @@ func (r *DiskRing) persist(encoded []byte) (result error) {
 		// writer if the file can still be repaired under the lock we already hold.
 		rollbackErr = errors.Join(rollbackErr, recoverSegment(path, r.owner))
 	}
-	if writeErr != nil || syncErr != nil || rollbackErr != nil || closeErr != nil {
-		return errors.Join(writeErr, syncErr, rollbackErr, closeErr)
-	}
-	r.persistedBytes.Add(uint64(len(encoded)))
-	return nil
+	return nil, errors.Join(writeErr, rollbackErr, closeErr)
 }
 
 type segmentInfo struct {
@@ -480,22 +529,22 @@ func (r *DiskRing) recover() (result error) {
 		total -= segments[0].size
 		segments = segments[1:]
 	}
-	// Writes append validated, newline-terminated records to the newest segment
-	// under writer.lock. Older segments are immutable. A crash can leave only an
-	// incomplete final record, so inspect the active tail before a full repair.
-	if len(segments) > 0 {
-		latest := segments[len(segments)-1]
-		partial, err := hasPartialTail(latest.path, r.owner)
-		if err != nil {
-			return err
-		}
-		if partial {
-			if err := recoverSegment(latest.path, r.owner); err != nil {
-				return err
-			}
-		}
+	return r.repairTail(segments)
+}
+
+// repairTail runs under writer.lock. Writes append validated, newline-terminated records to the newest segment under
+// it; older segments are immutable. A crash can leave only an incomplete final record, so inspect the active tail
+// before a full repair.
+func (r *DiskRing) repairTail(segments []segmentInfo) error {
+	if len(segments) == 0 {
+		return nil
 	}
-	return nil
+	latest := segments[len(segments)-1]
+	partial, err := hasPartialTail(latest.path, r.owner)
+	if err != nil || !partial {
+		return err
+	}
+	return recoverSegment(latest.path, r.owner)
 }
 
 func (r *DiskRing) ReadAll(ctx context.Context, maximum int64) (data []byte, result error) {

@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -163,6 +165,146 @@ func TestConcurrentStartupWithMaximumDiagnosticHistory(t *testing.T) {
 	if err != nil || bytes.Count(data, []byte{'\n'}) != wantRecords {
 		t.Fatalf("history records=%d want=%d err=%T", bytes.Count(data, []byte{'\n'}), wantRecords, err)
 	}
+}
+
+// Two processes at exit on a slow disk: one writer's sync stalls past every save bound, and a second must still open
+// the ring, append and finish its own shutdown. A sync under writer.lock made the second one lose its records.
+func TestASiblingsStalledDiskSyncDoesNotStopAnotherWritersShutdown(t *testing.T) {
+	previous := syncDiagnosticFile
+	var first atomic.Bool
+	stalled, resume := make(chan struct{}), make(chan struct{})
+	syncDiagnosticFile = func(file *os.File) error {
+		if first.CompareAndSwap(false, true) {
+			close(stalled)
+			<-resume
+		}
+		return previous(file)
+	}
+	t.Cleanup(func() { syncDiagnosticFile = previous })
+	config := DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid()}
+	sibling, err := NewDiskRing(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sibling.Close()
+	var released sync.Once
+	release := func() { released.Do(func() { close(resume) }) }
+	defer release()
+	if err := sibling.Record(concurrencyEvent(t, "sibling")); err != nil {
+		t.Fatal(err)
+	}
+	<-stalled
+	ring, err := NewDiskRing(config)
+	if err != nil {
+		t.Fatalf("open beside a stalled sync: %v", err)
+	}
+	if err := ring.Record(concurrencyEvent(t, "exiting")); err != nil {
+		t.Fatal(err)
+	}
+	shutdown, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
+	if err := errors.Join(ring.Flush(shutdown), ring.CloseContext(shutdown)); err != nil {
+		t.Fatalf("shutdown beside a stalled sync: %v (%+v)", err, ring.Stats())
+	}
+	release()
+	if err := sibling.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := sibling.ReadAll(t.Context(), DefaultMaximumBytes)
+	if err != nil || bytes.Count(data, []byte{'\n'}) != 2 {
+		t.Fatalf("want both writers' records: %q %v", data, err)
+	}
+}
+
+// A ring opened while the lock stayed busy skipped recovery: its first append must still repair a crashed tail.
+func TestARingOpenedBesideABusyWriterRepairsACrashedTailBeforeAppending(t *testing.T) {
+	config := DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid()}
+	first, err := NewDiskRing(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(first.Record(concurrencyEvent(t, "before")), first.Close()); err != nil {
+		t.Fatal(err)
+	}
+	segments, err := filepath.Glob(filepath.Join(config.Directory, "events-*.ndjson"))
+	if err != nil || len(segments) != 1 {
+		t.Fatalf("segments: %v %v", segments, err)
+	}
+	file, err := os.OpenFile(segments[0], os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"schema":"crashed`)
+	if err := errors.Join(err, file.Close()); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := acquireDiskLock(t.Context(), filepath.Join(config.Directory, "writer.lock"), first.owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := diskOperationTimeout
+	diskOperationTimeout = 50 * time.Millisecond
+	ring, err := NewDiskRing(config)
+	diskOperationTimeout = previous
+	if err := errors.Join(err, unlock()); err != nil {
+		t.Fatalf("open beside a held lock: %v", err)
+	}
+	defer ring.Close()
+	if err := errors.Join(ring.Record(concurrencyEvent(t, "after")), ring.Flush(t.Context())); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ring.ReadAll(t.Context(), DefaultMaximumBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSuffix(data, []byte{'\n'}), []byte{'\n'})
+	if len(lines) != 2 {
+		t.Fatalf("want the records before and after the crash: %q", data)
+	}
+	for _, line := range lines {
+		var event Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("corrupt line %q: %v", line, err)
+		}
+	}
+}
+
+// A real storage fault seen earlier must not turn into "only slow" because the flush or close later ran out of time.
+func TestAStorageFaultOutlivesATimedOutFlushAndClose(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "diagnostics")
+	ring, err := NewDiskRing(DiskConfig{Directory: directory, OwnerUID: os.Geteuid()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(directory, directory+".offline"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ring.Record(concurrencyEvent(t, "faulted")); err != nil {
+		t.Fatal(err)
+	}
+	fault := ring.Flush(t.Context())
+	if fault == nil || SaveDelayed(fault) {
+		t.Fatalf("storage fault: %v", fault)
+	}
+	if err := os.Rename(directory+".offline", directory); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := acquireDiskLock(t.Context(), filepath.Join(directory, "writer.lock"), ring.owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := ring.Record(concurrencyEvent(t, "blocked")); err != nil {
+		t.Fatal(err)
+	}
+	short, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer stop()
+	for name, err := range map[string]error{"flush": ring.Flush(short), "close": ring.CloseContext(short)} {
+		if err == nil || SaveDelayed(err) {
+			t.Errorf("timed-out %s hid the storage fault: %v", name, err)
+		}
+	}
+	<-ring.done
 }
 
 func TestContendedDiskShutdownAndReadAreBounded(t *testing.T) {
