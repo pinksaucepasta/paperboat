@@ -4,6 +4,9 @@ Everything here is after launch unless its group says otherwise (user decision 2
 
 ## Soon: right after the smoke
 
+### Recovery path when a user's WorkOS identity changes (L36)
+Sign-in refuses a new WorkOS subject whose canonical address already has an account (F13-07, no alias merge). If WorkOS ever gives a real user a new subject for the same address (user deleted and recreated), they get email_already_registered with no way back in. Rare; after launch add a support-driven re-link (verified exact-address match, audited).
+
 ### Drop control_tunnel_nodes.capacity_limit
 Until the commit that lists columns explicitly, the generated `RETURNING *` / `SELECT *` queries (edge register, heartbeat, stale list) read `control_tunnel_nodes.capacity_limit`, so dropping it under such a server fails every edge heartbeat. Only one deploy after that commit ships: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_tunnel_nodes DROP COLUMN capacity_limit;` (forward-only Down, `-- contract-after:` the newest migration in that shipped deploy), then `make generate`.
 

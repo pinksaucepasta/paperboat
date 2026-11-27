@@ -98,7 +98,25 @@ func (s *Service) refreshWorkOSSession(ctx context.Context, sessionHash, subject
 	}
 	// The verified email is an authorization input for shared browser resources.
 	// Refresh it atomically with provider credentials before this request continues.
-	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.users SET canonical_email=CASE WHEN canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address($1) END, primary_email=paperboat.canonical_email_address($1), email_verified=$2,
+	// A provider email changed to another account's address ends this session
+	// (the next sign-in is refused with email_already_registered) instead of
+	// giving this account that address.
+	var taken bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
+		(canonical_email=paperboat.canonical_email_address($1) OR paperboat.canonical_email_address(primary_email)=paperboat.canonical_email_address($1)))`,
+		strings.ToLower(strings.TrimSpace(profile.Email)), userID).Scan(&taken); err != nil {
+		return err
+	}
+	if taken {
+		if _, err = tx.ExecContext(ctx, `UPDATE paperboat.sessions SET revoked_at=now(), workos_refresh_token_ciphertext=NULL, updated_at=now(), version=version+1 WHERE id=$1`, id); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		return ErrUnauthenticated
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.users SET canonical_email=CASE WHEN canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address($1) END, primary_email=$1, email_verified=$2,
 		updated_at=now(), version=version+1 WHERE id=$3`, strings.ToLower(strings.TrimSpace(profile.Email)), profile.EmailVerified, userID); err != nil {
 		return err
 	}

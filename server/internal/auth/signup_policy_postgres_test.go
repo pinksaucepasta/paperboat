@@ -67,6 +67,10 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	if session.UserID != first.ID {
 		t.Fatal("initial session has wrong account")
 	}
+	// The contact address is the exact verified address, never its canonical form.
+	if first.PrimaryEmail != prefix+".one+first@example.test" {
+		t.Fatalf("contact address = %q, want the exact address", first.PrimaryEmail)
+	}
 	before := countUsers(t)
 	for i, email := range []string{canonical, prefix + ".one+second@example.test", prefix + ".ONE+second+third@EXAMPLE.TEST"} {
 		user, aliasSession, err := login(fmt.Sprintf("alias%d", i), email)
@@ -98,6 +102,17 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	refused(t, err, plain)
 	if got, _, err := login("owner", plain); err != nil || got.ID != owner.ID {
 		t.Fatalf("owner cannot sign in after a refused alias: %v", err)
+	}
+	// A known identity whose provider email changes to another account's address
+	// gets the same refusal, and neither account changes.
+	_, _, err = login("owner", prefix+".one+moved@example.test")
+	refused(t, err, canonical)
+	var ownerEmail string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT primary_email FROM paperboat.users WHERE id=$1`, owner.ID).Scan(&ownerEmail); err != nil || ownerEmail != plain {
+		t.Fatalf("owner address changed: %q %v", ownerEmail, err)
+	}
+	if countUsers(t) != before+1 {
+		t.Fatal("an email change created an account")
 	}
 	for i, email := range []string{prefix + "one@example.test", prefix + ".one@other.test"} {
 		user, _, err := login(fmt.Sprintf("distinct%d", i), email)

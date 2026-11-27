@@ -201,7 +201,7 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 			return err
 		}
 		created = !existed
-		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: sql.NullString{String: canonical, Valid: true}, UserID: accountID, WorkosSubject: profile.Subject, PrimaryEmail: canonical, EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
+		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: sql.NullString{String: canonical, Valid: true}, UserID: accountID, WorkosSubject: profile.Subject, PrimaryEmail: strings.ToLower(strings.TrimSpace(profile.Email)), EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
 		if err != nil {
 			return err
 		}

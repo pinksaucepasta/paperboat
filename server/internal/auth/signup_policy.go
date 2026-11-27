@@ -35,6 +35,16 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
  SELECT 1 FROM paperboat.user_identities i WHERE i.user_id=u.id AND i.provider='workos' AND i.provider_subject=$1)
  ORDER BY u.id LIMIT 1`, profile.Subject).Scan(&id)
 	if err == nil {
+		// A known identity whose provider email now names another account's
+		// address is refused, never given a duplicate or that address.
+		var other bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
+ (canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1))`, canonical, id).Scan(&other); err != nil {
+			return "", "", err
+		}
+		if other {
+			return canonical, id, &EmailAlreadyRegisteredError{Canonical: canonical}
+		}
 		return canonical, id, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
