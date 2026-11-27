@@ -100,6 +100,8 @@ async function remove() {
     await page.goto(`${origin}/account/delete`)
     await page.waitForTimeout(5000)
   }
+  // the page asks for the address the account is stored under, which is not the typed one for a plus-address sign-up
+  const stored = await page.request.get(origin + "/api/v1/me").then(async (r) => (r.ok() ? (await r.json()).data?.email : undefined), () => undefined)
   let status = 0
   page.on("response", (r) => {
     if (new URL(r.url()).pathname === "/api/v1/account" && r.request().method() === "DELETE") status = r.status()
@@ -111,7 +113,7 @@ async function remove() {
       await page.waitForTimeout(5000)
     }
     status = 0
-    await page.fill("#confirm-email", account.email, { timeout: 15000 })
+    await page.fill("#confirm-email", stored ?? account.email, { timeout: 15000 })
     await page.getByRole("button", { name: "Delete my account" }).click()
     await page.waitForURL(/\/auth\/deleted/, { timeout: 60000 }).catch(() => {})
   }

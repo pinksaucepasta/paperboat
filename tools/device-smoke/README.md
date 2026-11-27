@@ -28,6 +28,7 @@ The settings live in the `smoke` object of `~/.config/paperboat-dev/targets.json
 | `SMOKE_OPERATOR_STATE` | console session (Playwright storage state, mode 600) of the smoke team's owner `pprbtdev@gmail.com`: `node console_session.mjs password pprbtdev@gmail.com ~/.config/paperboat/console-workos.password STATE` | `config-team-default`, `team-business` |
 | `SMOKE_FREE_STATE` | the **Free fixture account** (never subscribes; created once with `fresh_account.mjs signup ~/.config/paperboat-dev/free-account`, which leaves `account.json` and `state.json` there) | `free-plan` |
 | `SMOKE_CONFIG_REPO` | `pujan-modha/paperboat-smoke-team-config`: a private GitHub repository connected to the operator account as a config repository (the account's GitHub connection already exists; connect another with `POST /v1/config-repositories` {provider github, numeric external_ref, display_name owner/name}); keep it, `config-team-default` only sets and unsets the team default | `config-team-default` |
+| `database_host` (targets.json, not in `smoke`) | operator `psql` over ssh: `workspace_usage.py` caps or seeds the current usage period of one throwaway account (`final-<hex>@`, under six hours old; anything else is refused by the SQL) | `billing-console`, `bandwidth-throttle-send` |
 | `SMOKE_FIXTURE_HOST`, `SMOKE_FIXTURE_PB` | an SSH host with passwordless Docker (a linuxpool runner) and the Linux build for its architecture; `fixture_machine.sh` builds the container image there once | the four checks run by `fixture_checks.py` |
 | `SMOKE_OPERATOR_API`, `~/.config/paperboat-dev/operator-cred` (the API origin; mode 600: operator email, password, authenticator key; `forward_live.py` format) | the smoke team `paperboat-smoke-paid` keeps a running paid plan and the SSO and SCIM add-ons. They are comp grants that end (the plan after at most 366 days): when preflight says the plan is gone, run `python3 operator_fixture.py ensure` (idempotent; never touches a Stripe subscription) | `config-team-default`, `team-business` |
 | `~/.f19-s3ak`, `~/.f19-s3sk` (mode 600) | the S3 keys of the audit-log stream store | `team-business` |
@@ -47,6 +48,16 @@ the team machine that records) and the member's pb as a profile in the first mac
 the owner's session) is on the controller: the container asks for it through files and the controller runs `console_record_start.mjs`
 (`console_start_bridge.py`). The member leaves the team, machines are revoked, and deleting the owner's account deletes the team and cancels its subscription; both accounts are gone when the run ends; a record that cannot be removed is reported as
 `LEFT BEHIND` and fails the check.
+`billing-console`, `bandwidth-throttle-send` and `plus-alias-signup` (`billing_checks.py`) each make their own throwaway accounts and delete them
+(which cancels the subscription). Money safety: nothing is typed into a Stripe page unless it is a test-mode one (a `cs_test_` Checkout or a `test_`
+portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 test card is used.
+
+| Check | CHECKLIST cells | What it does |
+|---|---|---|
+| `billing-console` | F13-04C, F13-06, F13-04B | live console: Free plan screen and allowance card, Checkout to Pro monthly, paid card, portal switch to yearly and back with seeded spend (bandwidth window, billing day, allowance and spent bytes unchanged) |
+| `bandwidth-throttle-send` | F13-03S, F13-06 | two containers, UDP blocked (relay only), fair-use amount used up: `pb send` finishes intact at 512 kbit/s and says why (the plan-limit cut was removed, 02e55fb13); the console card says "Slowed" |
+| `plus-alias-signup` | F13-07 | sign-ups with plus addresses of an existing account are refused by name; a plus address with no base account signs up; the base address signing up afterwards must not land in that account |
+
 When a console session has expired, preflight says which one: sign it in again with `console_session.mjs` (operator) or
 with the credentials in `free-account/account.json` (Free account).
 

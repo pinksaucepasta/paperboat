@@ -37,6 +37,9 @@ NEEDS = {
     'console-recording-replay': ['console_tools', 'fixture_host'],
     # recipe_checks.py: throwaway console accounts and containers; the clean real machines are optional (their rows are NOT RUN without)
     **{check: ['console_tools', 'fixture_host'] for check in recipe_checks.CHECKS},
+    'billing-console': ['console_tools', 'workspace_db'],
+    'bandwidth-throttle-send': ['console_tools', 'fixture_host', 'workspace_db'],
+    'plus-alias-signup': ['console_tools'],
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
 NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],
@@ -185,11 +188,26 @@ def windows_rsync():
 
 
 def console_tools():
+    if not setting('SMOKE_CONSOLE_ORIGIN'):
+        return 'SMOKE_CONSOLE_ORIGIN (the live console) is not set. Fix: %s' % FIX_ACCOUNTS
     missing = [t for t in ('node',) if not shutil.which(t)] + [p for p in (setting('SMOKE_PW_CHROMIUM'), setting('SMOKE_PW_MODULE')) if not p or not Path(p).exists()]
     return ('console automation is missing: %s. Fix: %s' % (', '.join(missing) or 'SMOKE_PW_CHROMIUM / SMOKE_PW_MODULE unset', FIX_ACCOUNTS)) if missing or not setting('SMOKE_PW_CHROMIUM') else None
 
 
-VERIFIERS = {f.__name__: f for f in (team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
+def workspace_db():
+    host = dev_targets.load().get('database_host')
+    if not host:
+        return 'database_host is not set in targets.json (workspace_usage.py caps and seeds a throwaway account\'s usage period there)'
+    try:
+        done = ssh(host, 'runuser -u postgres -- psql -d paperboat -qAtc "select 1"')
+    except subprocess.TimeoutExpired:
+        done = None
+    if done is None or done.returncode or done.stdout.strip() != '1':
+        return 'the database host %s does not answer psql over ssh (operator access, workspace_usage.py)' % host
+    return None
+
+
+VERIFIERS = {f.__name__: f for f in (workspace_db, team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
                                       s3_keys, fixture_host, windows_rsync, console_tools, operator_password)}
 
 
