@@ -459,12 +459,12 @@ var systemctlPath = func() string {
 // stillRestoringMessage is what pb says when it stops waiting for a background restore (Ctrl-C, or its bound). The
 // restore finishes on its own; `pb install` from this machine's ~/.local/bin/pb (already put back to the previous
 // version) repairs anything it could not, which `pb doctor` reports.
-const stillRestoringMessage = "The update failed and Paperboat is still restoring the previous version in the background. Run `pb status` to see when it is done, then `pb doctor`; if it reports a problem, run `pb install` to repair this computer's installation."
+const stillRestoringMessage = "The update failed and Paperboat is still restoring the previous version in the background. Give it a few minutes, then run `pb doctor`; if it reports a problem, run `pb install` to repair this computer's installation."
 
 // restoreAfterNotReady says the restore starts before running it: the failure printed after it named an "attempt"
 // that had already happened (L46).
 func restoreAfterNotReady(out io.Writer, rollback func(error) (string, error), causes ...error) (string, error) {
-	fmt.Fprintln(out, "The new Paperboat service did not become ready; restoring the previous installation...")
+	fmt.Fprintln(out, "The new Paperboat service did not become ready; undoing the update unless it already completed...")
 	return rollback(runtimeFailure("installed Paperboat service did not become ready", causes...))
 }
 

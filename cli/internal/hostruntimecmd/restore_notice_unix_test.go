@@ -18,7 +18,7 @@ func TestRestoreNoticeIsPrintedBeforeTheRollback(t *testing.T) {
 		seen = out.String()
 		return "", cause
 	}, errors.New("deadline"))
-	if !strings.Contains(seen, "restoring the previous installation") {
+	if !strings.Contains(seen, "undoing the update") {
 		t.Fatalf("notice before the rollback = %q", seen)
 	}
 	if err == nil || strings.Contains(err.Error(), "attempting") || !strings.Contains(err.Error(), "did not become ready") {
