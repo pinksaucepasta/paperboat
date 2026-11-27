@@ -138,12 +138,11 @@ export function MachineShell({ machineId, children }: { machineId: string; child
   return (
     <MachineContext value={machine}>
       {header}
-      <div className="min-h-0 flex-1">
+      {/* Docked, the height goes on this wrapper: the panel group sets height: 100% inline, over any class.
+          Without a definite height the terminal grows with its output and has nothing to scroll. */}
+      <div className={terminal === "open" && !isMobile ? "h-[calc(100svh-var(--header-height))]" : "min-h-0 flex-1"}>
         {terminal === "open" && !isMobile ? (
-          <ResizablePanelGroup
-            orientation={dock.value === "bottom" ? "vertical" : "horizontal"}
-            className="h-[calc(100svh-var(--header-height))]"
-          >
+          <ResizablePanelGroup orientation={dock.value === "bottom" ? "vertical" : "horizontal"}>
             <ResizablePanel minSize="30%">{content}</ResizablePanel>
             <ResizableHandle />
             <ResizablePanel defaultSize="35%" minSize="15%">
