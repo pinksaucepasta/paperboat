@@ -216,8 +216,12 @@ func commandFailureMessage(err error, failure commandFailure) string {
 			return nativeLaunchMessage(launch)
 		}
 
-		if _, ok := failure.owner.(*os.PathError); ok {
-			return "Paperboat could not access local files. Check file permissions and the local Paperboat service, then retry; run `pb doctor` if this continues."
+		if pathErr, ok := failure.owner.(*os.PathError); ok {
+			detail := ""
+			if failure := localPathFailure(pathErr); failure != "" {
+				detail = " (" + failure + ")"
+			}
+			return "Paperboat could not access local files" + detail + ". Check file permissions and the local Paperboat service, then retry; run `pb doctor` if this continues."
 		}
 		if failure.owner == syscall.EACCES || failure.owner == syscall.EPERM {
 			return "Paperboat could not access a local resource. Check permissions and the local Paperboat service, then retry; run `pb doctor` if this continues."
@@ -497,4 +501,17 @@ func credentialStoreUnreadable(err error) bool {
 		found = found || leaf == config.ErrCredentialStoreUnavailable
 		return true
 	}) && found
+}
+
+// localPathFailure names a file failure's operation, path and cause only inside Paperboat's system locations.
+func localPathFailure(err *os.PathError) string {
+	if strings.Contains(err.Path, "..") {
+		return ""
+	}
+	for _, root := range []string{"/usr/local/libexec/paperboat", "/var/lib/paperboat", "/run/paperboat", "/Library/PrivilegedHelperTools/Paperboat", "/Library/Application Support/Paperboat"} {
+		if err.Path == root || strings.HasPrefix(err.Path, root+"/") || strings.HasPrefix(err.Path, root+"-") {
+			return err.Op + " " + err.Path + ": " + err.Err.Error()
+		}
+	}
+	return ""
 }

@@ -300,6 +300,9 @@ func stageBinary(source, destination string, identity installsource.Source) (res
 	if err := identity.Verify(source); err != nil {
 		return err
 	}
+	if err := ensureInstallTree(filepath.Dir(destination)); err != nil {
+		return err
+	}
 	if err := secureRootDirectory(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
@@ -656,7 +659,7 @@ func lockUnixInstallState(ctx context.Context, root string) (io.Closer, error) {
 }
 
 func secureRootDirectory(path string, mode os.FileMode) error {
-	if err := os.MkdirAll(path, mode); err != nil {
+	if err := mkdirAllExactMode(path, mode); err != nil {
 		return err
 	}
 	info, err := os.Lstat(path)
@@ -667,4 +670,60 @@ func secureRootDirectory(path string, mode os.FileMode) error {
 		return ErrInvalidRequest
 	}
 	return os.Chmod(path, mode)
+}
+
+// mkdirAllExactMode creates path and its missing ancestors with explicit modes (ancestors 0755, path mode):
+// under a strict root umask (077) MkdirAll left new parents 0700, unreachable by the enrolled account.
+func mkdirAllExactMode(path string, mode os.FileMode) error {
+	var missing []string
+	for current := path; ; current = filepath.Dir(current) {
+		if _, err := os.Lstat(current); err == nil {
+			break
+		} else if !installNotExistOnly(err) {
+			return err
+		}
+		missing = append(missing, current)
+		if filepath.Dir(current) == current {
+			break
+		}
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		want := os.FileMode(0o755)
+		if i == 0 {
+			want = mode
+		}
+		err := os.Mkdir(missing[i], want)
+		if err == nil {
+			err = os.Chmod(missing[i], want)
+		}
+		if err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureInstallTree repairs to 0755 (via secureRootDirectory: no symlinks, root-owned) each directory from
+// Paperboat's binaries-only install base down to directory, so a host left 0700 installs again.
+func ensureInstallTree(directory string) error {
+	layout, err := service.DefaultLayout(runtime.GOOS)
+	if err != nil {
+		return err
+	}
+	return ensureInstallTreeUnder(layout.InstallRoot, directory)
+}
+
+func ensureInstallTreeUnder(base, directory string) error {
+	rel, err := filepath.Rel(base, directory)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return nil
+	}
+	path := base
+	for _, part := range append([]string{"."}, strings.Split(rel, "/")...) {
+		path = filepath.Join(path, part)
+		if err := secureRootDirectory(path, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -339,9 +339,15 @@ func TestUserFacingErrorSanitizesInfrastructureFailures(t *testing.T) {
 			forbid: []string{"GET", "/v1/machines", "api.secret.example"},
 		},
 		{
-			name: "local filesystem failure",
-			err:  &os.PathError{Op: "open", Path: `C:\\Users\\Tester\\Paperboat\\daemon.lock`, Err: os.ErrPermission},
-			want: "could not access local files",
+			name:   "local filesystem failure",
+			err:    &os.PathError{Op: "open", Path: `C:\\Users\\Tester\\Paperboat\\daemon.lock`, Err: os.ErrPermission},
+			want:   "could not access local files. Check",
+			forbid: []string{"Tester", "daemon.lock", "permission denied"},
+		},
+		{
+			name: "system directory not searchable",
+			err:  &os.PathError{Op: "lstat", Path: "/usr/local/libexec/paperboat/users", Err: syscall.EACCES},
+			want: "could not access local files (lstat /usr/local/libexec/paperboat/users: permission denied)",
 		},
 		{
 			name:   "local permission failure",
