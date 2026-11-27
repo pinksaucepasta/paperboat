@@ -133,6 +133,28 @@ class Guards(unittest.TestCase):
         self.assertNotIn(' -F', undo)
 
 
+class EveryEdge(unittest.TestCase):
+    TWO = dict(ENV, SMOKE_STAGING_EDGES='pb-stg-edge:18446:stg_managed_edge,pb-stg-edge-b:18456:stg_managed_edge_b')
+
+    def test_an_edge_that_does_not_serve_fails_the_row_and_the_others_are_still_drilled(self):
+        def no_b(host, clock, served):
+            return lambda url: (0, '') if ':18456/' in url else served(url)
+        host = Host()
+        run, leftovers = drill(host, no_b, env=self.TWO)
+        failed = [line for line in run.lines if line.startswith('FAIL')]
+        self.assertEqual(2, len(failed), failed)
+        self.assertTrue(all('pb-stg-edge-b serves before the cut' in line for line in failed), failed)
+        self.assertTrue(any('during the control outage' in line and line.startswith('PASS') for line in run.lines))
+        self.assertEqual((['preview', 'tunnel'], '', []), (host.deleted[:2], host.rules, leftovers))
+
+    def test_both_edges_serving_are_both_cut_and_checked(self):
+        host = Host()
+        run, _ = drill(host, env=self.TWO)
+        self.assertEqual(0, run.failed, run.lines)
+        self.assertEqual(4, sum('during the control outage' in line for line in run.lines))
+        self.assertEqual(2, sum('the cut of pb-stg-edge' in line for line in run.lines))
+
+
 class OriginCleanup(unittest.TestCase):
     def test_pkill_matches_the_origin_and_not_the_shell_that_runs_the_cleanup(self):
         command = row.origin_cleanup(8765, '/tmp/edgeout-1')

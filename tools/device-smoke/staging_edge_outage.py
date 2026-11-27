@@ -257,8 +257,12 @@ def drill(run, tag, leftovers):
         up = run.until_served(both, 180)
         for key, (status, ok) in up.items():
             run.log(ok, '%s serves before the cut' % key, 'HTTP %d' % status)
-        if not all(ok for _, ok in up.values()):
-            return  # nothing to prove by disturbing a staging that does not serve
+        # An edge that does not serve has its failed step above. The drill goes on with the URLs that do (every failure is
+        # collected), unless the preview or the tunnel serves nowhere: then there is nothing to prove by disturbing staging.
+        urls = {kind: {key: url for key, url in made_urls.items() if up[key][1]} for kind, made_urls in urls.items()}
+        if not all(urls.values()):
+            return
+        both = {**urls['preview'], **urls['tunnel']}
         address, control_port = s.server_address(), urllib.parse.urlsplit(s.api).port
         inserts = []
         for container, _, _ in s.edges:
