@@ -231,3 +231,55 @@ func TestHTTPStripeClientSchedulesCancellationAtPeriodEnd(t *testing.T) {
 		t.Fatalf("a subscription Stripe no longer has is already ended: %v", err)
 	}
 }
+
+func TestSubscriptionScheduleIDParsing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		extra, want string
+		bad         bool
+	}{
+		"absent":   {``, "", false},
+		"null":     {`"schedule":null,`, "", false},
+		"id":       {`"schedule":"sub_sched_1",`, "sub_sched_1", false},
+		"expanded": {`"schedule":{"id":"sub_sched_2","object":"subscription_schedule"},`, "sub_sched_2", false},
+		"empty":    {`"schedule":"",`, "", true},
+		"garbage":  {`"schedule":5,`, "", true},
+	} {
+		var r stripeSubscriptionResponse
+		raw := `{"id":"sub_1","customer":"cus_1","status":"active",` + tc.extra + `"items":{"data":[{"id":"si_1","quantity":2,"current_period_start":1700000000,"current_period_end":1702592000,"price":{"id":"price_1"}}]}}`
+		if err := json.Unmarshal([]byte(raw), &r); err != nil {
+			t.Fatal(err)
+		}
+		sub, err := r.subscription()
+		if (err != nil) != tc.bad || sub.ScheduleID != tc.want {
+			t.Errorf("%s: schedule=%q err=%v", name, sub.ScheduleID, err)
+		}
+	}
+}
+
+func TestHTTPStripeClientExpiresCheckoutSession(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/checkout/sessions/cs_open/expire":
+			io.WriteString(w, `{"id":"cs_open","status":"expired","livemode":false}`)
+		case "/v1/checkout/sessions/cs_other/expire":
+			io.WriteString(w, `{"id":"cs_wrong","status":"expired","livemode":false}`)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"Only Checkout Sessions with a status in [\"open\"] can be expired."}}`)
+		}
+	}))
+	defer srv.Close()
+	client := HTTPStripeClient{BaseURL: srv.URL, APIKey: "sk_test_secret", Client: srv.Client()}
+	if err := client.ExpireCheckoutSession(context.Background(), "cs_open"); err != nil || paths[0] != "POST /v1/checkout/sessions/cs_open/expire" {
+		t.Fatalf("expire: %v %v", err, paths)
+	}
+	if err := client.ExpireCheckoutSession(context.Background(), "cs_other"); err == nil {
+		t.Fatal("a response for another session was accepted")
+	}
+	if err := client.ExpireCheckoutSession(context.Background(), "cs_complete"); err == nil {
+		t.Fatal("a refused expiry was reported as done")
+	}
+}

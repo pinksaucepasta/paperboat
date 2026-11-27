@@ -675,9 +675,11 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 				return err
 			}
 		}
-		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1 AND scheduled_quantity_at<=$2 AND quantity=scheduled_quantity`, workspaceID, current.PeriodStart); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1 AND (scheduled_quantity_at<=$2 OR scheduled_quantity>=quantity OR (team_id IS NULL AND $3))`, workspaceID, current.PeriodStart, current.CancelAtPeriodEnd); err != nil {
 			return err
 		}
+		// A reduction whose date has come (applied or not), one that reduces nothing, or a personal plan's on
+		// cancel, is over.
 		// A scheduled seat reduction is kept while the subscription is cancelling: Stripe releases the schedule
 		// on cancel, and if the customer keeps the plan reapplySeatReductionOnResume schedules it again (L37).
 		// It is dropped once it can no longer apply: the subscription ended or was replaced, or the cancel was
@@ -731,6 +733,13 @@ func (s *WorkspaceService) priorCheckoutState(ctx context.Context, account, team
 	// re-read reports the completion, which still blocks a second subscription.
 	if expirer, ok := s.stripe.(checkoutSessionExpirer); ok && out.key != key && out.err == nil && out.session.Status == "open" &&
 		out.session.ID == prior.ProviderSessionID && out.session.CustomerID == prior.ProviderCustomerID && out.session.CheckoutOperation == out.key {
+		// Only a caller allowed to manage this workspace's billing may end its checkout.
+		if err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			_, e := WorkspaceTx(ctx, tx, account, team, true)
+			return e
+		}); err != nil {
+			return checkoutProviderState{}, err
+		}
 		_ = expirer.ExpireCheckoutSession(ctx, prior.ProviderSessionID)
 		out.session, out.err = s.stripe.GetCheckoutSession(ctx, prior.ProviderSessionID)
 	}
