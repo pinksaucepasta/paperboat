@@ -5,6 +5,9 @@ import contextlib
 import hashlib
 import json
 import os
+import re
+import shlex
+import sys
 import tempfile
 import subprocess
 import tarfile
@@ -175,23 +178,23 @@ class SeedAuthorityTest(unittest.TestCase):
             staging.remote, staging.sql = original
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class RegistrationTest(unittest.TestCase):
-    def register(self, function, image):
+    def register(self, function, image, running=None, written=None):
         from unittest.mock import patch
         statements, commands = [], []
         def remote(command, stdin=None, **kwargs):
             commands.append(command)
+            if written is not None and stdin is not None:
+                written[command.rsplit(' ', 1)[1]] = stdin
+            if command.startswith('ip -4 route get'):
+                return '1.1.1.1 via 10.0.0.1 dev eth0 src 10.0.0.7 uid 1001\n    cache\n'
             # Answer each remote command the way a real host does (edge() inspects the server network and its own container).
             if "{{range $name" in command:
                 return 'testnet\n'
             if "{{json .NetworkSettings.Networks}}" in command:
                 return '{"testnet":{"IPAddress":"10.0.0.5"}}'
             if command.startswith('python3 -c '):
-                return '\n'
+                return running(command) if running else '\n'
             return '{"keys":[]}'
         def sql(statement):
             statements.append(statement)
@@ -237,6 +240,77 @@ class RegistrationTest(unittest.TestCase):
         self.assertNotIn("capability='relay'", joined)
 
 
+class EdgePublicPortsTest(unittest.TestCase):
+    register = RegistrationTest.register
+
+    def run_edge(self, second=False, idle=None):
+        from unittest.mock import patch
+        written = {}
+        with patch.dict(os.environ, {'STAGING_PUBLIC_TCP_IDLE_SECONDS': idle or ''}):
+            _, commands = self.register(lambda image: staging.edge(image, second), 'paperboat-edge:stg-test', written=written)
+        run = next(c for c in commands if c.startswith('docker run '))
+        return re.findall(r' -p (\S+)', run), json.loads(written['edge-b/deployment.json' if second else 'edge/deployment.json'])
+
+    def test_only_the_first_edge_holds_the_hosts_web_ports_and_public_tcp_ports(self):
+        self.assertEqual(self.run_edge()[0], ['18445:18445', '18448:18448/udp', '18446:443', '18447:18447',
+                                              '443:443', '80:18447', '10.0.0.7:10000-10049:10000-10049'])
+        low, high = map(int, staging.EDGE_PUBLIC_TCP_PORTS.split('-'))
+        self.assertTrue(10000 <= low <= high <= 59999 and high < staging.PORT)
+        self.assertEqual(self.run_edge(second=True)[0], ['18455:18455', '18458:18458/udp', '18456:443', '18457:18457'])
+
+    def test_the_idle_limit_is_written_only_when_set_and_a_bad_one_is_refused_before_the_host_is_touched(self):
+        from unittest.mock import patch
+        self.assertNotIn('public_tcp_idle_timeout', self.run_edge()[1])
+        for second in (False, True):
+            self.assertEqual(self.run_edge(second, idle='120')[1]['public_tcp_idle_timeout'], 120_000_000_000)
+        for bad in ('59', '86401', '2m', '-1', '\u00b2'):
+            with patch.dict(os.environ, {'STAGING_PUBLIC_TCP_IDLE_SECONDS': bad}), \
+                    patch.object(staging, 'remote', side_effect=AssertionError('host touched')):
+                with self.assertRaisesRegex(SystemExit, 'STAGING_PUBLIC_TCP_IDLE_SECONDS'):
+                    staging.edge('paperboat-edge:stg-test')
+
+    def test_the_unchanged_check_covers_the_published_ports(self):
+        """Runs edge()'s real host-side digest program against a fake `docker inspect` of what the last run started."""
+        from unittest.mock import patch
+        written = {}
+        first = self.register(staging.edge, 'paperboat-edge:stg-test', written=written)[1]
+        argv = shlex.split(next(c for c in first if c.startswith('docker run ')))
+        label = argv[argv.index('--label') + 1].split('=', 1)[1]
+
+        def host(labels):
+            def running(command):
+                with tempfile.TemporaryDirectory() as root:
+                    Path(root, 'edge').mkdir()
+                    for name in ('deployment.json', 'runtime.credential'):
+                        Path(root, 'edge', name).write_text(written['edge/' + name])
+                    inspect = json.dumps([{'Config': {'Image': 'paperboat-edge:stg-test', 'Labels': labels}, 'State': {'Running': True}}])
+                    fake = f'import subprocess\nsubprocess.check_output=lambda *a,**k:{inspect!r}.encode()\n'
+                    return subprocess.check_output([sys.executable, '-c', fake + shlex.split(command)[2]], cwd=root, text=True)
+            return running
+
+        def started(labels):
+            commands = self.register(staging.edge, 'paperboat-edge:stg-test', running=host(labels))[1]
+            return any(c.startswith('docker run ') for c in commands)
+
+        # The same inputs keep the process; a container started without exactly these ports is replaced.
+        with patch.object(staging.secrets, 'token_urlsafe', lambda *_: written['edge/runtime.credential']):
+            self.assertFalse(started({'pb.publish': label}))
+            for labels in ({}, None, {'pb.publish': '18446:443'}):
+                self.assertTrue(started(labels), labels)
+
+    def test_each_edge_registers_its_own_installation_so_neither_takes_the_others_credential(self):
+        installs = []
+        for second in (False, True):
+            statements = self.register(lambda image: staging.edge(image, second), 'paperboat-edge:stg-test')[0]
+            node = next(s for s in statements if s.startswith('INSERT INTO control_tunnel_nodes'))
+            row = next(s for s in statements if s.startswith('INSERT INTO selfhost_installations'))
+            install, node_id = re.search(r"VALUES\('([^']+)','([^']+)'", row).groups()
+            self.assertIn(f"VALUES('{node_id}','{install}',", node)
+            self.assertIn('edge_pool=excluded.edge_pool', node)  # a node registered under the shared pool moves
+            installs.append((install, node_id))
+        self.assertEqual(installs, [('stg_managed_pool', 'stg_managed_edge'), ('stg_managed_pool_b', 'stg_managed_edge_b')])
+
+
 class CertificateEnvironmentTest(unittest.TestCase):
     def test_staging_domains_have_a_complete_certificate_runtime_confined_to_staging(self):
         import shlex
@@ -262,3 +336,7 @@ class CertificateEnvironmentTest(unittest.TestCase):
             again = dict(item.split("=", 1) for item in shlex.split(staging.build_env(values, prod)))
             self.assertEqual(again[staging.CERT_MASTER_ENV], values[staging.CERT_MASTER_ENV])
             self.assertEqual(again[staging.CERT_DISTRIBUTION_ENV], values[staging.CERT_DISTRIBUTION_ENV])
+
+
+if __name__ == '__main__':
+    unittest.main()

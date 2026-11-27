@@ -11,8 +11,10 @@ Run from the build host; each remote step uses SSH to the configured staging hos
   dns                  ensure regional and public wildcard DNS
   seed                 account, paid entitlement and a console session for the staging test account (idempotent)
   enroll <name>        print one machine enrollment token on stdout only (TOKEN_CMD for tools/probe/canary-setup.sh)
-  edge <image>         register and run the managed staging edge (carrier on TCP 18445)
-  edge-b <image>       the same for a second managed edge (carrier on TCP 18455, HTTPS probe port 18456)
+  edge <image>         register and run the managed staging edge (carrier on TCP 18445); it also holds the host's TCP 443
+                       and 80 and the first public TCP tunnel ports. STAGING_PUBLIC_TCP_IDLE_SECONDS (60-86400) shortens
+                       the public TCP/TLS idle limit; unset keeps the edge's default
+  edge-b <image>       the same for a second managed edge (carrier on TCP 18455, HTTPS probe port 18456; high ports only)
   relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside the staging host) for the staging account
   reset                new empty database from main's migrations (refuses an image not on origin/main); the regional certificate is kept
   check                applied migrations must equal main's set at the running image's commit (also run by up and reset)
@@ -401,6 +403,9 @@ EDGE_QUIC_PORT = 18448  # UDP is closed on the host; the config still needs a di
 EDGE_PORT = 18445   # carrier TCP (inside the staging host's open 10000-59999 range); the prod edge keeps 80/443/7272-7275
 EDGE_NAME, EDGE_DIR = "pb-stg-edge", "edge"
 EDGE_TRUST = "edge-trust"  # certificates of the staging edges, read by the server (compose mounts it)
+# Published for public TCP tunnels. The server hands out the lowest free port of shared/edgeports' public range, so its
+# first ports cover staging; publishing the whole range would start one docker-proxy per port and take staging's own ports.
+EDGE_PUBLIC_TCP_PORTS = "10000-10049"
 
 
 def carrier_certificate(host):
@@ -428,23 +433,32 @@ def sealed_credential(credential):
     return (nonce + AESGCM(hashlib.sha256(sealing.encode()).digest()).encrypt(nonce, credential.encode(), None)).hex()
 
 
-# The second managed staging edge (`edge-b`): another node of the same pool with its own container, state and ports, so
+# The second managed staging edge (`edge-b`): another node with its own installation, container, state and ports, so
 # a rename can be proved on both edges. The platform wildcard certificate is distributed to every ready managed edge.
-EDGE_B = {"node": "stg_managed_edge_b", "name": "pb-stg-edge-b", "dir": "edge-b", "port": 18455, "quic": 18458, "https": 18456, "http": 18457}
+EDGE_B = {"node": "stg_managed_edge_b", "pool": "stg_managed_pool_b", "name": "pb-stg-edge-b", "dir": "edge-b", "port": 18455, "quic": 18458, "https": 18456, "http": 18457}
 
 
 def edge(image, second=False):
     """Managed staging edge, authenticated like operatorinfra.MutateNode(enroll).
     Unchanged deployments keep their running process and certificate distribution epoch.
-    Managed ingress uses container port 443; host port 18446 (18456 for the second edge) is only for external probes.
-    No HTTP/3 (UDP is closed)."""
+    Managed ingress uses container port 443. Public URLs and public TCP tunnels carry no edge-specific port and the public
+    wildcard names the host, so the first edge alone also holds host 443, 80 and EDGE_PUBLIC_TCP_PORTS; host port 18446
+    (18456 for the second edge) reaches one named edge. No HTTP/3 (UDP is closed)."""
+    idle = os.environ.get("STAGING_PUBLIC_TCP_IDLE_SECONDS", "")
+    # Refused here, before the running edge is removed: the edge itself would only fail at its next start.
+    if idle and not (idle.isascii() and idle.isdigit() and 60 <= int(idle) <= 86400):
+        raise SystemExit("staging: STAGING_PUBLIC_TCP_IDLE_SECONDS must be whole seconds from 60 to 86400")
     EDGE_NAME, EDGE_DIR, EDGE_PORT, EDGE_QUIC_PORT = globals()["EDGE_NAME"], globals()["EDGE_DIR"], globals()["EDGE_PORT"], globals()["EDGE_QUIC_PORT"]
     https_port, http_port, edge_node = 18446, 18447, "stg_managed_edge"
+    # One installation (and its pool) per node, as a claim makes it: the server finds a node by its installation's
+    # runtime credential, so a shared one hands the first edge's authority to whichever edge registered last.
+    install = "stg_managed_pool"
     # A machine carries to a second edge only in another failure domain (runtimeattachment/service.go).
     failure_domain = REGION
     if second:
         EDGE_NAME, EDGE_DIR, EDGE_PORT, EDGE_QUIC_PORT = EDGE_B["name"], EDGE_B["dir"], EDGE_B["port"], EDGE_B["quic"]
         https_port, http_port, edge_node = EDGE_B["https"], EDGE_B["http"], EDGE_B["node"]
+        install = EDGE_B["pool"]
         failure_domain = REGION + "-b"
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -456,7 +470,7 @@ def edge(image, second=False):
     raw_seed = seed.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
     raw_pub = seed.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     cert_pem, key_pem, pin = carrier_certificate(host)
-    node, install = edge_node, "stg_managed_pool"
+    node = edge_node
     credential, usage = secrets.token_urlsafe(32), "managed:" + node
     # Keep the carrier pin and runtime authority stable across edge() reruns.
     existing = remote(f"test -f {EDGE_DIR}/managed && echo yes", check=False).strip() == "yes"
@@ -472,6 +486,16 @@ def edge(image, second=False):
         pin = hashlib.sha256(public.public_bytes(serialization.Encoding.DER,
             serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()
     jwks = remote(f"curl -sf -m10 http://127.0.0.1:{LOOPBACK}/.well-known/jwks.json")
+    publish = [f"{EDGE_PORT}:{EDGE_PORT}", f"{EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp", f"{https_port}:443", f"{http_port}:{http_port}"]
+    if not second:
+        # The range is bound to the host's routed IPv4 address: `tailscale serve` holds 10000 on the tailnet address,
+        # which makes docker refuse a wildcard bind.
+        route = remote("ip -4 route get 1.1.1.1").split()
+        if "src" not in route[:-1]:
+            raise SystemExit("staging: the staging host has no routed IPv4 address")
+        source = route[route.index("src") + 1]
+        publish += ["443:443", f"80:{http_port}", f"{source}:{EDGE_PUBLIC_TCP_PORTS}:{EDGE_PUBLIC_TCP_PORTS}"]
+    published = " ".join(publish)
     files = {
         "runtime.credential": credential, "jwks.json": jwks,
         "revocations.json": json.dumps({"jtis": [], "environments": [], "connector_generations": [], "key_ids": []}),
@@ -488,16 +512,17 @@ def edge(image, second=False):
             "preview_base_domain": public_base, "tunnel_base_domain": public_base,
             "runtime_base_domain": f"rt.{domain()}",
             "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 2048, "control_interval": 5_000_000_000,
-            "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768}),
+            "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768,
+            **({"public_tcp_idle_timeout": int(idle) * 1_000_000_000} if idle else {})}),
     }
     # Compare only launch inputs in memory; never print credentials or their files.
-    desired = hashlib.sha256((files["deployment.json"] + credential + image).encode()).hexdigest()
+    desired = hashlib.sha256((files["deployment.json"] + credential + image + published).encode()).hexdigest()
     program = f"""import hashlib,json,subprocess
 from pathlib import Path
 try:
  c=json.loads(subprocess.check_output(['docker','inspect',{EDGE_NAME!r}]))[0]
  p=Path({EDGE_DIR!r})
- digest=hashlib.sha256((p.joinpath('deployment.json').read_text()+p.joinpath('runtime.credential').read_text()+c['Config']['Image']).encode()).hexdigest()
+ digest=hashlib.sha256((p.joinpath('deployment.json').read_text()+p.joinpath('runtime.credential').read_text()+c['Config']['Image']+(c['Config'].get('Labels') or {{}}).get('pb.publish','')).encode()).hexdigest()
  print(digest if c['State']['Running'] else '')
 except (OSError,subprocess.CalledProcessError,KeyError):
  print('')
@@ -516,7 +541,7 @@ except (OSError,subprocess.CalledProcessError,KeyError):
         f"roles,transports,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},'{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
         f"'registered','{REGION}','{failure_domain}',ARRAY['edge'],ARRAY['http2','http3'],now(),now()+interval '1 hour',decode('{pin}','hex')) "
         "ON CONFLICT(id) DO UPDATE SET "
-        "failure_domain=excluded.failure_domain,carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
+        "edge_pool=excluded.edge_pool,failure_domain=excluded.failure_domain,carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
         "carrier_endpoint_quic_port=excluded.carrier_endpoint_quic_port")
     # Paperboat's own edge = a global installation (what an admin-panel claim of pbh install records).
     sql(f"INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) "
@@ -535,14 +560,15 @@ except (OSError,subprocess.CalledProcessError,KeyError):
     if not network or any(c.isspace() for c in network):
         raise SystemExit("staging: expected one staging server Docker network")
     if not unchanged:
-        remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state -p {EDGE_PORT}:{EDGE_PORT} -p {EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp "
-               f"--network {shell_quote(network)} -p {https_port}:443 -p {http_port}:{http_port} {image} {args}")
+        ports = " ".join(f"-p {mapping}" for mapping in publish)
+        remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state "
+               f"--label pb.publish={shell_quote(published)} --network {shell_quote(network)} {ports} {image} {args}")
     networks = json.loads(remote(f"docker inspect -f '{{{{json .NetworkSettings.Networks}}}}' {EDGE_NAME}"))
     if network not in networks:
         remote(f"docker network connect {shell_quote(network)} {EDGE_NAME}")
         networks = json.loads(remote(f"docker inspect -f '{{{{json .NetworkSettings.Networks}}}}' {EDGE_NAME}"))
     address = networks[network]["IPAddress"]
-    # The managed server dialer uses ingress IP:443. Never send staging to host/prod 443.
+    # The managed server dialer uses ingress IP:443: this container's own address, never the host's 443.
     import ipaddress
     ipaddress.IPv4Address(address)
     sql(f"UPDATE control_tunnel_nodes SET public_ingress_verified_at=now(),public_ingress_ipv4='{address}'::inet WHERE id='{node}'")
