@@ -60,12 +60,10 @@ func TestSuppliedUpdateCommitSaysWhatItWaitsForAndIsBounded(t *testing.T) {
 		var output bytes.Buffer
 		suppliedWaitOutput = &output
 		deadline = time.Time{}
-		ctx, want := context.Background(), "at most 15 min)"
+		// The root step's context has no deadline (hostruntimecmd/service_unix.go): rollback bounds itself.
+		ctx, want, bound := context.Background(), "at most 15 min)", suppliedCommitWait
 		if operation == "rollback-supplied" {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, 45*time.Second) // its caller's recovery bound
-			defer cancel()
-			want = "at most 1 min)"
+			want, bound = "at most 1 min)", suppliedRollbackWait
 		}
 		if _, err := lockSuppliedNative(ctx, t.TempDir(), operation, true); err != nil {
 			t.Fatal(err)
@@ -73,7 +71,7 @@ func TestSuppliedUpdateCommitSaysWhatItWaitsForAndIsBounded(t *testing.T) {
 		if got := output.String(); strings.Count(got, "Waiting for another Paperboat update that is finishing") != 1 || !strings.Contains(got, want) {
 			t.Fatalf("%s printed %q", operation, got)
 		}
-		if deadline.IsZero() || time.Until(deadline) > suppliedCommitWait {
+		if deadline.IsZero() || time.Until(deadline) > bound || time.Until(deadline) < bound-5*time.Second {
 			t.Fatalf("%s waits unbounded or past one activation: deadline %v", operation, deadline)
 		}
 	}

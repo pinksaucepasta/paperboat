@@ -343,8 +343,16 @@ func lockSuppliedNative(ctx context.Context, root, operation string, explicit bo
 		update = "the Paperboat update to " + candidate
 	}
 	wait := suppliedCommitWait
+	if operation == "rollback-supplied" {
+		// The root step gets no deadline from its caller, which stops waiting for it after 45 s
+		// (hostruntimecmd rollback); an orphaned rollback must not run minutes later over a newer activation.
+		wait = suppliedRollbackWait
+	}
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
 		wait = time.Until(deadline)
+	}
+	if wait <= 0 {
+		return nil, fmt.Errorf("waiting for the update operation before installing: %w", errors.Join(updated.ErrActivationPending, context.DeadlineExceeded))
 	}
 	fmt.Fprintf(suppliedWaitOutput, "Waiting for %s that is finishing on this computer (at most %d min)...\n", update, int((wait+time.Minute-1)/time.Minute))
 	bounded, cancel := context.WithTimeout(ctx, wait)
@@ -356,6 +364,10 @@ func lockSuppliedNative(ctx context.Context, root, operation string, explicit bo
 // (resolve, drain, canary, stability window, rollback, readiness) fits the update control bound, not the
 // 10 min window alone.
 const suppliedCommitWait = 15 * time.Minute
+
+// suppliedRollbackWait keeps the lock wait a small part of the 45 s the invoking pb gives rollback-supplied;
+// the restore after it is not bounded here (the root step gets no deadline from its caller).
+const suppliedRollbackWait = 10 * time.Second
 
 // suppliedWaitOutput is the root step's stderr, which the invoking pb prints; tests replace it.
 var suppliedWaitOutput io.Writer = os.Stderr
