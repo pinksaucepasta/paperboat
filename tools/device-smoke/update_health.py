@@ -4,10 +4,15 @@ the guard on .21).
 
 Versions: `pb --version` and `pb update status` (cli_version, runtime_version) name the expected version. Components:
 every running Paperboat service process (systemd units paperboat-* and the user's paperboatd; launchd jobs
-com.pinksaucepasta.paperboat.*; Windows services Paperboat*) runs the same bytes as the installed pb (SHA-256 of its
-executable): hostd, updater, carrier, session owner, host service, machine guard and daemon included.
+com.pinksaucepasta.paperboat.*; Windows services Paperboat*) runs the same bytes as the installed pb: hostd, updater,
+carrier, session owner, host service, daemon, and on Unix the machine guard (on Windows the guard is a scheduled task:
+doctor's machine_guard_version covers it). The RUNNING image is checked: Linux hashes /proc/PID/exe; macOS hashes the
+path only when the running text's inode is still that file's; Windows only when the file is not newer than the
+process. Otherwise the component is STALE (an old process kept running after its file was replaced). A component
+whose hash could not be read is MISSING; both fail the check.
 """
 import json
+import subprocess
 import time
 
 import pairing_lifecycle as p
@@ -21,13 +26,20 @@ cli=$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$HOME/.lo
 echo "cli $(h "$cli")"
 if command -v systemctl >/dev/null 2>&1; then
   for u in $(systemctl list-units --no-legend --plain --state=running 'paperboat-*' | awk '{print $1}'); do
-    pid=$(systemctl show -p MainPID --value "$u"); [ "${pid:-0}" -gt 0 ] && echo "$u $(h /proc/$pid/exe)"
+    pid=$(systemctl show -p MainPID --value "$u"); [ "${pid:-0}" -gt 0 ] && echo "$u $(h /proc/$pid/exe || true)"
   done
   pid=$(systemctl --user show -p MainPID --value paperboatd.service 2>/dev/null)
-  [ "${pid:-0}" -gt 0 ] && echo "paperboatd $(h /proc/$pid/exe)"
+  if [ "${pid:-0}" -gt 0 ]; then echo "paperboatd $(h /proc/$pid/exe || true)"; else echo "paperboatd MISSING"; fi
 else
-  { sudo -n launchctl list; launchctl list; } | awk '$3 ~ /^com\.pinksaucepasta\.paperboat/ && $1 ~ /^[0-9]+$/ {print $1, $3}' | sort -u |
-    while read -r pid label; do echo "$label $(h "$(ps -o comm= -p "$pid")")"; done
+  sudo -n launchctl list >/dev/null 2>&1 || echo "launchctl MISSING"
+  listed=$({ sudo -n launchctl list 2>/dev/null; launchctl list; } | awk '$3 ~ /^com\.pinksaucepasta\.paperboat/ && $1 ~ /^[0-9]+$/ {print $1, $3}' | sort -u)
+  printf '%s\n' "$listed" | while read -r pid label; do
+    [ -n "$pid" ] || continue
+    path=$(ps -o comm= -p "$pid"); running=$(sudo -n lsof -a -p "$pid" -d txt -Fi 2>/dev/null | sed -n 's/^i//p' | head -1)
+    if [ -z "$path" ] || [ -z "$running" ]; then echo "$label MISSING"
+    elif [ "$running" != "$(stat -f %i "$path")" ]; then echo "$label STALE"
+    else echo "$label $(h "$path")"; fi
+  done
 fi
 '''
 
@@ -35,7 +47,11 @@ WINDOWS_COMPONENTS = r'''
 $cli=(Get-FileHash -Algorithm SHA256 -LiteralPath %s).Hash.ToLower(); "cli $cli"
 Get-CimInstance Win32_Service -Filter "Name like 'Paperboat%%'" | Where-Object State -eq 'Running' | ForEach-Object {
   $exe = if ($_.PathName -match '^"([^"]+)"') { $Matches[1] } else { ($_.PathName -split ' ')[0] }
-  "$($_.Name) $((Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLower())" }
+  try {
+    $started = (Get-Process -Id $_.ProcessId -ErrorAction Stop).StartTime.ToUniversalTime()
+    if ((Get-Item -LiteralPath $exe -ErrorAction Stop).LastWriteTimeUtc -gt $started) { "$($_.Name) STALE" }
+    else { "$($_.Name) $((Get-FileHash -Algorithm SHA256 -LiteralPath $exe -ErrorAction Stop).Hash.ToLower())" }
+  } catch { "$($_.Name) MISSING" } }
 '''
 
 # A component the check must see running (a substring of its unit, label or service name).
@@ -50,13 +66,16 @@ def components(run_shell=None):
     elif run_shell:
         out = run_shell(UNIX_COMPONENTS)
     else:
-        import subprocess
         out = subprocess.run(['bash', '-c', UNIX_COMPONENTS], capture_output=True, text=True, timeout=120).stdout
     found = {}
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) == 2 and len(parts[1]) == 64:
-            found[parts[0]] = parts[1]
+        if not parts or parts[0] == 'launchctl':
+            if parts:
+                found['launchctl'] = 'MISSING'
+            continue
+        value = parts[1] if len(parts) == 2 else 'MISSING'
+        found[parts[0]] = value if len(value) == 64 or value in ('STALE', 'MISSING') else 'MISSING'
     return found
 
 
@@ -83,7 +102,10 @@ def problems(expected, doctor_report, status, version, parts):
     for need in REQUIRED:
         if not any(need in name.lower() for name in others):
             wrong.append('no running %s component' % need)
-    stale = ['%s %s' % (name, parts[name][:12]) for name in others if parts[name] != cli]
+    unread = ['%s %s' % (name, parts[name]) for name in others if parts[name] in ('STALE', 'MISSING')]
+    if unread:
+        wrong.append('not checkable or still the old process: ' + '; '.join(unread))
+    stale = ['%s %s' % (name, parts[name][:12]) for name in others if parts[name] not in ('STALE', 'MISSING') and parts[name] != cli]
     if stale:
         wrong.append('not on the installed pb (%s): %s' % ((cli or '?')[:12], '; '.join(stale)))
     return wrong
@@ -100,8 +122,9 @@ def settled(expected, seconds, pb=None, status=None, version=None, run_shell=Non
             wrong = problems(expected, report, seen_status, seen_version, parts)
             last = {'doctor': report.get('data', report), 'components': parts, 'problems': wrong}
             if not wrong:
-                return {'version': expected, 'components': sorted(k for k in parts if k != 'cli'), 'doctor': 'healthy'}
-        except (RuntimeError, ValueError, KeyError, p.CommandTimeout) as error:  # the daemon restarts during an activation
+                return {'version': expected, 'doctor': 'healthy', 'components': sorted(k for k in parts if k != 'cli'),
+                        'sha256': (parts.get('cli') or '')[:16]}
+        except (RuntimeError, ValueError, KeyError, p.CommandTimeout, subprocess.TimeoutExpired) as error:  # the daemon restarts during an activation
             last = {'problems': ['%s: %s' % (type(error).__name__, error)]}
         if clock.monotonic() >= deadline:
             raise AssertionError('not healthy on %s after the update: %s; receipt %s'

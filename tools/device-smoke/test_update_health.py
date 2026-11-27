@@ -28,9 +28,15 @@ class UpdateHealth(unittest.TestCase):
         for report, status, version, parts, want in cases:
             self.assertTrue(any(want in w for w in h.problems('B', report, status, version, parts)), want)
 
-    def test_parses_the_component_listing(self):
-        out = 'cli %s\npaperboat-hostd-u1-g.service %s\nnoise\nshort 12ab\n' % (A, A)
-        self.assertEqual(h.components(lambda script: out), {'cli': A, 'paperboat-hostd-u1-g.service': A})
+    def test_parses_the_component_listing_and_never_drops_an_unread_one(self):
+        out = 'cli %s\npaperboat-hostd-u1-g.service %s\ncom.pinksaucepasta.paperboat.carrier.u501.g STALE\nguard\nshort 12ab\n' % (A, A)
+        self.assertEqual(h.components(lambda script: out), {'cli': A, 'paperboat-hostd-u1-g.service': A,
+                         'com.pinksaucepasta.paperboat.carrier.u501.g': 'STALE', 'guard': 'MISSING', 'short': 'MISSING'})
+
+    def test_a_stale_or_unreadable_component_fails(self):
+        for value in ('STALE', 'MISSING'):
+            wrong = h.problems('B', HEALTHY, STATUS, 'B', dict(PARTS, **{'paperboat-machineguard.service': value}))
+            self.assertTrue(any('paperboat-machineguard.service ' + value in w for w in wrong), wrong)
 
     def test_settled_waits_for_the_activation_then_reports_the_doctor_output(self):
         clock = mock.Mock(monotonic=mock.Mock(side_effect=[0, 10, 20, 9999]), sleep=lambda s: None)
