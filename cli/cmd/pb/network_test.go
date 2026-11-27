@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/pinksaucepasta/paperboat/cli/internal/localtestroot"
+
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,7 +28,13 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
+	// Windows has no XDG seam: the test-only local root replaces LocalAppData and salts both per-user pipe names.
+	cleanup, err := localtestroot.Isolate()
+	if err != nil {
+		panic(err)
+	}
 	code := m.Run()
+	cleanup()
 	_ = os.RemoveAll(private)
 	os.Exit(code)
 }

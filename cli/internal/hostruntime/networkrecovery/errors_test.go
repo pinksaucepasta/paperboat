@@ -118,8 +118,22 @@ func testAutomaticRecoveryReference(t *testing.T, reference string) {
 	defer controller.Stop(context.Background())
 	observe(t, controller, 1, ReasonDNS, true)
 	waitForDebounceTimer(t, controller)
-	clock.Advance(100 * time.Millisecond)
-	waitFor(t, func() bool { return controller.Health().Attempt == 1 && count() == 1 })
+	// The controller re-arms its timers whenever it wakes, with a delay from a clock reading taken before the Reset. A fake
+	// Advance that lands between the two leaves the timer due one step after the controller's own deadline, and nothing
+	// wakes it again (Windows -race: "condition did not become true"); a real clock moves only microseconds there. So the
+	// clock creeps on after the step until the timer has fired.
+	advanceUntil := func(step time.Duration, condition func() bool) {
+		t.Helper()
+		clock.Advance(step)
+		waitFor(t, func() bool {
+			if condition() {
+				return true
+			}
+			clock.Advance(time.Millisecond)
+			return false
+		})
+	}
+	advanceUntil(100*time.Millisecond, func() bool { return controller.Health().Attempt == 1 && count() == 1 })
 	mu.Lock()
 	fault := faults[0]
 	mu.Unlock()
@@ -129,28 +143,11 @@ func testAutomaticRecoveryReference(t *testing.T, reference string) {
 	if fault.Errno != int(syscall.EIO) || !supportref.Valid(reference) || fault.SupportReference != reference {
 		t.Fatal("automatic owner lost original cause/reference")
 	}
-	// Retry timers can be armed after the health update; wait for their exact deadline.
-	waitRetry := func() {
-		waitFor(t, func() bool {
-			controller.mu.RLock()
-			deadline := controller.retryAt
-			timer := controller.retryTimer
-			controller.mu.RUnlock()
-			fake := timer.(*fakeTimer)
-			clock.mu.Lock()
-			defer clock.mu.Unlock()
-			return fake.active && fake.deadline.Equal(deadline)
-		})
-	}
-	waitRetry()
-	clock.Advance(100 * time.Millisecond)
-	waitFor(t, func() bool { return controller.Health().Attempt == 2 })
+	advanceUntil(100*time.Millisecond, func() bool { return controller.Health().Attempt == 2 })
 	if count() != 1 {
 		t.Fatal("transient retry emitted duplicate incident")
 	}
-	waitRetry()
-	clock.Advance(200 * time.Millisecond)
-	waitFor(t, func() bool { return controller.Health().State == StateReady && len(recorder.Recent()) == 1 })
+	advanceUntil(200*time.Millisecond, func() bool { return controller.Health().State == StateReady && len(recorder.Recent()) == 1 })
 	event := recorder.Recent()[0]
 	if event.Code != "carrier_recovered" || event.SupportReference != reference {
 		t.Fatal("confirmed recovery lost event/reference")

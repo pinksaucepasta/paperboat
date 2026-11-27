@@ -502,7 +502,8 @@ func TestStandaloneUpdateGatePurgeUsesBoundedLedger(t *testing.T) {
 }
 
 func TestWorkerUpdateDrainWaitsForCommittedTransferChunk(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Only a hang guard, over the whole test: opening the store alone passed 5 s under -race on a Windows runner.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	root := t.TempDir()
 	durable, err := store.Open(ctx, store.Config{Root: filepath.Join(root, "state")})

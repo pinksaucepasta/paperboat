@@ -5,6 +5,7 @@ package bugreport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -21,7 +22,7 @@ func TestRecordingInputPrivateConsoleCancellationAndEnter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute) // a hang guard: the helper is a whole -race test binary
 		defer cancel()
 		command := exec.CommandContext(ctx, executable, "-test.run=^TestRecordingInputPrivateConsoleCancellationAndEnter$")
 		command.Env = append(os.Environ(), "PB_RECORDING_CONSOLE_HELPER=1")
@@ -68,27 +69,42 @@ func TestRecordingInputPrivateConsoleCancellationAndEnter(t *testing.T) {
 		}
 		return count
 	}
-	baseline := countHandles()
-	for range 3 {
-		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
-		err := waitForLine(ctx, file)
-		cancel()
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatal("console cancellation lost")
-		}
-	}
 	event := recordingConsoleEvent{Kind: 1}
 	key := (*recordingKeyEvent)(unsafe.Pointer(&event.Data[0]))
 	key.Down, key.Repeat, key.VirtualKey, key.Character = 1, 1, 0x0d, '\r'
-	var written uint32
 	write := recordingKernel.NewProc("WriteConsoleInputW")
-	if success, _, err := write.Call(uintptr(handle), uintptr(unsafe.Pointer(&event)), 1, uintptr(unsafe.Pointer(&written))); success == 0 || written != 1 {
-		t.Fatalf("write private Enter event: %v", err)
+	// One round takes both ways out of a wait: three cancellations and one Enter.
+	waitBothWays := func() {
+		for range 3 {
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+			err := waitForLine(ctx, file)
+			cancel()
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("console cancellation lost")
+			}
+		}
+		var written uint32
+		if success, _, err := write.Call(uintptr(handle), uintptr(unsafe.Pointer(&event)), 1, uintptr(unsafe.Pointer(&written))); success == 0 || written != 1 {
+			t.Fatalf("write private Enter event: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		if err := waitForLine(ctx, file); err != nil {
+			t.Fatal(err)
+		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	if err := waitForLine(ctx, file); err != nil {
-		t.Fatal(err)
+	// The count is of the whole process, and the Go runtime opens handles of its own when it starts a thread
+	// (before=190 after=196 on a loaded runner). A wait that leaks grows it in every round; require one quiet round.
+	var rounds []string
+	for quiet := false; !quiet; {
+		baseline := countHandles()
+		waitBothWays()
+		count := countHandles()
+		quiet = count <= baseline
+		rounds = append(rounds, fmt.Sprintf("%d->%d", baseline, count))
+		if !quiet && len(rounds) == 10 {
+			t.Fatalf("private recording helper leaked handles in every round: %v", rounds)
+		}
 	}
 	var after uint32
 	if err := windows.GetConsoleMode(handle, &after); err != nil || after != before {
@@ -96,8 +112,5 @@ func TestRecordingInputPrivateConsoleCancellationAndEnter(t *testing.T) {
 	}
 	if _, err := file.Stat(); err != nil {
 		t.Fatal("borrowed console handle closed")
-	}
-	if count := countHandles(); count > baseline {
-		t.Fatalf("private recording helper leaked handles: before=%d after=%d", baseline, count)
 	}
 }

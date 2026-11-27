@@ -3,6 +3,8 @@
 package managedssh
 
 import (
+	"github.com/pinksaucepasta/paperboat/cli/internal/localtestroot"
+
 	"crypto/sha256"
 	"encoding/hex"
 )
@@ -14,6 +16,9 @@ func ownerAgentSocket(_ string) (string, error) {
 	sid, err := currentManagedSSHSID()
 	if err != nil {
 		return "", err
+	}
+	if root := localtestroot.Root(); root != "" {
+		sid += "\x00" + root
 	}
 	sum := sha256.Sum256([]byte(sid))
 	return `\\.\pipe\paperboat-ssh-agent-` + hex.EncodeToString(sum[:16]), nil

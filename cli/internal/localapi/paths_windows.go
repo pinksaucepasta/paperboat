@@ -9,7 +9,17 @@ import (
 	"path/filepath"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/localtestroot"
 )
+
+// localAppData is the per-user root; a test binary may replace it (localtestroot).
+func localAppData() (string, error) {
+	if root := localtestroot.Root(); root != "" {
+		return root, nil
+	}
+	return windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT)
+}
 
 // Paths is the per-user local API layout. Windows uses a named pipe for the
 // API endpoint and LocalAppData Known Folder for state. This avoids trusting a
@@ -23,7 +33,7 @@ type Paths struct {
 
 // DNSFile is where pb and the daemon keep verified addresses ("" without a profile); it creates nothing.
 func DNSFile() string {
-	base, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT)
+	base, err := localAppData()
 	if err != nil {
 		return ""
 	}
@@ -34,7 +44,7 @@ func CurrentPaths(uid int) (Paths, error) {
 	if uid < 0 {
 		return Paths{}, ErrInvalidConfig
 	}
-	base, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT)
+	base, err := localAppData()
 	if err != nil {
 		return Paths{}, errors.Join(ErrInvalidConfig, err)
 	}
@@ -67,7 +77,11 @@ func WindowsPaths(stateRoot, ownerSID string) (Paths, error) {
 	if err != nil || sid == nil || !sid.IsValid() || sid.String() != ownerSID {
 		return Paths{}, ErrInvalidConfig
 	}
-	digest := sha256.Sum256([]byte(ownerSID))
+	salt := ownerSID
+	if root := localtestroot.Root(); root != "" {
+		salt += "\x00" + root
+	}
+	digest := sha256.Sum256([]byte(salt))
 	pipeSuffix := hex.EncodeToString(digest[:12])
 	runtimeRoot := filepath.Join(stateRoot, "run")
 	return Paths{
