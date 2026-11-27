@@ -333,6 +333,22 @@ class Cleanups(unittest.TestCase):
         self.assertEqual({'pb-stg-edge-b': 'nsenter -t 7 -n'}, row.running(Two()))
 
 
+class Timeline(unittest.TestCase):
+    def test_it_holds_every_sample_and_a_write_that_fails_never_replaces_the_result(self):
+        import tempfile
+        from pathlib import Path
+        run, _ = drill(Host())
+        self.assertTrue(any('\t200\tTrue' in line for line in run.samples))
+        self.assertTrue(any('restoring: removing the DROP rules' in line for line in run.samples))
+        with tempfile.TemporaryDirectory() as directory, mock.patch('results_dir.results_dir', lambda *_: Path(directory)), mock.patch('builtins.print'):
+            row.keep_timeline(run, 'edgeout-1')
+            written = list(Path(directory, 'fixture-checks').glob('*.tsv'))
+            self.assertEqual(1, len(written))
+            self.assertEqual(0o600, written[0].stat().st_mode & 0o777)
+        with mock.patch('results_dir.results_dir', side_effect=OSError('read-only')), mock.patch('builtins.print'):
+            row.keep_timeline(run, 'edgeout-1')  # no raise
+
+
 class Registration(unittest.TestCase):
     def test_the_row_runs_in_smoke_and_is_preflighted(self):
         smoke = (row.__file__.replace('staging_edge_outage.py', 'smoke.sh'))

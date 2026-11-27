@@ -16,6 +16,7 @@ One run at a time (a lock directory on the staging host). The tunnel and preview
 import datetime
 import http.client
 import json
+import os
 import re
 import secrets
 import shlex
@@ -433,6 +434,20 @@ def settings():
     return dev_targets.smoke_environment(value), value.get('staging_host', '')
 
 
+def keep_timeline(run, tag):
+    """The raw samples, mode 600 from the start. A file that cannot be written is said so and never replaces the result."""
+    try:
+        from results_dir import results_dir
+        folder = results_dir(__file__) / 'fixture-checks'
+        folder.mkdir(parents=True, exist_ok=True)
+        timeline = folder / ('staging-edge-outage-%s-%s.tsv' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), tag))
+        with open(os.open(timeline, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as handle:
+            handle.write('\n'.join(run.samples) + '\n')
+        print('timeline: %s' % timeline, file=sys.stderr, flush=True)
+    except OSError as error:
+        print('timeline NOT kept: %s' % str(error)[:200], file=sys.stderr, flush=True)
+
+
 def check(m):
     """The fixture_checks.py row: (ok, detail). m.leftovers receives anything cleanup could not remove."""
     import console_rows
@@ -443,11 +458,5 @@ def check(m):
         drill(run, tag, m.leftovers)
     except Exception as error:  # noqa: BLE001 a FAIL with the reason, after the drill's own cleanup
         run.log(False, 'the drill stopped', '%s: %s' % (type(error).__name__, str(error)[:200]))
-    from results_dir import results_dir
-    folder = results_dir(__file__) / 'fixture-checks'
-    folder.mkdir(parents=True, exist_ok=True)
-    timeline = folder / ('staging-edge-outage-%s-%s.tsv' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), tag))
-    timeline.write_text('\n'.join(run.samples) + '\n')
-    timeline.chmod(0o600)
-    print('timeline: %s' % timeline, file=sys.stderr, flush=True)
+    keep_timeline(run, tag)
     return console_rows.verdict('staging-edge-outage', [('staging-edge-outage', 1 if run.failed else 0, '\n'.join(run.lines))])
