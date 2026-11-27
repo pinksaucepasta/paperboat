@@ -449,11 +449,34 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 	return out, err
 }
 
+// refuseWhileReconnecting answers ErrUnavailable (503, retryable: the edge keeps what it holds) to a pull that
+// arrived before the reconnecting edge process's heartbeat. The request verifier only lets a ready node with a
+// heartbeat under 2 minutes old this far; runtime_carrier_valid and the endpoint admissions want it under 30 s,
+// so in between they would answer the edge without its carriers (or as removals) and it would drop serving
+// routes (L42, staging drill F21-17). The refusal ends with the edge's next heartbeat, or at the verifier's
+// 2 minutes, after which the edge is refused as unknown until it heartbeats again.
+func (s *Service) refuseWhileReconnecting(ctx context.Context, edge previewattachment.PreviewEdgeIdentity) error {
+	var reconnecting bool
+	err := s.DB.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM control_tunnel_nodes n WHERE n.id=$1 AND n.process_epoch=$2
+ AND n.state='ready' AND n.ready AND n.drain_deadline IS NULL AND n.last_heartbeat_at<=now()-interval '30 seconds')`,
+		edge.NodeID, edge.ProcessEpoch).Scan(&reconnecting)
+	if err != nil {
+		return err
+	}
+	if reconnecting {
+		return ErrUnavailable
+	}
+	return nil
+}
+
 // Pull returns the edge's complete runtime snapshot: the runtime route admissions and, for an edge
 // that advertised runtimewire.CapabilityEndpoints, the endpoint routes riding on those carriers.
 func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string) ([]runtimewire.Admission, error) {
 	if !runtimewire.ValidEdgeCapabilities(capabilities) {
 		return nil, ErrInvalid
+	}
+	if err := s.refuseWhileReconnecting(ctx, edge); err != nil {
+		return nil, err
 	}
 	if len(capabilities) != 0 {
 		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
@@ -513,6 +536,9 @@ const observationRefresh = time.Minute
 func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since, page string, wait time.Duration) (runtimewire.Snapshot, error) {
 	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpoints) || !runtimewire.ValidEdgeCapabilities(capabilities) {
 		return runtimewire.Snapshot{}, ErrInvalid
+	}
+	if err := s.refuseWhileReconnecting(ctx, edge); err != nil {
+		return runtimewire.Snapshot{}, err
 	}
 	out := runtimewire.Snapshot{Schema: runtimewire.Schema}
 	if !runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas) {
@@ -584,6 +610,11 @@ func quietEndpointAnswer(a runtimewire.Snapshot) bool {
 // endpointDelta answers one endpoint pull of an edge with CapabilityEndpointDeltas: a page of the full set, or
 // the changes since the cursor minus overlap.
 func (s *Service) endpointDelta(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, capabilities []string, since, page string, overlap time.Duration) (runtimewire.Snapshot, error) {
+	// Every read, including the one after a held wait: a heartbeat that lapsed meanwhile would turn the edge's own
+	// carriers into removals.
+	if err := s.refuseWhileReconnecting(ctx, edge); err != nil {
+		return runtimewire.Snapshot{}, err
+	}
 	expires := admission.Deadline(time.Now(), s.admissionLifetime())
 	out := runtimewire.Snapshot{Schema: runtimewire.Schema}
 	after, err := decodeEndpointPage(page)

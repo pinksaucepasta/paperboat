@@ -103,6 +103,9 @@ func waitRuntime(t *testing.T, f func() bool) {
 	t.Fatal("runtime carrier condition timed out")
 }
 func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
+	saved := reconnectGrace
+	reconnectGrace = 200 * time.Millisecond // a revocation right after the outage waits out the grace
+	defer func() { reconnectGrace = saved }()
 	for _, mode := range []string{"revocation", "expiry", "disconnect"} {
 		t.Run(mode, func(t *testing.T) {
 			a := runtimeAdmission(t)
@@ -198,6 +201,104 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 			case <-done:
 			case <-time.After(runtimeWaitBound):
 				t.Fatal("handler leaked")
+			}
+		})
+	}
+}
+
+// L42 (staging drill F21-17): after a control outage the first answer may omit carriers that still serve (the
+// reconnecting edge's pull raced its heartbeat). An omitted route keeps serving through reconnectGrace and is
+// detached only when the confirming pull still omits it; one the confirming pull lists again never drops.
+func TestRuntimeCarrierKeepsOmittedRoutesThroughReconnectGrace(t *testing.T) {
+	saved := reconnectGrace
+	reconnectGrace = 400 * time.Millisecond
+	defer func() { reconnectGrace = saved }()
+	for _, mode := range []string{"restored", "confirmed_missing", "flapping"} {
+		t.Run(mode, func(t *testing.T) {
+			a := runtimeAdmission(t)
+			source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
+			expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: a.Binding.EdgeProcessEpoch})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 20 * time.Millisecond, Timeout: time.Second}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err = w.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = w.Shutdown(context.Background()) }()
+			waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1 })
+			ea, err := control.ExpectedRuntimeAdmission(a, a.Binding.EdgeNodeID, a.Binding.EdgeProcessEpoch, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := newTestCarrierServer(t, ea.Identity)
+			defer server.Close()
+			go func() { _ = w.Handle(ctx, server) }()
+			waitRuntime(t, func() bool { return routes.Len() == 1 })
+			source.mu.Lock()
+			source.err = errors.New("control unavailable")
+			source.mu.Unlock()
+			source.pullsAfter(t, 2)
+			// Control is back, but its first answers omit the carrier.
+			source.mu.Lock()
+			source.err = nil
+			source.admissions = nil
+			source.mu.Unlock()
+			recovered := time.Now()
+			if mode == "flapping" {
+				// Control keeps failing mid-grace: every failure reopens the grace, but the omitted route is
+				// still detached once reconnectGrace has passed since it was first omitted.
+				stop := make(chan struct{})
+				defer close(stop)
+				go func() {
+					for fail := true; ; fail = !fail {
+						select {
+						case <-stop:
+							return
+						case <-time.After(30 * time.Millisecond):
+						}
+						source.mu.Lock()
+						if fail {
+							source.err = errors.New("control unavailable")
+						} else {
+							source.err = nil
+						}
+						source.mu.Unlock()
+					}
+				}()
+				waitRuntime(t, func() bool { return routes.Len() == 0 })
+				if held := time.Since(recovered); held < reconnectGrace || held > 4*reconnectGrace {
+					t.Fatalf("a flapping control plane held an omitted route %v, want about %v", held, reconnectGrace)
+				}
+				return
+			}
+			for time.Since(recovered) < reconnectGrace/2 {
+				if routes.Len() != 1 {
+					t.Fatal("the first answers after a control outage detached a serving route")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if mode == "restored" {
+				source.mu.Lock()
+				source.admissions = []runtimewire.Admission{a}
+				source.mu.Unlock()
+				source.pullsAfter(t, 2)
+				waitRuntime(t, func() bool { return time.Since(recovered) > 2*reconnectGrace })
+				source.pullsAfter(t, 2)
+				if routes.Len() != 1 {
+					t.Fatal("a route the confirming pull lists again was detached")
+				}
+				return
+			}
+			waitRuntime(t, func() bool { return routes.Len() == 0 })
+			if held := time.Since(recovered); held < reconnectGrace || held > 4*reconnectGrace {
+				t.Fatalf("an omitted route was held %v after the outage, want about %v", held, reconnectGrace)
 			}
 		})
 	}

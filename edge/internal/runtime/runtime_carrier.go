@@ -79,7 +79,23 @@ type RuntimeCarrierWorker struct {
 	pulled          chan struct{}
 	endpointsPulled bool
 	closed          bool
+	// failedPull is set by a failed runtime pull (a control outage); the first successful one after it opens a
+	// reconnect grace until graceUntil. In it a held route the answer merely omits stays, but never longer than
+	// reconnectGrace after it was first omitted (omittedAt), however often the grace reopens; graceConfirm pulls
+	// again then, so only a route still omitted is detached (make-before-break). A route the server removes
+	// explicitly (an endpoint delta's Removed, in explicitRemoved) or admits with another identity or revision
+	// is detached at once (worker goroutine only).
+	failedPull      bool
+	graceUntil      time.Time
+	graceConfirm    <-chan time.Time
+	omittedAt       map[string]time.Time
+	explicitRemoved map[string]struct{}
 }
+
+// reconnectGrace caps how long, after a control outage, a route the first answer omits keeps serving: a
+// reconnecting edge's first pull can race its own heartbeat, and the server then answers without its carriers
+// (staging drill F21-17, L42).
+var reconnectGrace = 15 * time.Second
 
 // Pulled is closed once the first runtime pull AND the first endpoint pull installed this process's admissions
 // (previews and endpoint tunnels ride the endpoint pull): a replacement process takes over from the one it
@@ -196,6 +212,9 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 				fastTimer.Reset(w.applyEndpointPull(run, pull))
 			case <-w.wake:
 				w.observe(run)
+			case <-w.graceConfirm:
+				w.graceConfirm = nil
+				w.reconcile(run, nil)
 			case <-w.pullWake:
 				if wait := time.Until(lastMissPull.Add(missPullInterval)); wait > 0 {
 					select {
@@ -284,6 +303,15 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context, pulled func()) 
 	ctx, cancel := context.WithTimeout(parent, w.Timeout)
 	defer cancel()
 	values, err := w.Source.RuntimeCarrierAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch())
+	if err != nil {
+		w.failedPull = true
+	} else if w.failedPull {
+		w.failedPull = false
+		w.graceUntil = time.Now().Add(reconnectGrace)
+		if w.graceConfirm == nil {
+			w.graceConfirm = time.After(reconnectGrace)
+		}
+	}
 	if err == nil {
 		// Endpoint routes come only from the endpoint pull (endpoint deltas); this one is runtime.
 		w.runtimeSet = w.runtimeSet[:0]
@@ -395,6 +423,14 @@ func (w *RuntimeCarrierWorker) applyEndpointPull(parent context.Context, pull en
 // assignment change this worker had not seen.
 func (w *RuntimeCarrierWorker) applyEndpoints(parent context.Context, update control.EndpointUpdate) (news bool, failure error) {
 	next, expiry := mergeEndpointUpdate(w.endpointSet, update)
+	if !update.Complete && len(update.Removed) > 0 {
+		if w.explicitRemoved == nil {
+			w.explicitRemoved = map[string]struct{}{}
+		}
+		for _, id := range update.Removed {
+			w.explicitRemoved[id] = struct{}{}
+		}
+	}
 	logEndpointRemovals(w.endpointSet, next, update)
 	if update.Complete {
 		w.endpointFullAt = time.Now()
@@ -412,6 +448,7 @@ func (w *RuntimeCarrierWorker) applyEndpoints(parent context.Context, update con
 	defer w.markPulled()
 	changed := !endpointSetEqual(w.endpointSet, next)
 	if !changed && expiry.Sub(w.endpointExpiry) < endpointRenewStep {
+		w.explicitRemoved = nil
 		return news, nil
 	}
 	w.endpointSet, w.endpointExpiry = next, expiry
@@ -508,7 +545,53 @@ func (w *RuntimeCarrierWorker) install() error {
 			expected = append(expected, a)
 		}
 	}
-	return w.Expected.Replace(expected, now)
+	return w.Expected.Replace(w.keepOmitted(expected, now), now)
+}
+
+// keepOmitted adds to a new expected set, while the reconnect grace is open, the admitted routes it merely omits:
+// installing the set without them would detach them at once (Handle follows the expected set). Each stays at most
+// reconnectGrace after it was first omitted, however often the grace reopens; graceConfirm pulls again then. A
+// route the server removed explicitly, or that the new set lists (with whatever identity or revision), is not kept.
+func (w *RuntimeCarrierWorker) keepOmitted(expected []datacarrier.ExpectedAdmission, now time.Time) []datacarrier.ExpectedAdmission {
+	explicit := w.explicitRemoved
+	w.explicitRemoved = nil
+	omitted := map[string]time.Time{}
+	defer func() { w.omittedAt = omitted }()
+	if !now.Before(w.graceUntil) {
+		return expected
+	}
+	listed := make(map[string]struct{}, len(expected))
+	for _, a := range expected {
+		listed[a.RouteID] = struct{}{}
+	}
+	held := removalLog{msg: "runtime_route_held_after_reconnect"}
+	defer held.flush()
+	for _, a := range w.Expected.Snapshot() {
+		if !a.Admitted {
+			continue
+		}
+		if _, ok := listed[a.RouteID]; ok {
+			continue
+		}
+		if _, ok := explicit[a.RouteID]; ok {
+			continue
+		}
+		first, seen := w.omittedAt[a.RouteID]
+		if !seen {
+			first = now
+		}
+		if now.Sub(first) >= reconnectGrace || a.Validate(now, w.Expected.NodeID()) != nil {
+			continue
+		}
+		omitted[a.RouteID] = first
+		listed[a.RouteID] = struct{}{}
+		expected = append(expected, a)
+		held.add(a.RouteID, a.PreviewID, "omitted_after_reconnect")
+		if w.graceConfirm == nil {
+			w.graceConfirm = time.After(reconnectGrace - now.Sub(first))
+		}
+	}
+	return expected
 }
 
 // withdraw detaches routes the expected admissions no longer allow. Credential expiry during an
