@@ -122,5 +122,19 @@ class NoNewHardcoding(unittest.TestCase):
         self.assertEqual(found, [], 'hardcoded container settings (use ct_env.sh / ct_env.py):\n' + '\n'.join(found))
 
 
+class NoShellVariableInSingleQuotes(unittest.TestCase):
+    """A python -c program in single quotes is never expanded by the shell, so "$CT_HOME" reaches python literally and the
+    file it names is never found (the fresh machines of the final re-check failed that way). Such programs read HOME from os.environ."""
+    PATTERN = re.compile(r"python3? -c '[^']*\$CT_")
+
+    def test_no_variable_in_single_quoted_python(self):
+        found = []
+        for path in sorted(HERE.glob('*.sh')):
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                if self.PATTERN.search(line):
+                    found.append(f'{path.name}:{n}: {line.strip()[:120]}')
+        self.assertEqual(found, [], 'a shell variable inside a single-quoted python -c program is not expanded (read HOME from os.environ):\n' + '\n'.join(found))
+
+
 if __name__ == '__main__':
     unittest.main()

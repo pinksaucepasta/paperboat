@@ -89,7 +89,7 @@ fresh_official $T $ALIAS
 fresh_official $P $ALIAS-p
 X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR"
 for ct in $T $P; do $CT_DOCKER cp /tmp/$T-ds.tgz $ct:$CT_HOME/ds.tgz; $X $ct bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'; done
-target=$($X $T python3 -c 'import json;print(json.load(open("$CT_HOME/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])')
+target=$($X $T python3 -c 'import json,os;print(json.load(open(os.path.join(os.environ["HOME"],".local/state/paperboat/runtime/machine-registration.json")))["machine_id"])')
 for i in $(seq 1 24); do $X $P timeout 40 $CT_HOME/.local/bin/pb exec $ALIAS -- true >/dev/null 2>&1 && break; sleep 5; done
 if $X $P bash -c "cd ~/ds && python3 revoked_machine.py revoke $target" && $X $T bash -c "cd ~/ds && python3 revoked_machine.py verify $ALIAS-p --window 60"; then echo REVOKE_OK; else echo REVOKE_FAILED; fi
 EOF

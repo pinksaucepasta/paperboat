@@ -49,7 +49,7 @@ fresh_official() { # fresh_official CONTAINER NAME: a fresh container, the publi
   $mint machine add --name $name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);d.get("data") or sys.exit("enrollment refused: "+json.dumps(d.get("error",d))[:300]);print(d["data"]["linux_macos_command"])' > /tmp/$ct-cmd
   $CT_DOCKER cp /tmp/$ct-cmd $ct:$CT_HOME/install-cmd; rm -f /tmp/$ct-cmd
   $X bash -c 'bash $CT_HOME/install-cmd > $CT_HOME/install.log 2>&1; rm -f $CT_HOME/install-cmd'
-  $X python3 -c 'import json;print("MACHINE_ID="+json.load(open("$CT_HOME/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])'
+  $X python3 -c 'import json,os;print("MACHINE_ID="+json.load(open(os.path.join(os.environ["HOME"],".local/state/paperboat/runtime/machine-registration.json")))["machine_id"])'
   echo "OFFICIAL_$ct=$($X $CT_HOME/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)"
 }
 

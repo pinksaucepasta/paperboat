@@ -36,7 +36,7 @@ fresh $CLIENT $ALIAS-c
 for c in $TARGET $CLIENT; do $CT_DOCKER exec -e DEBIAN_FRONTEND=noninteractive \$c bash -c 'apt-get -qq install -y rsync >/dev/null 2>&1'; done
 $CT_DOCKER cp /tmp/$TARGET-client.sh $CLIENT:$CT_HOME/client.sh
 $CT_DOCKER exec $CLIENT chown $CT_USER:$CT_USER $CT_HOME/client.sh
-TID=\$($CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME $TARGET python3 -c 'import json;print(json.load(open("$CT_HOME/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])')
+TID=\$($CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME $TARGET python3 -c 'import json,os;print(json.load(open(os.path.join(os.environ["HOME"],".local/state/paperboat/runtime/machine-registration.json")))["machine_id"])')
 $CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR -e ALIAS=$ALIAS -e TARGET_ID=\$TID -e STAMP=$STAMP $CLIENT bash $CT_HOME/client.sh || echo CLIENT_FAILED
 EOF
 )
