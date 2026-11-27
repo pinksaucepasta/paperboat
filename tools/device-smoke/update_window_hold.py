@@ -13,7 +13,8 @@ about to be: the row first waits up to --wait-latest for `pb update check` to re
          for at most ~150 s: under the unit's 300 s watchdog, so the same process wakes (its pid is checked; a watchdog
          restart would only prove the startup catch-up). Windows has no freeze: the service is stopped and started,
          which proves the catch-up of a cold start (reported as such). B is installed and its activation completes.
-The original settings are restored when the machine is still official (hold leaves a custom install behind).
+The original settings are restored when the machine is still official (hold leaves a custom install behind); after a
+failure that left it on A, automatic updates stay off (the next run turns them on with its own window).
 """
 import argparse
 import datetime
@@ -31,7 +32,7 @@ import winhost
 PB = winhost.pb_path()
 HOLD_LEAD, MISSED_LEAD, WAKE_AFTER_SECONDS = 14, 2, 30
 POLL = 60
-MISSING_WORDS = ('no such file', 'not found', 'does not exist', 'cannot find', 'missing', 'could not read', 'not a file')
+MISSING_WORDS = ('no such file', 'not found', 'does not exist', 'cannot find', 'missing', 'could not read', 'cannot be read', 'not a file')
 relabelled = []  # set once a same-version --from made the install custom: its settings are not restored
 
 
@@ -181,16 +182,25 @@ def main():
     original = u.settings()
     published = u.clock.now() + datetime.timedelta(seconds=args.wait_latest)
     u.wait_until(published, lambda: check().get('latest_version') == args.latest, 'release %s to be published' % args.latest)
-    samples, result = [], {'check': 'update-window-' + args.scenario, 'installed': args.installed, 'latest': args.latest}
+    samples, result, passed = [], {'check': 'update-window-' + args.scenario, 'installed': args.installed, 'latest': args.latest}, False
     try:
         if args.scenario == 'hold':
             result['window'] = hold(args.installed, samples)
             result['stayed_on'] = args.installed
         else:
             result['window'], result['seconds_to_catch_up'] = missed(args.installed, args.latest, samples)
+        passed = True
     finally:
         result['samples'] = samples
         if not relabelled:
+            # A window already passed today is due as soon as it is set: after a failure on A, restoring it would
+            # install B and destroy the rerun's premise (smoke dry run 11-27), so updates stay off there.
+            try:
+                stayed = not passed and version() == args.installed
+            except (RuntimeError, ValueError, p.CommandTimeout):
+                stayed = not passed  # unreadable: off is the side that installs nothing
+            if stayed:
+                original = dict(original, automatic_updates=False)
             u.restore(original)
     result.update(status='PASS', enrollment_preserved=True)
     print(json.dumps(result), flush=True)

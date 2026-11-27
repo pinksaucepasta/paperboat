@@ -31,6 +31,17 @@ class Drop(unittest.TestCase):
         self.assertIn('file upload failed', tl.drop_refused(b'[paperboat]\x1b[1Cfile\x1b[1Cupload failed; pasting\r\n\x1b[5;1Horiginal path'))
         self.assertIsNone(tl.drop_refused(b'$ /tmp/paperboat-smoke-drop-1.bin'))
 
+    def test_a_drop_on_the_same_machine_needs_the_typed_path_not_the_local_echo(self):
+        name = 'paperboat-smoke-drop-1.bin'
+        wrapped = b'[paperboat] file transfer unavailable; pasting original path\r\n$ \x1b[7m/tmp/paperboat-smoke-drop-1.b\x1b[27mi\r\nn'
+        self.assertTrue(tl.pasted_local_path(wrapped, name))
+        self.assertTrue(tl.pasted_local_path(b'C:\\Users\\a>C:\\Temp\\paperboat-smoke-drop-1.bin\x1b[K', name))  # no notice: ConPTY
+        self.assertFalse(tl.pasted_local_path(b'^[[200~/tmp/paperboat-smoke-drop-1.bin^[[201~\r\n$ ', name))
+        self.assertFalse(tl.pasted_local_path(b'$ /home/a/Paperboat/Inbox/paperboat-smoke-drop-1.bin', name))
+        self.assertFalse(tl.pasted_local_path(b'[paperboat] file upload failed; pasting original path\r\n$ /tmp/paperboat-smoke-drop-1.bin', name))
+        with self.assertRaisesRegex(RuntimeError, 'did not type the local path'):
+            tl.await_local_paste(self.terminal('import time; time.sleep(30)'), name, bound=0)
+
     def test_the_drop_is_sent_at_once_and_reaches_a_program_that_is_not_reading_yet(self):
         terminal = self.terminal()
         with patch.object(tl, 'received_hash', side_effect=lambda *a: 'abc' if b'END' in terminal.output else None):

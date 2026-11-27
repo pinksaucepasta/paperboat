@@ -651,13 +651,16 @@ assert set(receipt["phases"])==set(phases.split())
 }
 
 # A file dropped the moment `pb connect` starts, before the remote prompt or the file transfer is ready: it must still
-# upload and be on the target byte for byte (terminal_lifecycle.py --check drop).
+# upload and be on the target byte for byte (terminal_lifecycle.py --check drop). A machine connected to itself
+# transfers nothing: there pb must type the local path.
 test_terminal_drop_pairs() {
-  local source target out status t0 id staged
+  local source target out status t0 id staged same phase
   for source in "${TLIST[@]}"; do
     staged=1
     stage_terminal_fixtures "$source" || staged=0
     for target in "${TLIST[@]}"; do
+      same="" phase=drop_uploaded
+      [ "$source" != "$target" ] || same=--same-machine phase=drop_local_path
       id="terminal-drop:$source-$target"
       skipped "$id" && continue
       if [ "$staged" = 0 ]; then
@@ -665,13 +668,13 @@ test_terminal_drop_pairs() {
         continue
       fi
       t0=$(now)
-      out=$(device_py "$source" terminal_lifecycle.py $target --check drop 2>&1); status=$?
+      out=$(device_py "$source" terminal_lifecycle.py $target --check drop $same 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1].splitlines()[-1])
 assert receipt["status"]=="PASS" and receipt["check"]=="terminal-drop" and receipt["target"]==sys.argv[2]
-assert set(receipt["phases"])=={"drop_uploaded","exact_session_cleanup"}
-' "$out" "$target" 2>/dev/null; then
+assert set(receipt["phases"])=={sys.argv[3],"exact_session_cleanup"}
+' "$out" "$target" "$phase" 2>/dev/null; then
         record "$id" PASS $(( $(now)-t0 ))
       else
         record_command_failure "$id" $(( $(now)-t0 )) "$out"
@@ -1157,7 +1160,9 @@ test_update_scheduled() {
 # install of SMOKE_RELEASE_OLD; it waits (SMOKE_UPDATE_WINDOW_WAIT s, default 3600) for SMOKE_RELEASE_NEW to be published.
 # hold leaves the machine a custom install: give each scenario its own device.
 test_update_window() {
-  skipped update-window && return
+  # the listed id carries the scenario (update-window-hold:DEVICE): either group selects the row
+  [[ ",$SKIP," != *",update-window,"* && ",$SKIP," != *",update-window-${SMOKE_UPDATE_WINDOW:-},"* ]] || return 0
+  skipped update-window && skipped "update-window-${SMOKE_UPDATE_WINDOW:-}" && return
   case "${SMOKE_UPDATE_WINDOW:-}" in
     hold|missed) ;;
     *) record update-window "NOT RUN" 0 "$(release_gap "no scenario for this shard's device (SMOKE_UPDATE_WINDOW=hold or missed)")"; return 0 ;;

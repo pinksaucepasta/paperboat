@@ -461,25 +461,48 @@ def await_drop(terminal, digest, remote_hash, bound=DROP_BOUND):
                                % (bound, ' (last query failed: %s)' % unanswered if unanswered else ''))
 
 
-def drop_file(terminal, pb, target, path, digest):
+def pasted_local_path(output, name):
+    """Whether the dropped file's local path was typed into the terminal and no Inbox path. The local tty's own echo of
+    a paste sent before pb took the terminal (`^[[200~...^[[201~`) does not count. Escapes and white space are ignored
+    and only both ends of the name are required (line editors redraw and wrap a long path). pb's notice is not
+    required: a Windows ConPTY redraws the screen over it."""
+    text = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\s', b'', bytes(output))
+    text = re.sub(rb'\^\[\[200~.*?\^\[\[201~', b'', text)
+    return (b'paperboat-smoke-drop-' in text and name[-4:].encode() in text and b'Inbox' not in text
+            and b'fileuploadfailed' not in text and b'fileuploaded,but' not in text)  # nothing may even try to upload
+
+
+def await_local_paste(terminal, name, bound=DROP_BOUND):
+    """`pb connect` to the machine it runs on transfers nothing (the file is already there): the path is typed."""
+    deadline = time.monotonic() + bound
+    while not pasted_local_path(terminal.output, name):
+        if time.monotonic() >= deadline:
+            raise RuntimeError('a drop on the same machine did not type the local path within %d s' % bound)
+        pump(terminal, 1)
+
+
+def drop_file(terminal, pb, target, path, digest, same_machine=False):
     """Drop `path` as a terminal does (a bracketed paste of the path, no Enter) right now: nothing is waited for."""
     terminal.send(b'\x1b[200~' + str(path).encode() + b'\x1b[201~')
-    await_drop(terminal, digest, lambda: received_hash(pb, target, path.name))
+    if same_machine:
+        await_local_paste(terminal, path.name)
+    else:
+        await_drop(terminal, digest, lambda: received_hash(pb, target, path.name))
 
 
-def qualify_drop(pb, target):
+def qualify_drop(pb, target, same_machine=False):
     prefix = 'paperboat-smoke-drop-' + uuid.uuid4().hex
     with winhost.workdir(prefix) as directory:  # on the device pb runs on: that is where a dropped file is
         path = directory / (prefix + '.bin')
         digest = winhost.write_random(path, 1 << 20)
         failure = None
         try:
-            qualify(pb, target, 'drop', None, drop=(path, digest))
+            qualify(pb, target, 'drop', None, drop=(path, digest, same_machine))
         except BaseException as error:
             failure = error
             raise
         finally:
-            restore_all(failure, lambda: remove_received(pb, target, path.name))
+            restore_all(failure, lambda: None if same_machine else remove_received(pb, target, path.name))
 
 
 def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='off', drop=None):
@@ -502,7 +525,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
             if announce:  # the ssh login to the Windows client is not part of pb connect
                 terminal.expect(announce)
             drop_file(terminal, pb, target, *drop)
-            phases = ['drop_uploaded']
+            phases = ['drop_local_path' if drop[2] else 'drop_uploaded']
         elif windows_target.is_windows(pb, target):
             phases = windows_phases(terminal, check, status_bar, windows_target.leaf(cwd) if on_device else None)
         else:
@@ -527,6 +550,7 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--check', choices=['main', 'paste', 'typing', 'apps', 'monitor', 'all', 'drop'], default='all')
     parser.add_argument('--monitor-path', default='htop')
+    parser.add_argument('--same-machine', action='store_true', help='--check drop where TARGET is the machine pb runs on')
     parser.add_argument('--entry', choices=['connect', 'root', 'new'], default='connect')
     parser.add_argument('--cwd-root', type=Path, default=Path.home(),
                         help='parent of the distinct project directory; /tmp exercises namespace isolation')
@@ -535,7 +559,7 @@ def main():
     if args.check == 'drop':
         if args.entry != 'connect':
             parser.error('--check drop is a drop into `pb connect`')
-        qualify_drop(pb, args.target)
+        qualify_drop(pb, args.target, args.same_machine)
     elif args.entry == 'new' and winhost.device():
         with winhost.device().temp_dir('pb-new') as directory:  # a directory of the device: the terminal must start in it
             qualify(pb, args.target, args.check, args.monitor_path, args.entry, str(directory))

@@ -97,6 +97,13 @@ class UpdateWindowHold(unittest.TestCase):
         self.assertTrue(any(s['phase'] == 'custom after a same-version pb update --from' for s in result['samples']))
         self.assertEqual(machine.local_time, (datetime.datetime(2026, 11, 27, 9, 14)).strftime('%H:%M'))  # not restored: custom
 
+    def test_a_failed_row_still_on_a_leaves_automatic_updates_off(self):
+        machine = Machine()
+        machine.command = lambda *a, **kw: mock.Mock(returncode=1, stdout='', stderr='pb: the updater is busy')
+        with self.assertRaisesRegex(AssertionError, 'another reason'):
+            run(machine, 'hold')
+        self.assertEqual((machine.version, machine.enabled, machine.local_time), ('2026.11.27.0', False, '04:00'))
+
     def test_hold_fails_when_the_machine_installs_b_after_a_restart(self):
         with self.assertRaisesRegex(AssertionError, 'outside the window'):
             run(Machine(eager=True), 'hold')
