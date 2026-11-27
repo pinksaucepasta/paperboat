@@ -41,7 +41,7 @@ def main():
     team = call('team', 'get', args.team, '--json')
     assert team['team_id'] == args.team and team['owner_account'] == me and team['generation'] >= 1
     assert any(t['team_id'] == args.team for t in call('team', 'list', '--json'))
-    created = call('team', 'create', 'smoke-' + secrets.token_hex(6), '--no-wait', '--json')
+    created = call('team', 'create', 'smoke-' + secrets.token_hex(6), '--no-wait', '--accept-terms', '--json')
     assert created['checkout_url'].startswith('https://'), 'team create printed no Checkout link'
     invitation = None
     try:

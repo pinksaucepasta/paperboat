@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """F15-05: bash, zsh and fish completion scripts install on Unix, the PowerShell one on Windows (pb.exe on the device,
 see winhost.py), and completion offers commands and machine names."""
+import os
 import argparse
 import json
 from pathlib import Path
@@ -59,9 +60,14 @@ def unix_shells_accept(scripts):
     with tempfile.TemporaryDirectory(prefix='paperboat-completion-') as directory:
         bash = Path(directory) / 'pb.bash'
         bash.write_text(scripts['bash'])
-        # Sourcing registers a completion function for pb in a real bash.
-        registered = subprocess.run(['bash', '-c', 'source "$1"; complete -p pb', 'x', str(bash)],
-                                    capture_output=True, text=True, timeout=30)
+        # Sourcing registers a completion function for pb in a real bash. The script needs bash-completion v2, which an
+        # interactive shell loads from its rc file and this one does not, so it is loaded first (Homebrew's on macOS,
+        # with Homebrew's bash: /bin/bash there is 3.2).
+        shell = next((path for path in ('/opt/homebrew/bin/bash', '/usr/local/bin/bash') if os.access(path, os.X_OK)), 'bash')
+        loader = ('for f in /usr/share/bash-completion/bash_completion /opt/homebrew/etc/profile.d/bash_completion.sh '
+                  '/usr/local/etc/profile.d/bash_completion.sh; do [ ! -r "$f" ] || { . "$f"; break; }; done; '
+                  'source "$1"; complete -p pb')
+        registered = subprocess.run([shell, '-c', loader, 'x', str(bash)], capture_output=True, text=True, timeout=30)
         if registered.returncode or ' pb' not in registered.stdout:
             raise RuntimeError('bash did not register the pb completion')
         if shutil.which('fish'):
