@@ -30,15 +30,24 @@ func TestUpdateFromKeepsTheStagedUpdateForAStepStillFinishing(t *testing.T) {
 		{"still finishing", hostruntimecmd.StillFinishingFailure("still restoring the previous version"), true},
 		{"failed", errors.New("the new version did not become ready"), false},
 		{"installed", nil, false},
+		{"interrupted", context.Canceled, true}, // Ctrl-C: a macOS root child may still read it (L46 review)
 	} {
 		var staged string
+		var interrupt func()
 		installStaged = func(_ *cobra.Command, _ context.Context, path string, _ bool) error {
 			staged = path
+			interrupt()
 			return test.err
 		}
 		command := &cobra.Command{}
 		command.Flags().String("approve", "", "")
-		command.SetContext(context.Background())
+		ctx, cancel := context.WithCancel(context.Background())
+		interrupt = func() {
+			if test.err == context.Canceled {
+				cancel() // the Ctrl-C arrives while the root step runs
+			}
+		}
+		command.SetContext(ctx)
 		if err := actionUpdateFrom(command, input, false); !errors.Is(err, test.err) && err != test.err {
 			t.Fatalf("%s: error %v, want %v", test.name, err, test.err)
 		}
@@ -46,5 +55,6 @@ func TestUpdateFromKeepsTheStagedUpdateForAStepStillFinishing(t *testing.T) {
 		if kept := statErr == nil; kept != test.kept {
 			t.Fatalf("%s: staged update kept=%v (%v), want %v", test.name, kept, statErr, test.kept)
 		}
+		cancel()
 	}
 }

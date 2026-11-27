@@ -45,7 +45,8 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) (resultE
 		// A root step still finishing in the background (an install or rollback past pb's bound) reads the staged
 		// update after pb exits: removing it made that step fail before it restored anything (device check 11-27).
 		// startStagedCleanup's helper removes it once that step ended.
-		if !stillFinishing(resultErr) {
+		// A Ctrl-C likewise: on macOS it ends sudo, not the root child still reading it.
+		if !stillFinishing(resultErr) && command.Context().Err() == nil {
 			_ = os.RemoveAll(directory)
 		}
 	}()

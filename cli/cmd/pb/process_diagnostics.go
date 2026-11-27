@@ -240,7 +240,7 @@ func diagnosticsStayInMemory(command *cobra.Command, args []string, goos string)
 		return false
 	}
 	switch command.Name() {
-	case "uninstall", "reset":
+	case "uninstall", "reset", "__remove-staged-update": // the staged-update helper may outlive an uninstall
 		return true
 	case "__runtime-host-service":
 		return true // root, with root's HOME from its unit: started at pairing, stopped (and still recording) by uninstall
