@@ -125,6 +125,14 @@ class Guards(unittest.TestCase):
         self.assertNotIn(' -F', undo)
 
 
+class OriginCleanup(unittest.TestCase):
+    def test_pkill_matches_the_origin_and_not_the_shell_that_runs_the_cleanup(self):
+        command = row.origin_cleanup(8765, '/tmp/edgeout-1')
+        pattern = shlex.split(command.split(';')[0])[-1]
+        self.assertTrue(re.search(pattern, 'python3 -m http.server 8765 --bind 127.0.0.1 --directory /tmp/edgeout-1'))
+        self.assertFalse(re.search(pattern, 'sh -c ' + command))
+
+
 class Drill(unittest.TestCase):
     def test_a_healthy_run_passes_and_restores_and_removes_everything(self):
         host = Host()

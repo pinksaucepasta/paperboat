@@ -22,6 +22,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from ct_env import CT_DOCKER as DOCKER, CT_HOME, CT_RUNDIR, CT_USER
+
 OUTAGE_SECONDS = 100  # the cell asks for 90 s or more
 RECOVERY_SECONDS = 60  # an earlier recovery bug withdrew decisions about 20 s after control returned
 DROP_SECONDS = 60
@@ -31,7 +33,7 @@ STALE_AT_CUT_END = 60  # the server's age of the edge's last heartbeat: it reall
 LOCK = '/tmp/pb-staging-edge-disturb.lock'
 SERVER = 'pb-release-staging-server-1'
 DATABASE = 'pb-release-staging-postgres-1'
-CONTAINER_USER = '-u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt'
+CONTAINER_USER = '-u %s -e HOME=%s -e XDG_RUNTIME_DIR=%s -w %s' % (CT_USER, CT_HOME, CT_RUNDIR, CT_HOME)
 
 
 def fetch(url, timeout=8):
@@ -71,7 +73,7 @@ class Staging:
         return done
 
     def in_machine(self, command, **kw):
-        return self.ssh('sudo -n docker exec %s %s sh -c %s' % (CONTAINER_USER, self.machine, shlex.quote(command)), **kw)
+        return self.ssh('%s exec %s %s sh -c %s' % (DOCKER, CONTAINER_USER, self.machine, shlex.quote(command)), **kw)
 
     def pb(self, *words, check=True, timeout=200):
         done = self.in_machine('.local/bin/pb ' + ' '.join(map(shlex.quote, words)) + ' --json', check=False, timeout=timeout)
@@ -98,8 +100,8 @@ class Staging:
         for container, _, node in self.edges:
             if not re.fullmatch(r'pb-stg-edge[a-z0-9-]*', container) or not re.fullmatch(r'stg_[a-z0-9_]+', node):
                 raise Refused('%s / %s is not a staging edge container and node' % (container, node))
-            control = self.ssh('f=$(sudo -n docker inspect -f %s %s) && sudo -n cat "$f/deployment.json" | python3 -c %s' % (
-                shlex.quote('{{range .Mounts}}{{if eq .Destination "/state"}}{{.Source}}{{end}}{{end}}'), container,
+            control = self.ssh('f=$(%s inspect -f %s %s) && sudo -n cat "$f/deployment.json" | python3 -c %s' % (
+                DOCKER, shlex.quote('{{range .Mounts}}{{if eq .Destination "/state"}}{{.Source}}{{end}}{{end}}'), container,
                 shlex.quote('import json,sys; print(json.load(sys.stdin)["control_url"])'))).stdout.strip().rstrip('/')
             if control != self.api:
                 raise Refused('edge %s reports to %r, not to the staging API' % (container, control))
@@ -111,12 +113,12 @@ class Staging:
     def heartbeat_age(self, node):
         query = ("select state, ready, round(extract(epoch from now()-last_heartbeat_at)) from paperboat.control_tunnel_nodes "
                  "where id='%s'" % node)  # node matched stg_[a-z0-9_]+ in the guard
-        out = self.ssh('sudo -n docker exec %s psql -U postgres -d paperboat_staging -Atc %s' % (DATABASE, shlex.quote(query))).stdout.strip()
+        out = self.ssh('%s exec %s psql -U postgres -d paperboat_staging -Atc %s' % (DOCKER, DATABASE, shlex.quote(query))).stdout.strip()
         state, ready, age = out.split('|')
         return state == 'ready' and ready == 't', int(float(age))
 
     def netns(self, container):
-        pid = self.ssh("sudo -n docker inspect -f '{{.State.Pid}}' %s" % container).stdout.strip()
+        pid = self.ssh("%s inspect -f '{{.State.Pid}}' %s" % (DOCKER, container)).stdout.strip()
         if not pid.isdigit() or int(pid) < 2:
             raise RuntimeError('edge %s is not running' % container)
         return 'nsenter -t %s -n' % pid
@@ -125,7 +127,7 @@ class Staging:
         return self.ssh('sudo -n %s iptables -L OUTPUT -v -n -x' % netns).stdout
 
     def server_address(self):
-        address = self.ssh("sudo -n docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' %s" % SERVER).stdout.split()
+        address = self.ssh("%s inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' %s" % (DOCKER, SERVER)).stdout.split()
         if not address or not re.fullmatch(r'[0-9.]+', address[0]):
             raise RuntimeError('the staging server container has no address')
         return address[0]
@@ -138,6 +140,11 @@ def cut_rules(netns, port, address, tag):
     insert = ' && '.join('%s iptables -I OUTPUT %s %s -j DROP' % (netns, match, comment) for match in matches)
     undo = '; '.join('while %s iptables -D OUTPUT %s %s -j DROP 2>/dev/null; do :; done' % (netns, match, comment) for match in matches)
     return insert, undo
+
+
+def origin_cleanup(port, work):
+    """Stops the run's origin and removes its directory. `[h]ttp` keeps pkill -f from matching the shell that runs this."""
+    return "pkill -f '[h]ttp.server %d --bind 127.0.0.1 --directory %s'; rm -rf %s" % (port, work, work)
 
 
 class Run:
@@ -234,8 +241,8 @@ def drill(run, tag, leftovers):
                 return
         work, port = '/tmp/%s' % tag, 8700 + secrets.randbelow(300)
         s.in_machine('mkdir -m 700 %s && echo %s > %s/index.html' % (work, run.marker, work))
-        cleanups.append(('origin', lambda: s.in_machine("pkill -f 'http.server %d --bind 127.0.0.1 --directory %s'; rm -rf %s" % (port, work, work))))
-        s.ssh('sudo -n docker exec -d -u pbt %s python3 -m http.server %d --bind 127.0.0.1 --directory %s' % (s.machine, port, work))
+        cleanups.append(('origin', lambda: s.in_machine(origin_cleanup(port, work))))
+        s.ssh('%s exec -d -u %s %s python3 -m http.server %d --bind 127.0.0.1 --directory %s' % (DOCKER, CT_USER, s.machine, port, work))
         made = {}
         # registered before the create: a create that failed after the server accepted it is found by its name and removed
         cleanups.append(('tunnel %s' % tag, lambda: delete_tunnel(s, made.get('tunnel', (tag,))[0], missing_ok=True)))
