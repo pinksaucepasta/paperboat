@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
+	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 	"github.com/pinksaucepasta/paperboat/server/internal/posthogquery"
 )
 
@@ -342,6 +343,72 @@ func TestEveryOperatorRouteHasPolicyAndGuard(t *testing.T) {
 		}
 		if !strings.HasPrefix(m[2], "operatorRoute(opts,") {
 			t.Errorf("route bypasses staff guard: %s", m[1])
+		}
+	}
+}
+
+// Routes built in loops or helpers are invisible to the router.go scan above; walk the
+// real registration and the documented surface so no admin route is denied by a missing policy.
+func TestEveryRegisteredAdminRouteHasPolicy(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
+	}
+	if err = json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	registerOperatorInfrastructure(mux, Options{OperatorInfrastructure: &operatorinfra.Service{}})
+	param := regexp.MustCompile(`\{[^}]+\}`)
+	registered := 0
+	for path, ops := range doc.Paths {
+		if !strings.HasPrefix(path, "/v1/admin/") {
+			continue
+		}
+		for method := range ops {
+			m := strings.ToUpper(method)
+			if m != "GET" && m != "POST" && m != "PUT" && m != "PATCH" && m != "DELETE" {
+				continue
+			}
+			route := m + " " + path
+			if _, ok := operatorPolicies[route]; !ok {
+				t.Errorf("documented admin route lacks policy: %s", route)
+			}
+			_, pattern := mux.Handler(httptest.NewRequest(m, param.ReplaceAllString(path, "x_test"), nil))
+			if strings.HasPrefix(pattern, m+" /v1/admin/") {
+				registered++
+				if _, ok := operatorPolicies[pattern]; !ok {
+					t.Errorf("registered admin route lacks policy: %s", pattern)
+				}
+			}
+		}
+	}
+	if registered < 10 {
+		t.Fatalf("infrastructure route walk found only %d routes", registered)
+	}
+}
+
+func TestOperatorDrainMoveAllowedForAdmin(t *testing.T) {
+	r := operatorTestRequest("POST", "POST /v1/admin/nodes/{node_id}/drain-move", auth.RoleAdmin, time.Now())
+	r.SetPathValue("node_id", "node_test")
+	r.Header.Set("Operator-Target", "node_test")
+	called := false
+	w := httptest.NewRecorder()
+	operatorGuard(&operatorAuditFake{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })).ServeHTTP(w, r)
+	if w.Code == 403 || !called {
+		t.Fatalf("admin drain-move denied: status %d called %t", w.Code, called)
+	}
+	for _, role := range []auth.Role{auth.RoleOperations, auth.RoleSupport, auth.RoleBilling, auth.RoleUser} {
+		r := operatorTestRequest("POST", "POST /v1/admin/nodes/{node_id}/drain-move", role, time.Now())
+		r.SetPathValue("node_id", "node_test")
+		r.Header.Set("Operator-Target", "node_test")
+		w := httptest.NewRecorder()
+		operatorGuard(&operatorAuditFake{}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatalf("%s allowed drain-move", role) })).ServeHTTP(w, r)
+		if w.Code != 403 {
+			t.Fatalf("%s drain-move status %d, want 403", role, w.Code)
 		}
 	}
 }

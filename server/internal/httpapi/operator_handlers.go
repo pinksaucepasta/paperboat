@@ -53,6 +53,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"DELETE /v1/admin/regions/{region_id}":                            {"admin", "region_id", ""},
 	"POST /v1/admin/regions/{region_id}/replace":                      {"admin", "region_id", ""},
 	"POST /v1/admin/nodes/{node_id}/drain":                            {"admin", "node_id", ""},
+	"POST /v1/admin/nodes/{node_id}/drain-move":                       {"admin", "node_id", ""},
 	"POST /v1/admin/nodes/{node_id}/resume":                           {"admin", "node_id", ""},
 	"POST /v1/admin/nodes/{node_id}/retire":                           {"admin", "node_id", ""},
 	"POST /v1/admin/nodes/{node_id}/verify-ingress":                   {"admin", "node_id", ""},
