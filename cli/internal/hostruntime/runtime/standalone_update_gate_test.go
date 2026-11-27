@@ -315,6 +315,14 @@ func (f *fenceFixture) holder() string {
 	return f.held
 }
 
+// reset drops the fence as a restarted process would. It takes the lock: a gate's lease timer can
+// call EndUpdate on its own goroutine at the same moment.
+func (f *fenceFixture) reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held = ""
+}
+
 func (f *fenceFixture) config(statePath string, lease time.Duration) standaloneUpdateGateConfig {
 	health := http.NewServeMux()
 	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
@@ -370,7 +378,7 @@ func TestStandaloneUpdateGateNewDrainSupersedesAbandonedTransaction(t *testing.T
 	}
 	stale := drainedGate(t, gate, "transaction_stale")
 	// hostd restarts after the failed update (a new process: no fence) and owns the stale transaction without fencing.
-	fence.held = ""
+	fence.reset()
 	gate, err = newStandaloneUpdateGate(fence.config(statePath, time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -416,8 +424,8 @@ func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
 	}
 	// A restarted hostd gets a fresh lease for a transaction that is still pending.
 	drainedGate(t, reloaded, "transaction_02")
-	retireGate(t, reloaded)
-	fence.held = "" // a restarted process starts with no fence
+	stopLease(reloaded) // the old process is gone: its lease timer must not record the rollback for the new one
+	fence.reset()       // a restarted process starts with no fence
 	reloaded, err = newStandaloneUpdateGate(fence.config(statePath, 50*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
@@ -434,14 +442,16 @@ func TestStandaloneUpdateGateFenceLeaseReleasesAbandonedDrain(t *testing.T) {
 // test's temporary directory while the directory is being removed ('directory not empty').
 func retireGate(t *testing.T, gate *standaloneUpdateGate) {
 	t.Helper()
-	t.Cleanup(func() {
-		gate.mu.Lock()
-		defer gate.mu.Unlock()
-		if gate.fenceTimer != nil {
-			gate.fenceTimer.Stop()
-		}
-		gate.heldTransaction = ""
-	})
+	t.Cleanup(func() { stopLease(gate) })
+}
+
+func stopLease(gate *standaloneUpdateGate) {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.fenceTimer != nil {
+		gate.fenceTimer.Stop()
+	}
+	gate.heldTransaction = ""
 }
 
 // The gate frees the fence before it persists the rollback, so a test that reloads the state right
