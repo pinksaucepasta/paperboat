@@ -98,6 +98,13 @@ func uninstallCommand() *cobra.Command {
 					}
 					return removeInstalledManuals(home)
 				}},
+				{name: "remove the ENV shell hook", run: func() error {
+					if homeErr != nil {
+						return homeErr
+					}
+					_, err := removeEnvHookFromRCFiles(home)
+					return err
+				}},
 				{name: "resolve Paperboat Inbox preservation", run: func() error { return inboxErr }},
 				{name: "stop local daemon", run: func() error {
 					if executableErr != nil {

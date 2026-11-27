@@ -3,6 +3,7 @@
 package main
 
 import (
+	"io/fs"
 	"path/filepath"
 
 	"golang.org/x/sys/windows"
@@ -18,3 +19,6 @@ func envHookDocumentsDir(home string) string {
 	}
 	return filepath.Join(home, "Documents")
 }
+
+// envHookRCOwner: a Windows profile keeps the protected per-user DACL atomicfile writes.
+func envHookRCOwner(string, fs.FileInfo) (int, int, error) { return -1, -1, nil }

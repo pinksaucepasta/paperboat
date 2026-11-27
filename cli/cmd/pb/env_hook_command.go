@@ -307,32 +307,58 @@ func envHookAllRCFiles(home string) []string {
 	return files
 }
 
+// removeEnvHookFromRCFiles takes pb's hook lines out of every startup file a
+// supported shell here reads, keeping every other byte. A symlinked startup
+// file (a dotfiles checkout) is edited at its target and stays a link.
+func removeEnvHookFromRCFiles(home string) ([]string, error) {
+	removed := []string{}
+	var failures []error
+	for _, rc := range envHookAllRCFiles(home) {
+		changed, err := removeEnvHookFromRCFile(home, rc)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("update %s: %w", rc, err))
+		} else if changed {
+			removed = append(removed, rc)
+		}
+	}
+	return removed, errors.Join(failures...)
+}
+
+func removeEnvHookFromRCFile(home, rc string) (bool, error) {
+	target, err := filepath.EvalSymlinks(rc)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return false, err
+	}
+	kept, found := removeEnvHookLines(string(data))
+	if found == 0 {
+		return false, nil
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return false, err
+	}
+	uid, gid, err := envHookRCOwner(home, info)
+	if err != nil {
+		return false, err
+	}
+	return true, atomicfile.Write(target, []byte(kept), atomicfile.Options{Mode: info.Mode().Perm(), OwnerUID: uid, OwnerGID: gid})
+}
+
 func uninstallEnvironmentHook(command *cobra.Command) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	removed := []string{}
-	for _, rc := range envHookAllRCFiles(home) {
-		data, err := os.ReadFile(rc)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("read %s: %w", rc, err)
-		}
-		kept, found := removeEnvHookLines(string(data))
-		if found == 0 {
-			continue
-		}
-		info, err := os.Stat(rc)
-		if err != nil {
-			return err
-		}
-		if err := atomicfile.Write(rc, []byte(kept), atomicfile.Options{Mode: info.Mode().Perm(), OwnerUID: -1, OwnerGID: -1}); err != nil {
-			return fmt.Errorf("update %s: %w", rc, err)
-		}
-		removed = append(removed, rc)
+	removed, err := removeEnvHookFromRCFiles(home)
+	if err != nil {
+		return err
 	}
 	recordPath, err := envHookRecordPath(command)
 	if err != nil {
