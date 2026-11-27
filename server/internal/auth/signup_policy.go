@@ -76,6 +76,10 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
  ORDER BY (canonical_email=$1) DESC NULLS LAST,created_at,id LIMIT 1`, canonical).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if hasPlusTag(profile.Email) {
+			// Same answer as a claimed address, so an unverified email learns nothing.
+			if !profile.EmailVerified {
+				return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
+			}
 			return "", "", &EmailAliasNotAllowedError{Canonical: canonical}
 		}
 		return canonical, newID("user"), nil

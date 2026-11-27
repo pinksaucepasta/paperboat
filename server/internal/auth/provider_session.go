@@ -101,27 +101,36 @@ func (s *Service) refreshWorkOSSession(ctx context.Context, sessionHash, subject
 	// A provider email changed to another account's address ends this session
 	// (the next sign-in is refused with email_already_registered) instead of
 	// giving this account that address.
-	// Same lock as sign-in, so a concurrent sign-up of that address is serialised.
-	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(paperboat.canonical_email_address($1),174))`,
-		strings.ToLower(strings.TrimSpace(profile.Email))); err != nil {
-		return err
-	}
-	var taken bool
+	// Only an address change is checked. It takes the sign-in address lock with
+	// a try (this transaction already holds the session row, and ban takes the
+	// address lock before sessions): when busy, or when the address belongs to
+	// another account, the session ends and the next sign-in decides.
+	email := strings.ToLower(strings.TrimSpace(profile.Email))
+	var changed bool
 	if err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$2 AND
-		coalesce(canonical_email,paperboat.canonical_email_address(primary_email))=paperboat.canonical_email_address($1))
-		AND EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
-		(canonical_email=paperboat.canonical_email_address($1) OR paperboat.canonical_email_address(primary_email)=paperboat.canonical_email_address($1)))`,
-		strings.ToLower(strings.TrimSpace(profile.Email)), userID).Scan(&taken); err != nil {
+		coalesce(canonical_email,paperboat.canonical_email_address(primary_email))=paperboat.canonical_email_address($1))`, email, userID).Scan(&changed); err != nil {
 		return err
 	}
-	if taken {
-		if _, err = tx.ExecContext(ctx, `UPDATE paperboat.sessions SET revoked_at=now(), workos_refresh_token_ciphertext=NULL, updated_at=now(), version=version+1 WHERE id=$1`, id); err != nil {
+	if changed {
+		var locked, taken bool
+		if err = tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(paperboat.canonical_email_address($1),174))`, email).Scan(&locked); err != nil {
 			return err
 		}
-		if err = tx.Commit(); err != nil {
-			return err
+		if locked {
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id<>$2 AND
+		(canonical_email=paperboat.canonical_email_address($1) OR paperboat.canonical_email_address(primary_email)=paperboat.canonical_email_address($1)))`, email, userID).Scan(&taken); err != nil {
+				return err
+			}
 		}
-		return ErrUnauthenticated
+		if !locked || taken {
+			if _, err = tx.ExecContext(ctx, `UPDATE paperboat.sessions SET revoked_at=now(), workos_refresh_token_ciphertext=NULL, updated_at=now(), version=version+1 WHERE id=$1`, id); err != nil {
+				return err
+			}
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+			return ErrUnauthenticated
+		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE paperboat.users SET canonical_email=CASE WHEN canonical_email IS NULL THEN NULL ELSE paperboat.canonical_email_address($1) END, primary_email=$1, email_verified=$2,
 		updated_at=now(), version=version+1 WHERE id=$3`, strings.ToLower(strings.TrimSpace(profile.Email)), profile.EmailVerified, userID); err != nil {
