@@ -419,6 +419,73 @@ class WindowsChecksRunner(unittest.TestCase):
         self.assertEqual([('add', ['1-52', '54-442', '444-65535']), ('remove', None)], calls)
         self.assertIn('-RemotePort @($req.ports)', winhost.UDP_BLOCK)  # the rule blocks what udp_blocked computed, not a fixed range
 
+    def test_the_client_cut_arms_its_failsafe_first_and_restarts_nothing(self):
+        add, lift = winhost.CLIENT_CUT_ADD, winhost.CLIENT_CUT_LIFT
+        armed = add.index('Register-ScheduledTask')
+        for blocks in ('New-NetFirewallRule', 'Start-Service PolicyAgent', 'ipsec add policy', 'pktmon.exe start', '/failure:enable'):
+            self.assertLess(armed, add.index(blocks), blocks)  # nothing is changed before the device can undo it by itself
+        self.assertIn("-User 'SYSTEM'", add)  # not a child of the SSH session
+        self.assertIn('-RepetitionInterval', add)  # a lift that failed is tried again
+        self.assertIn('-Direction $d -Action Block -Program $x', add)  # only pb.exe: SSH and the runner job stay
+        self.assertIn('protocol=udp "srcport=$p" dstport=0 mirrored=yes', add)  # per packet, only pb's own UDP flows
+        for script in (add, lift, winhost.CLIENT_CUT_STOP):
+            for forbidden in ('Stop-Process', 'Disable-NetAdapter', 'route.exe', 'Remove-NetRoute'):
+                self.assertNotIn(forbidden, script)
+        # the task goes only after the check that nothing of the cut is left
+        self.assertLess(lift.index("throw \"the client cut is not lifted"), lift.index('Unregister-ScheduledTask'))
+        self.assertLess(winhost.CLIENT_CUT_STOP.index('pktmon stop'), winhost.CLIENT_CUT_STOP.index('[ScriptBlock]::Create'))
+        self.assertIn("$_.Properties[2].Value -eq '%%14593'", winhost.CLIENT_CUT_PROOF)  # dropped= counts what pb tried to send
+
+    def client_cut_device(self, calls, proof=None, armed=True, failures=0):
+        device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
+        left = [failures]
+        def ps(step, script, **kw):
+            calls.append((script, kw))
+            if script == winhost.CLIENT_CUT_ADD:  # ConvertTo-Json: a one-element array can arrive as its element
+                return 0, json.dumps({'since': 's', 'udp': 41642, 'tcp': ['1 203.0.113.7 443']})
+            if script == winhost.CLIENT_CUT_STOP:
+                if left[0]:
+                    left[0] -= 1
+                    raise winhost.DeviceError('no answer')
+                return 0, json.dumps({'until': 'u', 'armed': armed, 'udp': [50000, 41642], 'tcp': None})
+            return 0, json.dumps(proof)
+        device.ps = ps
+        return device
+
+    def test_a_client_cut_is_lifted_once_and_its_proof_covers_every_port_pb_owned(self):
+        calls = []
+        cut = self.client_cut_device(calls, {'sent': 0, 'captured': 40, 'dropped': 9, 'leaks': []}, failures=2).cut_client(480)
+        self.assertEqual(480, calls[0][1]['seconds'])
+        cut.release(), cut.release()
+        self.assertEqual(3, len([c for c in calls if c[0] == winhost.CLIENT_CUT_STOP]))  # two lost sessions, then lifted once
+        self.assertEqual('sent=0 captured=40 dropped=9', cut.proof())
+        self.assertEqual(([41642, 50000], ['1 203.0.113.7 443']), (calls[-1][1]['udp'], calls[-1][1]['tcp']))
+
+    def test_a_client_cut_that_did_not_hold_is_not_cut(self):
+        good = {'sent': 0, 'captured': 40, 'dropped': 9}
+        for proof, armed in ((dict(good, sent=3, leaks=['udp 41642 > 203.0.113.7:7275']), True),  # packets of pb left the machine
+                             (dict(good, captured=0), True),  # the capture saw nothing, not even SSH
+                             (dict(good, dropped=0), True),  # an idle pb: nothing was blocked
+                             (good, False)):  # the failsafe lifted it before the check ended
+            with self.subTest(proof=proof, armed=armed):
+                cut = self.client_cut_device([], proof, armed).cut_client(480)
+                cut.release()
+                with self.assertRaisesRegex(RuntimeError, 'not cut'):
+                    cut.proof()
+
+    def test_a_client_cut_whose_add_fails_is_lifted(self):
+        calls = []
+        device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
+        def ps(step, script, **kw):
+            calls.append(script)
+            if script == winhost.CLIENT_CUT_ADD:
+                raise winhost.DeviceError('netsh ipsec static add filter failed')
+            return 0, '{}'
+        device.ps = ps
+        with self.assertRaises(winhost.DeviceError):
+            device.cut_client(480)
+        self.assertEqual([winhost.CLIENT_CUT_ADD, winhost.CLIENT_CUT_STOP], calls)
+
     def test_a_peer_cut_runs_add_then_remove_and_keeps_the_capture(self):
         calls = []
         with patch.object(winhost, "PEER_CUT", ["cut.sh", "h", "ct"]), \

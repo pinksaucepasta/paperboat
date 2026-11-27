@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""F21-48: after a 5 min network blip the client recovers like the control plane: `pb doctor` does not report
-healthy while the network is down, `pb exec` to TARGET works again within 30 s of the network returning, and a
-native terminal attaches within the same 30 s.
+"""F21-48: after a 5 min network blip the client recovers like the control plane: `pb doctor` stops reporting
+healthy within 180 s of the cut, `pb exec` to TARGET fails while the network is down and works again within 30 s of
+the network returning, and a native terminal attaches within the same 30 s.
 
   net_blip.py TARGET [--down-seconds 300]
 
-The blip is network_drop.cut(): iptables owner-drop (Linux), a pf anchor (macOS) or a firewall block of pb.exe's own
-traffic (a Windows device, PB_SMOKE_WINDOWS_PB set), lifted on every exit path and by a failsafe after
-down-seconds + 60. Prints one JSON line.
+The blip cuts the CLIENT: network_drop.cut() (iptables owner-drop on Linux, a pf anchor on macOS), or on a Windows
+device (PB_SMOKE_WINDOWS_PB set) winhost's cut_client(), which blocks pb's own traffic there and leaves SSH alone (a
+cut of the peer, SMOKE_PEER_CUT, would leave this client's doctor rightly healthy). It is lifted on every exit path and
+by a failsafe after down-seconds + 180. The Windows cut also has to prove itself (report "cut"). Prints one JSON line.
 """
 import argparse
 import datetime
@@ -26,6 +27,9 @@ import winhost
 
 PB = network_drop.PB
 RECOVER_SECONDS = 30
+DOCTOR_DEADLINE = 180  # doctor must have stopped saying healthy by then (a Linux client: healthy at 90 s, unhealthy by ~170 s)
+DOCTOR_PAUSE = 10
+DOCTOR_ANSWER_SECONDS = 30  # a run that started by the deadline has this long after it to answer
 LATE_SECONDS = 300  # only to tell slow from stuck in the report
 
 
@@ -36,10 +40,45 @@ def exec_ok(target, timeout=25):
         return False
 
 
-def doctor_overall():
-    """The overall state `pb doctor --json` reports; doctor exits non-zero when it is not healthy."""
-    out = winhost.run_pb(PB, ['doctor', '--json'], 120).stdout.decode(errors='replace')
-    return json.loads(out[out.index('{'):]).get('overall', '')
+def doctor_report():
+    """What `pb doctor --json` reports: (overall, the checks that did not pass), ('', []) when it gave no report; doctor
+    exits non-zero when it is not healthy."""
+    try:
+        out = winhost.run_pb(PB, ['doctor', '--json'], 120).stdout.decode(errors='replace')
+        report = json.loads(out[out.index('{'):])
+    except (subprocess.TimeoutExpired, ValueError):
+        return '', []
+    failing = ['%s=%s' % (c.get('code'), c.get('status')) for c in report.get('checks', []) if c.get('status') != 'pass']
+    return report.get('overall', ''), failing
+
+
+def doctor_flip(cut_at, deadline, expected=None):
+    """Ask doctor again and again until it stops saying healthy (or says `expected`) or `deadline` seconds have passed
+    since cut_at. A run only counts if it started by then and answered at most DOCTOR_ANSWER_SECONDS after. Returns (last
+    overall, seconds it flipped at or None, samples)."""
+    samples, overall = [], ''
+    while time.monotonic() - cut_at <= deadline:
+        overall, failing = doctor_report()
+        at = round(time.monotonic() - cut_at, 1)
+        samples.append([at, overall, failing])
+        if at <= deadline + DOCTOR_ANSWER_SECONDS and (overall == expected if expected else overall not in ('', 'healthy')):
+            return overall, at, samples
+        time.sleep(DOCTOR_PAUSE)
+    return overall, None, samples
+
+
+def cut_client(seconds):
+    """Cut the machine under test; returns (block, failsafe)."""
+    if network_drop.DEVICE:
+        return network_drop.DEVICE.cut_client(seconds), None
+    return network_drop.cut(seconds)
+
+
+def release_client(block):
+    if network_drop.DEVICE:
+        block.release()
+    else:
+        network_drop.release(block)
 
 
 def attach(target, name, deadline):
@@ -98,7 +137,7 @@ def main():
     since = (network_drop.DEVICE.ps('device clock', '[DateTime]::UtcNow.ToString("o")')[1]
              if network_drop.DEVICE else datetime.datetime.now(datetime.timezone.utc).isoformat())
     control_block = None
-    block, failsafe = network_drop.cut(args.down_seconds + 180)
+    block, failsafe = cut_client(args.down_seconds + 180)
     blocked = True
     try:
         cut_at = time.monotonic()
@@ -118,11 +157,11 @@ def main():
                 report['refusal_rotation'] = json.loads(rotation.stdout)
             if rotation.returncode:
                 raise RuntimeError('forced refusal registration failed: ' + rotation.stderr)
-        time.sleep(min(90, args.down_seconds // 2))
-        report['doctor_while_down'] = doctor_overall()
+        report['doctor_while_down'], report['doctor_flipped_after_s'], report['doctor_samples'] = doctor_flip(
+            cut_at, min(DOCTOR_DEADLINE, args.down_seconds), 'unhealthy' if forced else None)
         report['exec_while_down'] = exec_ok(args.target)
         time.sleep(max(0, args.down_seconds - (time.monotonic() - cut_at)))
-        network_drop.release(block)
+        release_client(block)
         blocked = False
         if forced:
             # Keep only the API blocked: real relays now refuse the cached grants
@@ -174,7 +213,7 @@ def main():
         report['error'] = str(error)
     finally:
         if blocked:
-            network_drop.release(block)
+            release_client(block)
         if control_block is not None:
             control_block.release()
         if failsafe is not None and failsafe.poll() is None:
@@ -183,7 +222,14 @@ def main():
             cleanup(PB, args.target, name)
         except Exception:
             pass
-    ok = (report.get('doctor_while_down') not in (None, '', 'healthy') and report.get('exec_while_down') is False
+    if network_drop.DEVICE:  # read after the recovery timings: reading the capture and the event log takes a while
+        try:
+            report['cut'] = block.proof()
+        except RuntimeError as error:
+            report['cut'] = None
+            report['error'] = ' '.join(filter(None, (report.get('error'), str(error))))
+    ok = (report.get('doctor_flipped_after_s') is not None and report.get('exec_while_down') is False
+          and (not network_drop.DEVICE or bool(report.get('cut')))
           and report.get('exec_after_s') is not None and report['exec_after_s'] <= RECOVER_SECONDS
           and report.get('terminal_after_s') is not None and report['terminal_after_s'] <= RECOVER_SECONDS)
     if forced:

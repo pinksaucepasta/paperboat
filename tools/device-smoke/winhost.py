@@ -172,6 +172,99 @@ PEER_UDP_CUT = ("if($req.action -eq 'remove'){Get-NetFirewallRule -DisplayName $
                 "Get-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-*' -ErrorAction SilentlyContinue|Remove-NetFirewallRule\n"
                 "foreach($d in 'Outbound','Inbound'){[void](New-NetFirewallRule -DisplayName $req.name -Direction $d -Action Block -Protocol UDP -RemoteAddress @($req.addr))}\n"
                 "foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe add $a mask 255.255.255.255 0.0.0.0 if 1 metric 1 *>$null;if($LASTEXITCODE){throw \"route to $a failed\"}}}")
+# The client cut (net_blip.py): this device loses pb's network while everything else on it (the controller's SSH and its tunnel,
+# which share an address with a relay, so no route can tell them apart, and a hosted runner's job) keeps running. No
+# process is restarted. Two layers, found by experiment on Server 2025 (2026-11-28):
+#   - block rules for every pb.exe under Program Files\\Paperboat: Windows ends its established TCP connections and refuses every
+#     new flow, but UDP flows that already exist keep leaving the network card (about 560 packets in 40 s);
+#   - an IPsec block, which is judged per packet, on exactly the UDP ports pb owns when the cut starts (IPv4 only: a UDP flow
+#     over IPv6 would show up as sent= in the proof and fail the row).
+# The proof: pktmon records the network card for the cut (sent= packets that left from a port pb owned, captured= all that
+# left) and Windows logs every packet its filters drop (dropped= the outgoing ones of a pb.exe).
+CLIENT_CUT_NAME = 'PaperboatSmoke-client'
+_DROP_AUDIT = '{0CCE9225-69AE-11D9-BED3-505054503030}'  # "Filtering Platform Packet Drop": events 5152
+_CAPTURE = "(Join-Path $env:SystemRoot 'Temp\\PaperboatSmoke-client.etl')"
+_PB_PORTS = ("$ids=@(Get-CimInstance Win32_Process -Filter \"Name='pb.exe'\"|ForEach-Object{[int]$_.ProcessId})\n"
+             "$udp=@(Get-NetUDPEndpoint|Where-Object{$ids -contains [int]$_.OwningProcess -and $_.LocalAddress -notin '127.0.0.1','::1'}|"
+             "ForEach-Object{[int]$_.LocalPort}|Sort-Object -Unique)\n"
+             "$tcp=@(Get-NetTCPConnection -ErrorAction SilentlyContinue|Where-Object{$ids -contains [int]$_.OwningProcess -and "
+             "$_.State -ne 'Listen' -and $_.RemoteAddress -notin '127.0.0.1','::1','0.0.0.0','::'}|"
+             "ForEach-Object{'{0} {1} {2}' -f $_.LocalPort,($_.RemoteAddress -replace '%.*'),$_.RemotePort}|Sort-Object -Unique)\n")
+# Lifts everything and removes its own task, only once nothing is left: the failsafe task runs it every minute from its deadline
+# until then. $agent: PolicyAgent was stopped before the cut; $audit: packet drops were not audited before it.
+CLIENT_CUT_LIFT = (
+    "$ErrorActionPreference='Continue';$n='" + CLIENT_CUT_NAME + "'\n"
+    "foreach($v in 'policy','filteraction','filterlist'){& netsh.exe ipsec static delete $v \"name=$n\"|Out-Null}\n"
+    "Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue|Remove-NetFirewallRule -ErrorAction SilentlyContinue\n"
+    "$policy=(& netsh.exe ipsec static show policy \"name=$n\"|Out-String)\n"
+    "if(@(Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue).Count -or $policy -notmatch 'ERR IPsec'){throw \"the client cut is not lifted: $policy\"}\n"
+    "if($agent){Stop-Service PolicyAgent -Force -ErrorAction SilentlyContinue}\n"
+    "& cmd.exe /c 'pktmon stop >nul 2>&1'\n"
+    "if($audit){& auditpol.exe /set /subcategory:'" + _DROP_AUDIT + "' /failure:disable|Out-Null}\n"
+    "Unregister-ScheduledTask -TaskName $n -Confirm:$false -ErrorAction SilentlyContinue\n")
+# The lift an earlier or the current cut registered (it knows what to restore), else one that restores no service or audit setting.
+_RUN_LIFT = (
+    "$t=Get-ScheduledTask -TaskName $req.name -ErrorAction SilentlyContinue\n"
+    "$armed=[bool]$t\n"
+    "if($t){$script=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String((@($t.Actions)[0].Arguments -split ' ')[-1]))}"
+    "else{$script='$agent=$false;$audit=$false;'+\"`n\"+$req.lift}\n"
+    "& ([ScriptBlock]::Create($script))\n")
+CLIENT_CUT_ADD = (
+    "$ErrorActionPreference='Stop';$n=$req.name\n"
+    "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
+    "if(Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue){\n" + _RUN_LIFT + "$ErrorActionPreference='Stop'}\n"
+    "$audit=-not ((& auditpol.exe /get /subcategory:'" + _DROP_AUDIT + "' /r|Where-Object{$_}|ConvertFrom-Csv).'Inclusion Setting' -match 'Failure')\n"
+    "$agent=(Get-Service PolicyAgent).Status -ne 'Running'\n"
+    # the failsafe comes first: a SYSTEM task, so nothing that happens to this session or the controller can stop it
+    "$encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(\"`$agent=`$$agent;`$audit=`$$audit`n\"+$req.lift))\n"
+    "$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument \"-NoProfile -NonInteractive -EncodedCommand $encoded\"\n"
+    "$when=New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds([int]$req.seconds) -RepetitionInterval (New-TimeSpan -Minutes 1)\n"
+    "$settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries\n"
+    "[void](Register-ScheduledTask -TaskName $n -Force -User 'SYSTEM' -RunLevel Highest -Action $action -Trigger $when -Settings $settings)\n"
+    "$pb=@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat') -Recurse -Filter pb.exe -File|ForEach-Object{$_.FullName})\n"
+    "if(-not $pb.Count){throw 'no pb.exe under Program Files\\Paperboat'}\n"
+    "foreach($d in 'Outbound','Inbound'){foreach($x in $pb){[void](New-NetFirewallRule -DisplayName $n -Direction $d -Action Block -Program $x)}}\n"
+    + _PB_PORTS +
+    "if(-not $udp.Count){throw 'pb owns no UDP socket: is it running?'}\n"
+    "function ipsec{$o=& netsh.exe ipsec static @args;if($LASTEXITCODE){throw \"netsh ipsec static ${args}: $o\"}}\n"
+    "Start-Service PolicyAgent\n"
+    "ipsec add policy \"name=$n\" assign=no\n"
+    "ipsec add filterlist \"name=$n\"\n"
+    "ipsec add filteraction \"name=$n\" action=block\n"
+    "foreach($p in $udp){ipsec add filter \"filterlist=$n\" srcaddr=me dstaddr=any protocol=udp \"srcport=$p\" dstport=0 mirrored=yes}\n"
+    "ipsec add rule \"name=$n\" \"policy=$n\" \"filterlist=$n\" \"filteraction=$n\"\n"
+    "ipsec set policy \"name=$n\" assign=y\n"
+    "& auditpol.exe /set /subcategory:'" + _DROP_AUDIT + "' /failure:enable|Out-Null\n"
+    "if($LASTEXITCODE){throw 'auditpol could not enable the packet drop events'}\n"
+    "Start-Sleep 2\n"  # packets already below the filters leave before the capture starts
+    "& cmd.exe /c 'pktmon filter remove >nul 2>&1'\n"
+    "$o=& pktmon.exe start --capture --comp nics --pkt-size 96 --file-size 256 -f " + _CAPTURE + "\n"
+    "if($LASTEXITCODE){throw \"pktmon start: $o\"}\n"
+    "@{since=[DateTime]::UtcNow.ToString('o');udp=$udp;tcp=$tcp}|ConvertTo-Json -Compress")
+# Ends the capture while the cut still holds, then lifts. armed=false: the failsafe had lifted it already.
+CLIENT_CUT_STOP = (
+    "$ErrorActionPreference='Continue'\n" + _PB_PORTS +
+    "$until=[DateTime]::UtcNow.ToString('o')\n"
+    "& cmd.exe /c 'pktmon stop >nul 2>&1'\n"
+    + _RUN_LIFT +
+    "@{until=$until;armed=$armed;udp=$udp;tcp=$tcp}|ConvertTo-Json -Compress")
+CLIENT_CUT_PROOF = (
+    "$ErrorActionPreference='Stop';$etl=" + _CAPTURE + ";$txt=$etl+'.txt'\n"
+    "& pktmon.exe etl2txt $etl --out $txt|Out-Null\n"
+    "if($LASTEXITCODE){throw 'pktmon could not read the capture'}\n"
+    "$local=@{};Get-NetIPAddress|ForEach-Object{$local[($_.IPAddress -replace '%.*')]=1}\n"
+    "$ports=@{};foreach($p in @($req.udp)){$ports[\"udp $p\"]=1};foreach($c in @($req.tcp)){$ports[\"tcp $c\"]=1}\n"
+    "$captured=0;$sent=0;$leaks=@{}\n"
+    "foreach($line in [IO.File]::ReadLines($txt)){\n"
+    " if($line -notmatch ', length \\d+: (\\S+)\\.(\\d+) > (\\S+)\\.(\\d+): (.*)$' -or -not $local[$matches[1]]){continue}\n"
+    " $captured++\n"
+    " $key=if($matches[5] -like 'Flags*'){'tcp {0} {1} {2}' -f $matches[2],$matches[3],$matches[4]}else{'udp {0}' -f $matches[2]}\n"
+    " if($ports[$key]){$sent++;$leaks[\"$key > $($matches[3]):$($matches[4])\"]++}}\n"
+    "Remove-Item -LiteralPath $etl,$txt -Force -ErrorAction SilentlyContinue\n"
+    "$events=@{LogName='Security';Id=5152;StartTime=([datetime]$req.since);EndTime=([datetime]$req.until)}\n"
+    "$dropped=@(Get-WinEvent -FilterHashtable $events -ErrorAction SilentlyContinue|Where-Object{[string]$_.Properties[1].Value -like '*\\pb.exe' -and "
+    "$_.Properties[2].Value -eq '%%14593'}).Count\n"  # 14593 is Outbound: a dropped incoming packet does not show pb was sending
+    "@{sent=$sent;captured=$captured;dropped=$dropped;leaks=@($leaks.Keys|Select-Object -First 5)}|ConvertTo-Json -Compress")
 # SMOKE_PEER_CUT: a command that cuts the PEER instead of the Windows device (`<cmd> add all`, `<cmd> add server IP...`,
 # `<cmd> add addresses IP...`, `<cmd> remove`; container_cut.sh HOST CONTAINER). NET_CUT has to stop pb.exe for its rule
 # to apply, which turns "survives a network cut" into "survives a restart"; a peer-side cut leaves pb.exe running.
@@ -686,6 +779,17 @@ class WindowsDevice:
             raise
         return NetCut(self, script, undo, scratch)
 
+    def cut_client(self, seconds):
+        """Cut pb's own network on this device (CLIENT_CUT_ADD) without restarting any pb.exe, until release(), or after
+        `seconds` by a SYSTEM scheduled task on the device whatever happens to this controller and its SSH."""
+        try:
+            added = json.loads(self.ps('cut the client network', CLIENT_CUT_ADD, timeout=150, name=CLIENT_CUT_NAME,
+                                       seconds=int(seconds), lift=CLIENT_CUT_LIFT)[1])
+        except BaseException:
+            self.ps('restore the client network', CLIENT_CUT_STOP, timeout=150, name=CLIENT_CUT_NAME, lift=CLIENT_CUT_LIFT)
+            raise
+        return ClientCut(self, added)
+
     @contextlib.contextmanager
     def udp_blocked(self, allow=(53,)):
         """Outgoing UDP except the `allow` ports (DNS by default) dropped on the device for the duration; removed on every exit path."""
@@ -746,6 +850,43 @@ class WindowsDevice:
             yield path
         finally:
             path.unlink()
+
+
+class ClientCut:
+    """The cut made by WindowsDevice.cut_client: release() lifts it (also when called twice), proof() then shows it held."""
+
+    def __init__(self, device, added):
+        self.device, self.added, self.stopped = device, added, None
+
+    def release(self):
+        for attempt in range(3):  # lifting twice is harmless; if this session cannot reach the device, its own task lifts the cut
+            if self.stopped is not None:
+                return
+            try:
+                self.stopped = json.loads(self.device.ps('restore the client network', CLIENT_CUT_STOP, timeout=150,
+                                                         name=CLIENT_CUT_NAME, lift=CLIENT_CUT_LIFT)[1])
+            except DeviceError:
+                if attempt == 2:
+                    raise
+
+    def proof(self):
+        """'sent=0 captured=N dropped=M' for the released cut; RuntimeError ('not cut') unless pb's traffic was blocked."""
+        def listed(key):  # ConvertTo-Json writes a one-element array as the element and an empty one as null or {}
+            values = []
+            for part in (self.added, self.stopped):
+                value = part.get(key)
+                values += value if isinstance(value, list) else [value] if isinstance(value, (int, str)) else []
+            return sorted(set(values))
+        got = json.loads(self.device.ps('prove the client cut', CLIENT_CUT_PROOF, timeout=240, since=self.added['since'],
+                                        until=self.stopped['until'], udp=listed('udp'), tcp=listed('tcp'))[1])
+        line = 'sent=%d captured=%d dropped=%d' % (got['sent'], got['captured'], got['dropped'])
+        print('client cut: %s' % line, file=sys.stderr, flush=True)
+        if not self.stopped['armed']:
+            raise RuntimeError('not cut: the failsafe on the device lifted the cut before the check did: ' + line)
+        # sent=0 alone also holds for a capture that saw nothing (the SSH session itself must be in it) or an idle pb
+        if got['sent'] or not got['captured'] or not got['dropped']:
+            raise RuntimeError('not cut: the client cut did not block pb\'s traffic: %s %s' % (line, got.get('leaks') or ''))
+        return line
 
 
 class NetCut:
