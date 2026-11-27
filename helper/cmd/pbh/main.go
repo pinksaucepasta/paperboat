@@ -55,12 +55,29 @@ func execute(ctx context.Context, reporter *reporting.Reporter, args []string, o
 			code = 2
 		}
 	}()
+	if !serviceCommand(args) && os.Getenv(debugVariable) != "1" {
+		reporter.DiscardLocalFaults()
+	}
 	observe := func(ctx context.Context, definition string, err error) {
 		reporter.ObserveFailure(ctx, definition, err)
 		reportChildExit(diagnostic, ctx, definition, err)
 	}
 	if err := runObserved(ctx, args, out, observe); err != nil {
+		var child elevatedExit
+		if errors.As(err, &child) {
+			return int(child)
+		}
+		var mistyped usageError
+		if errors.As(err, &mistyped) {
+			fmt.Fprintf(diagnostic, "pbh: %s\n", mistyped.Error())
+			return usageExitCode
+		}
 		fault := reporter.CaptureFailure(ctx, "selfhost_command", err)
+		// A refusal carries no underlying error: its message is everything there is to say.
+		if refusal, ok := err.(commandError); ok {
+			fmt.Fprintf(diagnostic, "pbh: %s\n", refusal.Error())
+			return 1
+		}
 		message := "operation failed; state retained for retry"
 		var owned commandError
 		if errors.As(err, &owned) {
@@ -91,12 +108,12 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 }
 func runObserved(ctx context.Context, args []string, out io.Writer, observe func(context.Context, string, error)) error {
 	if len(args) == 0 {
-		return commandError("use pbh install, pbh selfhost code, pbh status, pbh doctor, or pbh uninstall (pbh help lists every command)")
+		return usage("use pbh install, pbh selfhost code, pbh status, pbh doctor, or pbh uninstall (pbh help lists every command)")
 	}
 	switch args[0] {
 	case "check-host":
 		if len(args) != 1 {
-			return commandError("check-host accepts no arguments")
+			return usage("check-host accepts no arguments")
 		}
 		if err := containers.CheckHost(); err != nil {
 			return fmt.Errorf("%w: %w", commandError("unsupported self-host operating system"), err)
@@ -110,20 +127,15 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		return install(ctx, args[1:], out)
 	case "selfhost":
 		if len(args) < 2 || args[1] != "code" {
-			return commandError("use pbh selfhost code")
+			return usage("use pbh selfhost code")
 		}
 		fs := flag.NewFlagSet("selfhost code", flag.ContinueOnError)
-		fs.SetOutput(io.Discard)
 		dir := fs.String("state-dir", defaultState, "installation state directory")
-		if err := fs.Parse(args[2:]); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				printHelp(out, "selfhost code", fs)
-				return nil
-			}
+		if done, err := parseFlags(fs, args[2:], out); done {
 			return err
 		}
 		if fs.NArg() != 0 {
-			return commandError("unexpected arguments")
+			return usage("unexpected arguments")
 		}
 		if os.Geteuid() != 0 && *dir == defaultState {
 			return elevated(ctx, args, out)
@@ -136,17 +148,12 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		return nil
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-		fs.SetOutput(io.Discard)
 		dir := fs.String("state-dir", defaultState, "installation state directory")
-		if err := fs.Parse(args[1:]); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				printHelp(out, "serve", fs)
-				return nil
-			}
+		if done, err := parseFlags(fs, args[1:], out); done {
 			return err
 		}
 		if fs.NArg() != 0 {
-			return commandError("unexpected arguments")
+			return usage("unexpected arguments")
 		}
 		return serve(ctx, *dir, out, observe)
 	case "help", "--help", "-h":
@@ -158,7 +165,7 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 				fmt.Fprintf(out, "pbh status: %s\n", commandHelp["status"])
 				return nil
 			}
-			return commandError("status accepts no arguments")
+			return usage("status accepts no arguments")
 		}
 		cmd := exec.CommandContext(ctx, "systemctl", "status", "--no-pager", "paperboat-selfhost.service")
 		cmd.Stdout = out
@@ -177,23 +184,14 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 	case "uninstall":
 		return uninstall(ctx, args[1:], out)
 	default:
-		return commandError("unknown command; run pbh help")
+		if strings.HasPrefix(args[0], "-") {
+			return usage("unknown flag " + args[0] + "; run pbh help")
+		}
+		return usage("unknown command; run pbh help")
 	}
-}
-func elevated(ctx context.Context, args []string, out io.Writer) error {
-	binary, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	cmd := exec.CommandContext(ctx, "sudo", append([]string{binary}, args...)...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = out
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	fs.Bool("relay", false, "run a relay (the default)")
 	fs.Bool("edge", false, "run an edge for previews and tunnels")
 	fs.Bool("both", false, "run a relay and an edge")
@@ -211,15 +209,11 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	noService := fs.Bool("no-service", false, "initialize without systemd (isolated testing)")
 	relayImage := fs.String("relay-image", defaultRelayImage, "configured relay container image")
 	edgeImage := fs.String("edge-image", defaultEdgeImage, "configured edge container image")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printHelp(out, "install", fs)
-			return nil
-		}
+	if done, err := parseFlags(fs, args, out); done {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return commandError("unexpected install arguments")
+		return usage("unexpected install arguments")
 	}
 	enable, err := selectedMode(fs)
 	if err != nil {
@@ -257,7 +251,10 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fresh := !existing
 	defer func() {
 		if fresh && err != nil {
-			err = errors.Join(err, discardFreshInstall(*dir))
+			// Join only a real second failure: a refusal stays the error it is.
+			if discard := discardFreshInstall(*dir); discard != nil {
+				err = errors.Join(err, discard)
+			}
 		}
 	}()
 	images := containers.Images{Relay: *relayImage, Edge: *edgeImage}

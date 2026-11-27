@@ -17,21 +17,16 @@ import (
 
 func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	removeData := fs.Bool("remove-data", false, "also delete protected identity, credentials and configuration")
 	confirm := fs.Bool("confirm-remove-data", false, "explicitly confirm permanent data deletion")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printHelp(out, "uninstall", fs)
-			return nil
-		}
+	if done, err := parseFlags(fs, args, out); done {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return commandError("unexpected uninstall arguments")
+		return usage("unexpected uninstall arguments")
 	}
 	if *removeData != *confirm {
-		return commandError("data deletion requires both --remove-data and --confirm-remove-data; omit both to retain state")
+		return usage("data deletion requires both --remove-data and --confirm-remove-data; omit both to retain state")
 	}
 	if !isRoot() {
 		return elevate(ctx, append([]string{"uninstall"}, args...), out)

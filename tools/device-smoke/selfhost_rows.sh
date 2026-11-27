@@ -30,15 +30,9 @@ row() { # ID command...
   else failed=1; printf '%-28s %-5s %6ss  %s\n' "$id" FAIL $((SECONDS - start)) "exit $rc: ${detail:-$(tail -1 "$LOGS/$id.log")} (log $LOGS/$id.log)" | cut -c1-300; fi
 }
 
-# helper/deploy/qualify-fresh-host.sh names the edge's image flag after the capability (--tunnel-image); pbh calls it
-# --edge-image (helper/deploy/README.md), so its upgrade-in-place step always failed. The copy run here corrects that one
-# line and refuses to run once the original no longer has it (then use the original).
+# qualify-fresh-host.sh finds the repository from its own path: this copy is what runs here and is sent to HOST.
 mkdir -p "$REPO/.build/covf"; QUALIFY=$REPO/.build/covf/qualify.sh
-BROKEN='  old_args="$old_args --$capability-image ${ref%:*}:$old_tag"'
-FIXED='  flag=$capability; [ "$flag" = tunnel ] \&\& flag=edge; old_args="$old_args --$flag-image ${ref%:*}:$old_tag"'
-if grep -qxF -- "$BROKEN" "$REPO/helper/deploy/qualify-fresh-host.sh"; then
-  sed 's|^  old_args="\$old_args --\$capability-image \${ref%:\*}:\$old_tag"$|'"$FIXED"'|' "$REPO/helper/deploy/qualify-fresh-host.sh" >"$QUALIFY"
-else cp "$REPO/helper/deploy/qualify-fresh-host.sh" "$QUALIFY"; fi
+cp "$REPO/helper/deploy/qualify-fresh-host.sh" "$QUALIFY"
 
 images() { # every service image of VERSION is a multi-arch manifest
   local name arch out rc=0

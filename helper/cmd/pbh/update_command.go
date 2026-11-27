@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -24,18 +23,13 @@ import (
 // then runs the same steps as the console's Update button (updateStepsFor + runUpdate), including the rollback.
 func updateCommand(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	dir := fs.String("state-dir", defaultState, "installation state directory")
 	yes := fs.Bool("yes", false, "update without asking")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printHelp(out, "update", fs)
-			return nil
-		}
+	if done, err := parseFlags(fs, args, out); done {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return commandError("unexpected update arguments")
+		return usage("unexpected update arguments")
 	}
 	if os.Geteuid() != 0 && *dir == defaultState {
 		return elevated(ctx, append([]string{"update"}, args...), out)

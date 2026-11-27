@@ -14,6 +14,7 @@ import (
 
 func TestPbhDisabledReporterKeepsSafeFailureAndProcessReference(t *testing.T) {
 	t.Setenv("PAPERBOAT_SENTRY_ENABLED", "false")
+	t.Setenv("PAPERBOAT_DEBUG", "1")
 	reporter, err := reporting.New("paperboat-selfhost")
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +45,7 @@ func TestPbhDisabledReporterKeepsSafeFailureAndProcessReference(t *testing.T) {
 		t.Fatal("selfhost diagnostic fields missing")
 	}
 	public.Reset()
-	if code := execute(ctx, reporter, []string{"unknown"}, io.Discard, &public); code != 1 || !strings.Contains(public.String(), "run pbh help") {
+	if code := execute(ctx, reporter, []string{"unknown"}, io.Discard, &public); code != 2 || !strings.Contains(public.String(), "run pbh help") {
 		t.Fatal("owned command guidance lost")
 	}
 }

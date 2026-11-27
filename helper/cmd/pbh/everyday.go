@@ -26,7 +26,7 @@ func splitComponent(args []string) (component string, rest []string, err error) 
 		if arg != "relay" && arg != "edge" {
 			rest = append(rest, arg)
 		} else if component != "" {
-			return "", nil, commandError("name at most one component: relay or edge")
+			return "", nil, usage("name at most one component: relay or edge")
 		} else {
 			component = arg
 		}
@@ -79,23 +79,18 @@ func logsCommand(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	follow := fs.Bool("follow", false, "keep streaming new lines until interrupted")
 	since := fs.Duration("since", 0, "only lines newer than this, for example 10m or 2h")
 	lines := fs.Int("lines", 200, "most recent lines to show per component (at most "+strconv.Itoa(maxLogLines)+")")
 	dir := fs.String("state-dir", defaultState, "installation state directory")
-	if err := fs.Parse(rest); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printHelp(out, "logs", fs)
-			return nil
-		}
+	if done, err := parseFlags(fs, rest, out); done {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return commandError("unexpected logs arguments; use pbh logs [--follow] [relay|edge]")
+		return usage("unexpected logs arguments; use pbh logs [--follow] [relay|edge]")
 	}
 	if *lines < 1 || *lines > maxLogLines || *since < 0 {
-		return commandError("--lines must be 1 to " + strconv.Itoa(maxLogLines) + " and --since must not be negative")
+		return usage("--lines must be 1 to " + strconv.Itoa(maxLogLines) + " and --since must not be negative")
 	}
 	if os.Geteuid() != 0 && *dir == defaultState {
 		return elevated(ctx, append([]string{"logs"}, args...), out)
@@ -189,17 +184,12 @@ func restartCommand(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	dir := fs.String("state-dir", defaultState, "installation state directory")
-	if err := fs.Parse(rest); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printHelp(out, "restart", fs)
-			return nil
-		}
+	if done, err := parseFlags(fs, rest, out); done {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return commandError("unexpected restart arguments; use pbh restart [relay|edge]")
+		return usage("unexpected restart arguments; use pbh restart [relay|edge]")
 	}
 	if os.Geteuid() != 0 && *dir == defaultState {
 		return elevated(ctx, append([]string{"restart"}, args...), out)

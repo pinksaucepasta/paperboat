@@ -26,6 +26,7 @@ Commands:
   version         print the pbh version
 
 Run pbh <command> --help for a command's description and flags.
+Set PAPERBOAT_DEBUG=1 to also print a command's structured diagnostic records.
 `
 
 // commandHelp is the paragraph printed above a command's flags by `pbh <command> --help`.

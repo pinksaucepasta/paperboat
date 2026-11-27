@@ -125,7 +125,8 @@ if [ -n "$published" ]; then
  old_args=''
  for capability in $(echo "$enable" | sed 's/both/relay tunnel/'); do
   ref=$(printf '%s' "$current" | sed -E "s/.*\"$capability\":\"([^\"]*)\".*/\1/")
-  old_args="$old_args --$capability-image ${ref%:*}:$old_tag"
+  flag=$capability; [ "$flag" != tunnel ] || flag=edge # the edge serves the tunnel capability; pbh names its image --edge-image
+  old_args="$old_args --$flag-image ${ref%:*}:$old_tag"
  done
  inside "$installer $mode_flag $endpoint $old_args" > "$work/out4" 2>&1 || { tail -30 "$work/out4"; fail "switching to the older images failed"; }
  [ "$(images)" != "$current" ] || fail "image versions did not change"

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -32,17 +31,12 @@ type doctorDeps struct {
 
 func doctor(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	dir := fs.String("state-dir", defaultState, "installation state directory")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			printHelp(out, "doctor", fs)
-			return nil
-		}
+	if done, err := parseFlags(fs, args, out); done {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return commandError("unexpected doctor arguments")
+		return usage("unexpected doctor arguments")
 	}
 	if os.Geteuid() != 0 && *dir == defaultState {
 		return elevated(ctx, append([]string{"doctor"}, args...), out)

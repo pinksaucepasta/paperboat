@@ -177,6 +177,15 @@ func (r *Reporter) PersistFloodState(path string) {
 	}
 }
 
+// DiscardLocalFaults stops writing the local structured record of each failure to stderr, for a command whose
+// stderr is a person's terminal and which prints its own message. SDK telemetry is unchanged. Call it before the
+// reporter is used.
+func (r *Reporter) DiscardLocalFaults() {
+	if r != nil {
+		r.localFault = func(Fault) {}
+	}
+}
+
 // dsnFromEnvironment reads PAPERBOAT_SENTRY_DSN, or the file PAPERBOAT_SENTRY_DSN_FILE names: pbh hands the DSN to
 // its containers as a file so it is not on a command line or in `docker inspect` (the server does the same).
 func dsnFromEnvironment() (string, error) {

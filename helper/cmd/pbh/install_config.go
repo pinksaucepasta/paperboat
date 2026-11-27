@@ -31,7 +31,7 @@ func selectedMode(fs *flag.FlagSet) (string, error) {
 	case 1:
 		return chosen[0], nil
 	}
-	return "", commandError("choose only one of --relay, --edge and --both")
+	return "", usage("choose only one of --relay, --edge and --both")
 }
 
 func installationMode(c selfhost.Config) string {
@@ -126,7 +126,7 @@ func installRegion(fs *flag.FlagSet, in io.Reader, out io.Writer, terminal bool)
 	region := fs.Lookup("region").Value.String()
 	if given || !terminal {
 		if !regionName.MatchString(region) {
-			return "", commandError("--region must start with a lowercase letter and use only lowercase letters, digits, - and _ (at most 63 characters)")
+			return "", usage("--region must start with a lowercase letter and use only lowercase letters, digits, - and _ (at most 63 characters)")
 		}
 		return region, nil
 	}

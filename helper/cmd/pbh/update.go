@@ -75,15 +75,14 @@ func runUpdate(ctx context.Context, s updateSteps) error {
 // updateApply runs one requested update (pbh update-apply, inside updateUnit).
 func updateApply(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("update-apply", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	dir := fs.String("state-dir", defaultState, "installation state directory")
 	request := fs.String("request", "", "update request id")
 	target := fs.String("to", "", "release version")
-	if err := fs.Parse(args); errors.Is(err, flag.ErrHelp) {
-		printHelp(out, "update-apply", fs)
-		return nil
-	} else if err != nil || *request == "" || *target == "" || fs.NArg() != 0 {
-		return commandError("usage: pbh update-apply --request ID --to VERSION")
+	if done, err := parseFlags(fs, args, out); done {
+		return err
+	}
+	if *request == "" || *target == "" || fs.NArg() != 0 {
+		return usage("usage: pbh update-apply --request ID --to VERSION")
 	}
 	node, err := containers.OpenUpdateNode(*dir)
 	if err != nil {
