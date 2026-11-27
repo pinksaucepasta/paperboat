@@ -373,6 +373,21 @@ var failureLimitedRoutes = map[string]bool{
 	"POST /v1/auth/recipe-sessions":           true,
 }
 
+// secretProvenRefusals are refusals only a caller holding a real secret can get: the server found
+// the enrollment token or pairing verifier by its hash and it was pending, used, expired or denied.
+// A guessed secret matches nothing and still gets invalid/unavailable, which is charged, so
+// guessing stays limited. Without this, ~20 machines polling approval_pending every 2 s behind one
+// NAT used up the budget and their pairing was refused with 429.
+var secretProvenRefusals = map[string]bool{
+	"user_machine_approval_pending": true,
+	"user_machine_pairing_denied":   true,
+	"user_machine_pairing_expired":  true,
+	"enrollment_token_used":         true,
+	"enrollment_token_expired":      true,
+}
+
+type refusalCodeKey struct{}
+
 // failureLimited covers the routes above plus the guest terminal join-code and ticket routes,
 // whose path carries a session id: guesses must not spread across sessions.
 func failureLimited(r *http.Request) bool {
@@ -399,8 +414,9 @@ func signInLimit(limiter *ratelimit.Limiter, next http.Handler) http.Handler {
 				return
 			}
 			recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(recorder, r)
-			if recorder.status >= 400 && recorder.status < 500 {
+			var code string
+			next.ServeHTTP(recorder, r.WithContext(context.WithValue(r.Context(), refusalCodeKey{}, &code)))
+			if recorder.status >= 400 && recorder.status < 500 && !secretProvenRefusals[code] {
 				limiter.Allow(key)
 			}
 			return

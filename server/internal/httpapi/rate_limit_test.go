@@ -77,3 +77,51 @@ func TestFailedSecretExchangesAreLimitedPerNetwork(t *testing.T) {
 		t.Fatalf("an unrelated terminal route was limited: %d", code)
 	}
 }
+
+// A team pairing ~20 machines at once behind one network polls approval_pending every 2 s and may
+// hit used/expired tokens: those refusals prove a real secret and must not use up the guess budget
+// (they did, and pairing was refused with 429). Invalid secrets are still charged.
+func TestSecretProvenRefusalsDoNotDrainPairingBudget(t *testing.T) {
+	handler := signInLimit(ratelimit.New(30, 10, 1000), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Code") {
+		case "pending":
+			writeError(w, r, http.StatusConflict, "user_machine_approval_pending", "pending")
+		case "used":
+			writeError(w, r, http.StatusConflict, "enrollment_token_used", "used")
+		case "expired":
+			writeError(w, r, http.StatusGone, "enrollment_token_expired", "expired")
+		case "invalid":
+			writeError(w, r, http.StatusBadRequest, "enrollment_token_invalid", "invalid")
+		default:
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	send := func(path, code string) int {
+		rec := httptest.NewRecorder()
+		request := httptest.NewRequest("POST", path, nil)
+		request.Header.Set("X-Test-Code", code)
+		handler.ServeHTTP(rec, request)
+		return rec.Code
+	}
+	for machine := range 20 {
+		for poll := range 15 {
+			if code := send("/v1/machines/pairings/installation", "pending"); code == http.StatusTooManyRequests {
+				t.Fatalf("machine %d poll %d: legitimate pending poll refused with 429", machine+1, poll+1)
+			}
+		}
+		for _, c := range []string{"used", "expired"} {
+			if code := send("/v1/machines/pairings", c); code == http.StatusTooManyRequests {
+				t.Fatalf("machine %d %s: refused with 429", machine+1, c)
+			}
+		}
+		if code := send("/v1/machines/pairings", ""); code != http.StatusCreated {
+			t.Fatalf("machine %d pairing: %d", machine+1, code)
+		}
+	}
+	for range 10 {
+		send("/v1/machines/pairings", "invalid")
+	}
+	if code := send("/v1/machines/pairings", "invalid"); code != http.StatusTooManyRequests {
+		t.Fatalf("guessing after the burst: %d, want 429", code)
+	}
+}

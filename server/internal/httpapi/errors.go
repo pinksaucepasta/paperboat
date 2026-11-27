@@ -230,6 +230,9 @@ func writeErrorDetails(w http.ResponseWriter, r *http.Request, status int, code,
 		w.Header().Set("Retry-After", busyRetryAfter)
 	}
 	captureSupportFailure(r, status, code, sentry.NewStacktrace(), causes...)
+	if holder, ok := r.Context().Value(refusalCodeKey{}).(*string); ok {
+		*holder = code
+	}
 	if status >= 400 && status < 500 {
 		// A refusal's code is otherwise only in the response body; the request log
 		// line has the status alone, which made account-wide 409s untraceable.
