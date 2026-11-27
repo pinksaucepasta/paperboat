@@ -1240,7 +1240,9 @@ func TestRequestDuringARefreshIsNotLostToTheAppliedConfigurationWake(t *testing.
 		<-fetched
 		select {
 		case <-fetched:
-		case <-time.After(2500 * time.Millisecond):
+		// The window spans applying the first configuration, the on-demand spacing and the second fetch, which passed
+		// 2.5 s under -race on a loaded Windows runner. A lost request waits for the next renewal, minutes away.
+		case <-time.After(20 * time.Second):
 			t.Fatalf("round %d: the requested refresh never ran", round)
 		}
 		cancel()
