@@ -213,7 +213,7 @@ type pingPrepared struct {
 // pingPrepareTimeout even if a step ignores its context.
 var (
 	pingPrepareNotice  = 3 * time.Second
-	pingPrepareTimeout = localDaemonReadyTimeout + 15*time.Second
+	pingPrepareTimeout = localDaemonReadyTimeout + 30*time.Second
 )
 
 var errPingPrepareTimeout = errors.New("pb ping could not reach the local Paperboat service in time; run `pb doctor`, then retry")
@@ -237,8 +237,13 @@ func preparePing(ctx context.Context, notices io.Writer, prepare func(context.Co
 		case result := <-done:
 			return result.prepared, result.err
 		case <-notice.C:
-			fmt.Fprintln(notices, "Waiting for the local Paperboat service...")
+			fmt.Fprintln(notices, "Still preparing: finding the machine and starting the local Paperboat service...")
 		case <-prepareCtx.Done():
+			select {
+			case result := <-done:
+				return result.prepared, result.err
+			default:
+			}
 			if ctx.Err() != nil {
 				return pingPrepared{}, ctx.Err()
 			}

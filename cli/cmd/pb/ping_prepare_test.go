@@ -29,7 +29,7 @@ func TestPreparePingStalledStepPrintsAndTimesOut(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("preparePing returned after %s", elapsed)
 	}
-	if !strings.Contains(notices.String(), "Waiting for the local Paperboat service") {
+	if !strings.Contains(notices.String(), "Still preparing") {
 		t.Fatalf("notices = %q, want a waiting notice", notices.String())
 	}
 }
