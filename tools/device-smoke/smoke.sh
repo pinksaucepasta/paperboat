@@ -1173,8 +1173,10 @@ test_update_window() {
       continue
     fi
     out=$(device_py "$device" update_window_hold.py --scenario $scenario --installed "$(printf %q "$SMOKE_RELEASE_OLD")" --latest "$(printf %q "$SMOKE_RELEASE_NEW")" --wait-latest "${SMOKE_UPDATE_WINDOW_WAIT:-3600}" 2>&1); status=$?
+    # a missed row freezes the updater: wake it whatever happened to the row (killed by a timeout included)
+    [ "$scenario" != missed ] || device_py "$device" update_window_hold.py --scenario wake --installed - --latest - >/dev/null 2>&1 || true
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-window-"+sys.argv[2] and r["status"]=="PASS" and r["samples"];assert sys.argv[2]!="hold" or r["stayed_on"]==r["installed"];assert sys.argv[2]!="missed" or r["samples"][-1]["version"]==r["latest"]' "$out" "$scenario" 2>/dev/null; then
-      record "$id" PASS $(( $(now)-t0 )) "$(python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);print(("stayed on %s through an updater restart, a failed and a same-version pb update --from, past the %s window" % (r["installed"], r["window"])) if "stayed_on" in r else ("asleep across the %s window; %s installed %d s after waking" % (r["window"], r["latest"], r["seconds_to_catch_up"])))' "$out")"
+      record "$id" PASS $(( $(now)-t0 )) "$(python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);print(("official %s stayed put to 1 min before the %s window through an updater restart and a failed pb update --from; custom after a same-version --from, also past the window" % (r["installed"], r["window"])) if "stayed_on" in r else ("asleep across the %s window; %s installed %d s after waking" % (r["window"], r["latest"], r["seconds_to_catch_up"])))' "$out")"
     else
       record_command_failure "$id" $(( $(now)-t0 )) "$out"
     fi

@@ -16,7 +16,7 @@ class FreshInstallWindow(unittest.TestCase):
             local = now.astimezone(zoneinfo.ZoneInfo(f.past_window_zone(now)))
             self.assertTrue(6 <= local.hour <= 21, (hour, local))
 
-    def fake(self, latest, version_after=None, sums_ok=True, local_hour='09'):
+    def fake(self, latest, version_after=None, sums_ok=True, local_hour='09', planned_ok=True):
         old, new = '2026.11.27.0', '2026.11.27.3'
         body = b'pb'
         digest = hashlib.sha256(body).hexdigest() if sums_ok else '0' * 64
@@ -36,14 +36,15 @@ class FreshInstallWindow(unittest.TestCase):
                 return mock.Mock(stdout=json.dumps({'ok': True, 'data': {'version': next(versions)}}))
             if 'update check' in command:
                 return mock.Mock(stdout=json.dumps({'ok': True, 'data': {'latest_version': new, 'update_available': True}}))
-            return mock.Mock(stdout=json.dumps({'ok': True, 'data': {'next_maintenance_at': '2026-11-28T04:00:00+05:30'}}))
+            planned = (datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Kolkata')) + datetime.timedelta(days=1)).replace(hour=4, minute=0, second=0, microsecond=0)
+            return mock.Mock(stdout=json.dumps({'ok': True, 'data': {'next_maintenance_at': (planned if planned_ok else planned - datetime.timedelta(hours=5, minutes=30)).isoformat()}}))
         m = mock.Mock()
         m.machine.return_value = ('au4', 'machine_x', 'ssh h docker exec au4')
         m.at.side_effect = at
         env = {'SMOKE_RELEASE_OLD': old, 'SMOKE_RELEASE_NEW': new, 'SMOKE_AU4_OBSERVE': '120', 'SMOKE_AU4_HOST': 'lp9'}
         patches = [mock.patch.object(f, 'fetch', fetch), mock.patch.dict(os.environ, env),
                    mock.patch.object(f, 'run', lambda *a, **k: mock.Mock(stdout='x86_64\n')),
-                   mock.patch.object(f.time, 'sleep', lambda s: None),
+                   mock.patch.object(f.time, 'sleep', lambda s: None), mock.patch.object(f, 'past_window_zone', lambda: 'Asia/Kolkata'),
                    mock.patch.object(f.time, 'monotonic', mock.Mock(side_effect=range(0, 100000, 60)))]
         for patch in patches:
             patch.start()
@@ -78,6 +79,12 @@ class FreshInstallWindow(unittest.TestCase):
         ok, detail = f.fresh_install_window(self.fake('2026.11.27.3', local_hour='02'))
         self.assertFalse(ok)
         self.assertIn('local time', detail)
+
+
+    def test_fails_when_pb_plans_the_window_in_another_zone(self):
+        ok, detail = f.fresh_install_window(self.fake('2026.11.27.3', planned_ok=False))
+        self.assertFalse(ok)
+        self.assertIn('did not take', detail)
 
 
 if __name__ == '__main__':

@@ -400,6 +400,12 @@ def fresh_install_window(m):
     installed = pb('--version')['version']
     if installed != old:
         return False, 'installed %s, not release %s' % (installed, old)
+    import datetime
+    import zoneinfo
+    planned = datetime.datetime.fromisoformat(pb('update', 'status')['next_maintenance_at'].replace('Z', '+00:00')).astimezone(zoneinfo.ZoneInfo(zone))
+    today = datetime.datetime.now(zoneinfo.ZoneInfo(zone)).date()
+    if (planned.hour, planned.minute) != (4, 0) or planned.date() != today + datetime.timedelta(days=1):
+        return False, 'pb does not plan the window at 04:00 tomorrow in %s (next maintenance %s): the zone did not take' % (zone, planned.isoformat())
     check = pb('update', 'check')
     if check.get('latest_version') != new or not check.get('update_available'):
         return False, 'the machine does not see %s as available: %r' % (new, {k: check.get(k) for k in ('latest_version', 'update_available')})

@@ -46,24 +46,26 @@ class Machine:
             return {'data': {'installed_version': self.version, 'latest_version': self.latest}}
         raise AssertionError(args)
 
-    def updater(self, action):
+    def updater(self, action, pid=None):
         self.actions.append(action)
         if action == 'restart' and self.eager:
             self.version = self.latest
         self.frozen = action == 'freeze'
         if action == 'wake' and self.missed and self.enabled:
             self.version = self.latest
+        return '42' if action in ('freeze', 'wake') else None
 
     def command(self, binary, *args, timeout=0, **kwargs):
         self.froms.append(args[-1])
         ok = 'pb-missing' not in args[-1]
         if ok:
             self.enabled = False  # a supplied build is custom: no automatic updates any more
-        return mock.Mock(returncode=0 if ok else 1, stdout='', stderr='')
+        return mock.Mock(returncode=0 if ok else 1, stdout='', stderr='' if ok else 'pb: open /tmp/pb-missing: no such file or directory')
 
 
-def run(machine, scenario):
+def run(machine, scenario, pid='42'):
     with mock.patch.object(update_scheduled, 'clock', machine), \
+            mock.patch.object(h, 'updater_pid', lambda: pid), \
             mock.patch.object(update_scheduled.p, 'invoke', machine.invoke), \
             mock.patch.object(h.p, 'command_result', machine.command), \
             mock.patch.object(h, 'updater', machine.updater), \
@@ -84,7 +86,7 @@ class UpdateWindowHold(unittest.TestCase):
         self.assertEqual((result['status'], result['stayed_on']), ('PASS', '2026.11.27.0'))
         self.assertEqual(machine.actions, ['restart'])
         self.assertEqual(len(machine.froms), 2)
-        self.assertTrue(any(s['phase'] == 'after a same-version pb update --from' for s in result['samples']))
+        self.assertTrue(any(s['phase'] == 'custom after a same-version pb update --from' for s in result['samples']))
         self.assertEqual(machine.local_time, (datetime.datetime(2026, 11, 27, 9, 14)).strftime('%H:%M'))  # not restored: custom
 
     def test_hold_fails_when_the_machine_installs_b_after_a_restart(self):
@@ -101,13 +103,30 @@ class UpdateWindowHold(unittest.TestCase):
 
     def test_missed_window_fails_when_nothing_installs(self):
         machine = Machine()
-        def asleep_forever(action):  # freezes and wakes, but never catches up
+        def asleep_forever(action, pid=None):  # freezes and wakes, but never catches up
             machine.actions.append(action)
             machine.frozen = action == 'freeze'
+            return '42'
         machine.updater = asleep_forever
         with mock.patch.object(update_scheduled, 'READY_SECONDS', 60), mock.patch.object(update_scheduled, 'ACTIVATION_SECONDS', 60):
             with self.assertRaisesRegex(AssertionError, 'missed window'):
                 run(machine, 'missed')
+
+
+    def test_missed_window_fails_when_the_updater_was_restarted_while_frozen(self):
+        with self.assertRaisesRegex(AssertionError, 'restarted while frozen'):
+            run(Machine(), 'missed', pid='43')
+
+    def test_hold_fails_when_the_failed_update_fails_for_another_reason(self):
+        machine = Machine()
+        machine.command = lambda binary, *args, **kw: mock.Mock(returncode=2, stdout='', stderr='unknown flag --from')
+        with self.assertRaisesRegex(AssertionError, 'another reason'):
+            run(machine, 'hold')
+
+    def test_hold_checks_the_official_install_up_to_the_minute_before_the_window(self):
+        result = run(Machine(), 'hold')
+        official = [s for s in result['samples'] if s['phase'].startswith('official')]
+        self.assertTrue(official and official[-1]['at'] >= '2026-11-27T09:12')
 
 
 if __name__ == '__main__':
