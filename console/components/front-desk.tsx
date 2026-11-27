@@ -70,7 +70,13 @@ function Editor({ machine, current }: { machine: Machine; current: Desk }) {
         if (dirty && validPort(port)) save.mutate()
       }}
     >
-      <Choice label={scheme} value={scheme} options={schemes} onChange={(next) => setScheme(next as Desk["scheme"])} />
+      <Choice
+        name="front-desk-scheme"
+        label={scheme}
+        value={scheme}
+        options={schemes}
+        onChange={(next) => setScheme(next as Desk["scheme"])}
+      />
       <span className="text-muted-foreground">on</span>
       <Input
         aria-label="Front desk port"

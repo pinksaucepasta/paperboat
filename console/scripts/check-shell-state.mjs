@@ -106,6 +106,7 @@ async function appUp() {
 // count joins the name ("Ended 0"), so match the label at the start.
 const checked = (page, name) => page.getByRole("button", { name: new RegExp(`^${name}`) }).first()
 const pressed = async (page, name) => (await checked(page, name).getAttribute("aria-pressed")) === "true"
+const menu = (p) => p.getByRole("menu")
 const clearSearch = async (p) => (await p.getByRole("button", { name: "Clear search" }).count()) > 0
 // How to tell the shell from the server page: every page under (console)/, machine tabs included,
 // shows WithSession's own scoped fallback (.shell-delay) while its Session suspends.
@@ -118,6 +119,22 @@ const shellDelay = {
 const focusedIn = (p, placeholder, caret) =>
   p.evaluate(([text, at]) => document.activeElement?.getAttribute("placeholder") === text && document.activeElement.selectionStart === at, [placeholder, caret])
 const cases = [
+  // First: a push to a route visited a few cases earlier reuses its revealed page and shows no shell, so keep the
+  // other /activity case at least three routes away.
+  [
+    "Activity: an open filter menu",
+    "/activity",
+    async (p) => {
+      if (await menu(p).count()) return
+      await p.locator(".shell-delay").getByRole("button", { name: "All activity" }).click()
+      // The popup renders after the click returns: wait, or the retry below would click again and close it.
+      await menu(p).waitFor({ timeout: 2000 }).catch(() => {})
+    },
+    // One menu, still open once the loaded page is in place.
+    async (p) => (await menu(p).count()) === 1 && (await menu(p).isVisible()),
+    undefined,
+    async (p) => (await menu(p).count()) === 1,
+  ],
   [
     "Tunnels: search text and the New tunnel dialog with its name",
     "/tunnels",
@@ -232,8 +249,10 @@ try {
     // A cold server or a loaded host can stall a navigation past the server's ~3 s hold, leaving no
     // shell to enter on: one fresh re-push with a new hold recovers, the page being warm by then. A
     // genuinely broken shell fails every attempt the same way, so the check still fails without the fix.
+    let first
     for (let attempt = 0; ; attempt++) {
       let release
+      let released = false
       try {
         await context.addCookies([{ name: "pb-workspace", value: workspace ?? "personal", url: ORIGIN }])
         world.hold = new Promise((resolve) => (release = resolve))
@@ -253,6 +272,7 @@ try {
         }
         if (!(await shell.showing(page))) throw new Error("the server page had already replaced the shell: the state was not entered on the shell")
         release()
+        released = true
         await shell.loaded(page)
         await page.waitForTimeout(300)
         if (!(await survived(page))) throw new Error("the state entered on the shell was lost when the server page replaced it")
@@ -263,11 +283,13 @@ try {
         try {
           release()
         } catch {}
-        if (attempt > 0) {
-          results.push([false, `${name}  (${String(error.message ?? error).split("\n")[0]})`])
+        const why = String(error.message ?? error).split("\n")[0]
+        // Once released the page is loaded: a second push to it would show no shell and hide this failure.
+        if (released || attempt > 0) {
+          results.push([false, `${name}  (${first ? `${first}; again: ` : ""}${why})`])
           break
         }
-        // The case never started (nothing entered yet): try once more instead of failing the run.
+        first = why // No loaded page yet: try once more instead of failing the run.
       }
     }
   }

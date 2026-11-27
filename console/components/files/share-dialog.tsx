@@ -150,6 +150,7 @@ function SettingsChoices({ settings }: { settings: Settings }) {
   return (
     <>
       <Choice
+        name="share-audience"
         label={audiences[settings.access]}
         value={settings.access}
         options={Object.entries(audiences).map(([value, label]) => ({ value, label }))}
@@ -157,6 +158,7 @@ function SettingsChoices({ settings }: { settings: Settings }) {
       />
       <span aria-hidden>·</span>
       <Choice
+        name="share-lifetime"
         label={lifetimes.find((entry) => entry.hours === settings.hours)!.label}
         value={String(settings.hours)}
         options={lifetimes.map((entry) => ({ value: String(entry.hours), label: entry.label }))}
@@ -314,6 +316,7 @@ function UploadBody({
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
         <span>Hosted on</span>
         <Choice
+          name="share-destination"
           label={destination?.label ?? (machines.isPending ? "…" : (source.machine?.alias ?? "no machine"))}
           value={destination ? destinationValue(destination) : ""}
           options={destinations.map((entry) => ({ value: destinationValue(entry), label: entry.label }))}

@@ -8,15 +8,19 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** One editable default in the settings line: its value with a caret, a radio menu on click. */
 export function Choice({
+  name,
   label,
   value,
   options,
   onChange,
   min = 2,
 }: {
+  /** Names this menu among those on a page: an open menu survives the static shell → server page swap. */
+  name: string
   label: string
   value: string
   options: { value: string; label: string }[]
@@ -24,8 +28,9 @@ export function Choice({
   /** Fewest options that make it a menu; below it, a plain label. */
   min?: number
 }) {
+  const [open, setOpen] = useShellState(`choice.tsx:open:${name}`, false)
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         disabled={options.length < min}
         className="inline-flex items-center gap-0.5 rounded-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none"

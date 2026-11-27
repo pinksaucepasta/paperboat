@@ -106,6 +106,7 @@ function MachineChips({
       )}
       {rest.length > 0 && (
         <Choice
+          name="files-add-machine"
           label="Add machine"
           value=""
           min={1}
@@ -374,6 +375,7 @@ export function SendToMachineDialog({
         <div className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
           <span>From {machine.alias} to</span>
           <Choice
+            name="files-target-machine"
             label={target?.alias ?? (machines.isPending ? "…" : "no machine")}
             value={target?.id ?? ""}
             options={others.map((entry) => ({ value: entry.id, label: entry.alias }))}

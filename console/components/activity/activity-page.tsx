@@ -127,6 +127,7 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
         <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
           Show
           <Choice
+            name="activity-area"
             label={activityAreas[area]}
             value={area}
             options={Object.entries(activityAreas).map(([value, label]) => ({ value, label }))}
@@ -136,12 +137,14 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
         {activityLive.filters && (
           <>
             <Choice
+              name="activity-period"
               label={activityPeriods[period]}
               value={period}
               options={Object.entries(activityPeriods).map(([value, label]) => ({ value, label }))}
               onChange={setPeriod}
             />
             <Choice
+              name="activity-result"
               label={denied ? "Only denied" : "All results"}
               value={denied ? "denied" : "all"}
               options={[
