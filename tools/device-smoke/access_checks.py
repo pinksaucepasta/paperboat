@@ -494,7 +494,7 @@ def tunnel_origin(m):
 
 
 def tunnel_origin_proxies(m):
-    _, _, [(name, _, _)] = solo(m, ['tprox'], names=['small'])
+    _, _, [(name, _, _)] = solo(m, ['tprox'], names=['fx-small'])
     out = str(Path(fx.tempfile.gettempdir()) / ('otm-%s.json' % m.run_id))
     m.callback(lambda: Path(out).unlink(missing_ok=True))
     code, _, text = script(['origin_tunnel_matrix.py', '--host', fx.HOST, '--container', name, '--pb', PB, '--out', out], 2700)
