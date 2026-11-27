@@ -26,6 +26,9 @@ func TestCommandTestsNeverResolveTheInstalledDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if dns := localapi.DNSFile(); !strings.HasPrefix(dns, root) {
+		t.Fatalf("dns=%q", dns)
+	}
 	t.Setenv(localtestroot.EnvName, "") // the installed daemon's pipe is the unsalted one
 	installed, err := localapi.WindowsPaths(filepath.Join(appData, "Paperboat", "state"), currentSIDForTest(t))
 	if err != nil {
@@ -33,9 +36,6 @@ func TestCommandTestsNeverResolveTheInstalledDaemon(t *testing.T) {
 	}
 	if !strings.HasPrefix(paths.StateRoot, root) || paths.SocketPath == installed.SocketPath {
 		t.Fatalf("paths=%+v installed pipe=%q", paths, installed.SocketPath)
-	}
-	if dns := localapi.DNSFile(); !strings.HasPrefix(dns, root) {
-		t.Fatalf("dns=%q", dns)
 	}
 }
 
