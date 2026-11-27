@@ -133,7 +133,7 @@ class Collect(unittest.TestCase):
         self.assertFalse(rc.Steps('x').result()[0])
 
     def test_refused_needs_a_failure_with_the_reason(self):
-        rc.refused(rd.Result(1, '', 'pb: This recipe has\n reached its max_machines.'), 'x', rc.FULL)
+        rc.refused(rd.Result(1, '', 'pb: ci already has 1 of\n 1 machines.'), 'x', rc.FULL)
         for result in (rd.Result(0, rc.FULL), rd.Result(124, rc.FULL), rd.Result(1, 'sudo: a password is required')):
             with self.assertRaises(AssertionError):
                 rc.refused(result, 'x', rc.FULL)
