@@ -348,3 +348,6 @@ ac1095ce while both go.mod files pin 2d32e5f0.
 - **Pre-launch live checks to turn into E2E rows (2026-11-27):** new Windows computer reaching peers outbound; GitHub
   disconnect and reconnect; drain and resume of one relay (staging only); `pb doctor` with an offline peer; parallel
   fleet install and pairing; web terminal keys typed in the first second; Windows service remove and reinstall.
+- **F21-37 stays hand-proven (2026-11-27):** quiet public TCP/TLS streams closing at the edge idle limit while HTTPS keeps
+  answering has no E2E row: it needs shared staging to itself and edge A restarted with a short limit. Rechecked by hand
+  on staging that day (see CHECKLIST.md F21-37). A row, if ever written, must refuse to run from an outdated checkout.
