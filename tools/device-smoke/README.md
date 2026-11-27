@@ -89,6 +89,19 @@ a used one is uninstalled at the end. The one-liner is the line `pb recipe creat
 takes about 10 minutes. Not automated: the console's offer to create a missing vault (its recipe editor was removed on
 2026-11-21; the CLI path is checked) and reading the server's stored vault bytes.
 
+`recipe-apply:{container,linux,macos,windows}` (F26-05) pairs a machine from one commented recipe file with every section and
+restarts its daemon; the config repository is a public HTTPS one (`SMOKE_RECIPE_CONFIG_URL`). A Windows target needs `python`.
+
+## Rows that need an account of their own (F10-07, F27-05, F1-03)
+
+`account_rows.py` runs on the same harness and settings with its own throwaway account: smoke.sh `env-vault-reset-locked:{container,
+macos,windows}` (reset of a locked ENV vault), `held-web-ports:{container,linux,macos,windows}` (a web server holds 80/443 before
+Paperboat starts; Linux (nft) and macOS (PF) keep working behind the guard's redirect with `pb doctor` healthy; on Windows IIS
+takes :80, doctor names it and recovers when IIS stops: the machine needs the IIS service, stopped) and `pair-token-refusals:{linux,macos,windows}` (the other OS's pasted command, and a used, revoked and
+expired token; about 12 minutes because the expired token is waited out). The rows without `:container` use the clean
+`SMOKE_RECIPE_<OS>_SSH` machine and are NOT RUN without it. The wrong-platform paste needs `pwsh` on Linux and macOS and Git bash
+on Windows. Not automated: a pairing the server refuses as an unsupported platform (no supported test OS can send one).
+
 
 ## Extra Windows machines (winpool)
 

@@ -19,6 +19,10 @@ leaves the controller, and deleting the account takes every recipe, vault, tag a
 paired Linux container on SMOKE_FIXTURE_HOST (build SMOKE_FIXTURE_PB); Linux targets and peers are containers there too.
 The real machines are SMOKE_RECIPE_LINUX_SSH, SMOKE_RECIPE_MACOS_SSH and SMOKE_RECIPE_WINDOWS_SSH: throwaway runners with NO
 Paperboat on them (a machine that has any is refused and not touched); each is left without it.
+  recipe-apply:container   F26-05 one commented recipe file with every section (tags, reach, env, config, preview, tunnel) is applied
+  recipe-apply:linux       once after pairing (one preview and one tunnel serving a local app, the pull-only config repository, the ENV
+  recipe-apply:macos       hook) and not again after the daemon restarts (the apply runs again and creates nothing). The config
+  recipe-apply:windows     repository is a public HTTPS one (SMOKE_RECIPE_CONFIG_URL, default github.com/octocat/Spoon-Knife).
 With --expect-version a release version (YYYY.MM.DD.N) the one-liner installs that release (PB_VERSION) and it is checked.
 Secrets travel on stdin only. Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"} per ID; every step
 of a check runs even after an earlier one failed. Exit 0 only when every ID passed.
@@ -36,7 +40,9 @@ import fixture_checks as f
 import recipe_devices as rd
 
 PLATFORMS = ('container', 'linux', 'macos', 'windows')
-CHECKS = ('recipe-lifecycle', 'recipe-errors', 'recipe-vaults', 'recipe-lifetimes', 'recipe-api-tokens') + tuple('recipe-install:' + p for p in PLATFORMS)
+CHECKS = (('recipe-lifecycle', 'recipe-errors', 'recipe-vaults', 'recipe-lifetimes', 'recipe-api-tokens')
+          + tuple('recipe-install:' + p for p in PLATFORMS) + ())
+CONFIG_URL = 'https://github.com/octocat/Spoon-Knife.git'  # small, public, its branch is main, no sync manifest
 SSH_SETTING = {p: 'SMOKE_RECIPE_%s_SSH' % p.upper() for p in ('linux', 'macos', 'windows')}
 # the paired smoke machines: a recipe check installs and uninstalls Paperboat, so it never runs on one of them
 PAIRED = ('SMOKE_LINUX_SSH', 'SMOKE_LINUX_PEER_SSH', 'SMOKE_MACOS_SSH', 'SMOKE_MACOS_VM_SSH', 'SMOKE_WINDOWS_SSH', 'SMOKE_MEMBER_SSH',
@@ -162,7 +168,7 @@ class Session:
         self._vault_ready = False
 
     def name(self, role):
-        return 'test-%s-rcp-%s-%s' % (self.day, role, self.run_id)
+        return 'test-%s-%s-%s-%s' % (self.day, f.ENV.get('SMOKE_RECIPE_NAME_TAG', 'rcp'), role, self.run_id)
 
     def vault_ready(self):
         if not self._vault_ready:
@@ -739,6 +745,200 @@ def check_install(check, platform):
         reverse(check, platform, name, target, recipe['url'])
 
 
+# ------------------------------------------------------------------ F26-05
+APPLY_SOURCE = """// Every section of a recipe in one commented file (PLAN F26).
+{
+  /* what the paired machine gets */
+  "tags": ["%(tag)s"], // a trailing comment
+  "reach": [{"dst": ["tag:%(tag)s"], "allow": ["exec"]}],
+  "env": {"vaults": ["%(vault)s"]},
+  "config": {"repository": "%(repository)s"},
+  "preview": [{"port": %(preview)d, "ttl": "2h"}],
+  "tunnel": [{"port": %(tunnel)d}],
+  "max_machines": 2,
+  "expires": "1d", // and trailing commas
+}
+"""
+PREVIEW_PORT, TUNNEL_PORT = 18731, 18732
+
+
+def items(creator, *args):
+    """{id: item} of a pb list --json (all of the throwaway account's)."""
+    data = rd.json_data(creator.pb(*args, '--json', '--limit', '200'))
+    return {row['id']: row for row in data.get('items') or []}
+
+
+def inventory(check):
+    previews = items(check.s.creator, 'preview', 'list', '--all')
+    tunnels = items(check.s.creator, 'tunnel', 'list')
+    return previews, tunnels
+
+
+def check_apply(check, platform):
+    steps, s = check.steps, check.s
+    creator, tag = s.creator, check.tag
+    repository = 'rcp-cfg-' + tag[3:]
+    app = 'rcpapp' + secrets.token_hex(6)
+    with steps.step('vault-setup'):
+        s.vault_ready()
+    with steps.step('config-repository-connected'):
+        url = f.ENV.get('SMOKE_RECIPE_CONFIG_URL', CONFIG_URL)
+        ok(creator.pb('config', 'repository', 'connect', url, '--name', repository, '--json'), 'pb config repository connect')
+    name, target = None, None
+    with steps.step('target-has-no-paperboat'):
+        candidate_name, candidate = target_device(check, platform)
+        found = candidate.present() + candidate.hooks()
+        need(not found, 'the %s machine already has Paperboat (%s): it is not touched; use a fresh runner' % (platform, ', '.join(found)[:200]))
+        name, target = candidate_name, candidate
+    if target is None:
+        return
+    if platform != 'container':
+        check.stack.callback(uninstall, steps, target)
+    servers = []
+    check.stack.callback(lambda: [target.stop_app(pid) for pid in servers])
+    with steps.step('local-app-serving'):
+        for port in (PREVIEW_PORT, TUNNEL_PORT):
+            servers.append(target.start_app(port, app))
+    source = APPLY_SOURCE % {'tag': tag, 'vault': s.vault, 'repository': repository, 'preview': PREVIEW_PORT, 'tunnel': TUNNEL_PORT}
+    recipe, before = {}, {}
+    with steps.step('create-from-commented-file'):
+        path = creator.write(tag + '.jsonc', source)
+        check.live.append((creator, tag))
+        before['previews'], before['tunnels'] = inventory(check)
+        result = creator.pb('recipe', 'create', '-f', path, '--json')
+        for token in rd.PB_RECIPE_RE.findall(result.text):
+            token_parts(token)
+        data = rd.json_data(result)
+        token_parts(data.get('token', ''))
+        key = 'windows' if target.os == 'windows' else 'linux_macos'
+        recipe.update(token=data['token'], url=rd.installer_url(data['install'][key], windows=target.os == 'windows'))
+        shown = check.shown(tag)['recipe']
+        need(shown['source'].replace('\r\n', '\n') == source, 'show does not return the commented file as written')
+        parsed = shown['recipe']
+        missing = [k for k in ('tags', 'reach', 'env', 'config', 'preview', 'tunnel') if not parsed.get(k)]
+        need(not missing, 'the stored recipe lost %s' % ', '.join(missing))
+    if not recipe:
+        return
+    paired = {}
+    with steps.step('pair-with-the-one-liner'):
+        paired['id'], name = check.install(target, recipe['url'], recipe['token'], name, any_name=True)
+    if not paired:
+        return
+    state = {}
+
+    def row():
+        rows = [m for m in check.shown(tag)['machines'] if m['name'] == name]
+        need(len(rows) == 1, 'show lists the machine %d times' % len(rows))
+        return rows[0]
+
+    def made():
+        """(previews, tunnels) the account did not have before the pairing, ended ones included."""
+        previews, tunnels = inventory(check)
+        return ({k: v for k, v in previews.items() if k not in before['previews']},
+                {k: v for k, v in tunnels.items() if k not in before['tunnels']})
+    with steps.step('applied-after-pairing'):
+        def applied():
+            mine = row()
+            errors = {k: v.get('error') for k, v in (mine.get('apply_state') or {}).items() if (v or {}).get('error')}
+            need(mine['applied_revision'] == 1 and not errors, 'applied revision %s, errors %s; %s' % (mine['applied_revision'], errors, recipe_step(target)))
+            _, record = target.apply_record()
+            need(record['revision'] == 1 and len(record['previews']) == 1 and len(record['tunnels']) == 1
+                 and record['config'] == repository and record['hook'], '%s; the machine has applied %s' % (recipe_step(target), json.dumps(record)[:300]))
+            state['record'] = record
+        wait_for('every section applied', applied, 420, 10)
+    with steps.step('one-preview-one-tunnel'):
+        every, tunnels = made()
+        # a first attempt that raced the starting host runtime ends its own preview: live ones are what the user has
+        previews = {k: v for k, v in every.items() if v.get('state') != 'stopped'}
+        need(len(previews) == 1 and len(tunnels) == 1, '%d live previews and %d tunnels were created (the machine recorded %s): %s' % (
+            len(previews), len(tunnels), sorted(state['record']['previews'].values()) if 'record' in state else '?',
+            json.dumps([{k: row.get(k) for k in ('id', 'state', 'allocation_state', 'created_at')} for row in every.values()])))
+        if len(every) > len(previews):
+            steps.notes.append('%d ended preview from a failed first attempt' % (len(every) - len(previews)))
+        preview, tunnel = next(iter(previews.values())), next(iter(tunnels.values()))
+        need(tunnel['name'] == name, 'the tunnel is named %s, not after the machine %s' % (tunnel['name'], name))
+        need(preview['owner_machine_id'] == paired['id'], 'the preview belongs to another machine')
+        state.update(previews=sorted(every), tunnels=sorted(tunnels), urls={'preview': preview.get('endpoint'), 'tunnel': tunnel.get('stable_endpoint')})
+
+    def serving(what):
+        address = state['urls'][what]
+        need(address, 'the %s has no address' % what)
+        address = address if address.startswith('https://') else 'https://' + address
+
+        def probe():
+            done = creator.sh('curl -fsS --max-time 20 %s' % shlex.quote(address + '/'), timeout=60)
+            need(done.code == 0 and app in done.out, '%s answers exit %d %s' % (what, done.code, done.tail(200)))
+        wait_for('the %s serving the local app' % what, probe, 240, 10)
+    for what in ('preview', 'tunnel'):
+        with steps.step(what + '-serves-the-app'):
+            need('urls' in state, 'nothing was created')
+            serving(what)
+    with steps.step('config-pull-only'):
+        said = ok(target.pb('config', 'sync', 'validate'), 'pb config sync validate').text
+        need('pull_only' in said, 'the machine configuration is not pull_only: ' + said[-300:])
+        state['config'] = config_assignment(target)
+    with steps.step('env-section'):
+        check.read(target, 'RCP_SECRET', s.marker)
+        if target.os != 'windows':
+            state['hooks'] = target.hook_lines()
+            need(state['hooks'] and all(n == 1 for n in state['hooks'].values()), 'ENV hook lines: %s' % state['hooks'])
+    with steps.step('daemon-restart'):
+        state['mtime'], state['at_restart'] = target.apply_record()
+        time.sleep(2)
+        ok(target.pb('service', 'restart', '--json', timeout=240), 'pb service restart')
+        state['restarted'] = True
+    with steps.step('apply-runs-again-after-restart'):
+        need(state.get('restarted'), 'the daemon was not restarted')
+
+        def ran_again():
+            stamp, _ = target.apply_record()
+            need(stamp > state['mtime'], 'the apply record has not been rewritten since the restart')
+        wait_for('the recipe being applied again by the restarted daemon', ran_again, 300, 10)
+    with steps.step('nothing-applied-twice'):
+        need(state.get('restarted') and 'previews' in state, 'no state before the restart')
+        time.sleep(60)  # past the first retry (15 s) of an apply that failed right after the restart
+        _, record = target.apply_record()
+        need(record == state['at_restart'], 'the apply record changed: %s -> %s' % (json.dumps(state['at_restart'])[:250], json.dumps(record)[:250]))
+        previews, tunnels = made()
+        need((sorted(previews), sorted(tunnels)) == (state['previews'], state['tunnels']),
+             'after the restart there are %d previews and %d tunnels (new ids: %s)' % (
+                 len(previews), len(tunnels), sorted(set(previews) - set(state['previews'])) + sorted(set(tunnels) - set(state['tunnels']))))
+        mine = row()
+        errors = {k: v.get('error') for k, v in (mine.get('apply_state') or {}).items() if (v or {}).get('error')}
+        need(mine['applied_revision'] == 1 and not errors, 'applied revision %s, errors %s' % (mine['applied_revision'], errors))
+        if 'config' in state:
+            now = config_assignment(target)
+            need(now == state['config'], 'the config assignment changed: %s -> %s' % (state['config'], now))
+        if 'hooks' in state:
+            need(target.hook_lines() == state['hooks'], 'ENV hook lines changed: %s -> %s' % (state['hooks'], target.hook_lines()))
+    with steps.step('still-serving-after-restart'):
+        need('urls' in state, 'nothing was created')
+        for what in ('preview', 'tunnel'):
+            serving(what)
+    with steps.step('revoke-removes-the-machine'):
+        _, result = check.confirmed('revoke', tag)
+        need('1 machine removed' in result.out, 'revoke said: ' + result.tail())
+        wait_for('the machine leaving the list', lambda: check.gone(name), 120)
+    if state.get('urls', {}).get('tunnel'):
+        steps.notes.append('config repository %s, preview and tunnel on ports %d/%d' % (repository, PREVIEW_PORT, TUNNEL_PORT))
+    if platform != 'container':
+        with steps.step('uninstall'):
+            target.uninstall()
+            need(not target.present(), 'pb uninstall left behind: %s' % ', '.join(target.present())[:300])
+
+
+def recipe_step(device):
+    """pb doctor's line about applying the recipe (why a section has not applied)."""
+    said = device.pb('doctor', timeout=120).text
+    return next((' '.join(line.split())[:300] for line in said.splitlines() if line.startswith('daemon:recipe:')), 'pb doctor shows no recipe failure')
+
+
+def config_assignment(device):
+    """The parts of this machine's config sync file check that a second apply would change."""
+    said = ok(device.pb('config', 'sync', 'validate'), 'pb config sync validate').out
+    return [line.strip() for line in said.splitlines() if line.strip().startswith(('Revision:', 'Enabled:', 'Repository:'))]
+
+
 def uninstall(steps, device):
     try:
         device.uninstall()
@@ -786,16 +986,22 @@ RUNNERS = {'recipe-lifecycle': check_lifecycle, 'recipe-errors': check_errors, '
            'recipe-lifetimes': check_lifetimes, 'recipe-api-tokens': check_api_tokens}
 
 
-def run_check(session, check_id, expect, log):
+def dispatch(check, check_id):
+    if check_id.startswith('recipe-install:'):
+        check_install(check, check_id.partition(':')[2])
+    elif check_id.startswith('recipe-apply:'):
+        check_apply(check, check_id.partition(':')[2])
+    else:
+        RUNNERS[check_id](check)
+
+
+def run_check(session, check_id, expect, log, run=dispatch):
     steps = Steps(check_id, log)
     try:
         with contextlib.ExitStack() as stack:
             check = Check(session, steps, stack, expect)
             try:
-                if check_id.startswith('recipe-install:'):
-                    check_install(check, check_id.partition(':')[2])
-                else:
-                    RUNNERS[check_id](check)
+                run(check, check_id)
             finally:
                 check.revoke_all()
     except Exception as error:  # noqa: BLE001 outside a step (a container, the creator): a FAIL with the reason
@@ -804,18 +1010,18 @@ def run_check(session, check_id, expect, log):
     return steps.result()
 
 
-def main(argv):
+def main(argv, checks=CHECKS, run=dispatch, usage=__doc__, receipt='recipes'):
     args, expect = list(argv[1:]), ''
     if '--expect-version' in args:
         at = args.index('--expect-version')
         if at + 1 >= len(args):
-            print(__doc__, file=sys.stderr)
+            print(usage, file=sys.stderr)
             return 2
         expect = args[at + 1]
         del args[at:at + 2]
     ids = [i for i in args[0].split(',') if i] if len(args) == 1 else []
-    if not ids or any(i not in CHECKS for i in ids):
-        print(__doc__, file=sys.stderr)
+    if not ids or any(i not in checks for i in ids):
+        print(usage, file=sys.stderr)
         return 2
     results, log, setup_failure = {}, [], ''
     try:
@@ -823,13 +1029,13 @@ def main(argv):
             session = Session(machines)
             for check_id in ids:
                 began = time.monotonic()
-                passed, detail = run_check(session, check_id, expect, log)
+                passed, detail = run_check(session, check_id, expect, log, run)
                 results[check_id] = [passed, detail, round(time.monotonic() - began)]
         leftovers = machines.leftovers
     except Exception as error:  # noqa: BLE001 the account, the creator or a cleanup step
         setup_failure = rd.redact('%s: %s' % (type(error).__name__, error))
         leftovers = []
-    kept = f.keep('recipes', '\n'.join(log + [setup_failure] + leftovers) + '\n')
+    kept = f.keep(receipt, '\n'.join(log + [setup_failure] + leftovers) + '\n')
     exit_code = 0
     for check_id in ids:
         passed, detail, seconds = results.get(check_id, [False, 'not run: ' + setup_failure[:250], 0])

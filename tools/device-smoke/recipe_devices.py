@@ -55,6 +55,15 @@ def spawn(argv, stdin=None, timeout=300):
     return Result(done.returncode, done.stdout, done.stderr)
 
 
+def parse_record(done, what):
+    """(modification stamp, parsed recipe-apply.json) from "stamp\n{json}"."""
+    stamp, _, body = done.out.strip().partition('\n')
+    try:
+        return int(stamp.strip()), json.loads(body)
+    except ValueError:
+        raise AssertionError('no recipe apply record on the %s machine: %s' % (what, done.tail())) from None
+
+
 # pb as the installer leaves it on Linux and macOS
 PB_FIND = ('P=; for c in "$HOME/.local/bin/pb" "/Library/PrivilegedHelperTools/Paperboat/users/u$(id -u)/bin/pb"; do '
            '[ -x "$c" ] && { P=$c; break; }; done; [ -n "$P" ] || { echo "pb is not installed" >&2; exit 127; }; ')
@@ -63,6 +72,9 @@ POSIX_PRESENT = ('for p in "$HOME/.local/bin/pb" "/usr/local/libexec/paperboat/u
                  '"/Library/PrivilegedHelperTools/Paperboat/users/u$(id -u)" "$HOME/.config/paperboat/config.json" '
                  '"$HOME/Library/Application Support/paperboat/config.json"; do [ -e "$p" ] && echo "$p"; done; '
                  'command -v pb | grep /; echo END')
+# what the daemon has applied of the machine's recipe, beside pb's config file
+POSIX_APPLY_RECORD = ('for f in "$HOME/.config/paperboat/recipe-apply.json" "$HOME/Library/Application Support/paperboat/recipe-apply.json"; do '
+                      '[ -f "$f" ] && { stat -c %Y "$f" 2>/dev/null || stat -f %m "$f"; cat "$f"; exit 0; }; done; echo "no recipe-apply.json" >&2; exit 3')
 # the line `pb env hook` (installed by pairing) adds to a shell startup file
 HOOK_MARK = '# paperboat-env-hook'
 HOOK_FILES = ' '.join('"$HOME/%s"' % name for name in ('.bashrc', '.bash_profile', '.bash_login', '.profile', '.zshrc', '.zshenv', '.zprofile', '.config/fish/config.fish'))
@@ -110,6 +122,30 @@ class Posix:
         if done.code or not lines or lines[-1] != 'END':
             raise AssertionError('cannot read the shell startup files: ' + done.tail())
         return lines[:-1]
+
+    def apply_record(self):
+        return parse_record(self.sh(POSIX_APPLY_RECORD, timeout=90), self.kind)
+
+    def hook_lines(self):
+        """{shell startup file: how many ENV hook lines it carries}."""
+        counts = {}
+        for path in self.hooks():
+            done = self.sh('grep -c %s %s' % (shlex.quote(HOOK_MARK), shlex.quote(path)), timeout=90)
+            counts[path] = int(done.out.strip() or 0)
+        return counts
+
+    def start_app(self, port, marker):
+        """A local web server answering marker on 127.0.0.1:port; returns its PID (stop_app ends exactly it)."""
+        done = self.sh('d="$HOME/rcp-work/app%d"; mkdir -p "$d" && printf %%s %s > "$d/index.html" || exit 1; '
+                       'nohup python3 -m http.server %d --bind 127.0.0.1 --directory "$d" >/dev/null 2>&1 </dev/null & echo $!; '
+                       'sleep 2; curl -fsS --max-time 10 http://127.0.0.1:%d/' % (port, shlex.quote(marker), port, port), timeout=90)
+        lines = done.out.split()
+        if done.code or not lines or not lines[0].isdigit() or marker not in done.out:
+            raise AssertionError('the local app on port %d did not start: %s' % (port, done.tail()))
+        return int(lines[0])
+
+    def stop_app(self, pid):
+        self.sh('kill %d 2>/dev/null; true' % pid, timeout=60)
 
     def drop_hooks(self):
         """Runner hygiene after the check judged the uninstall: take any hook line out."""
@@ -169,6 +205,26 @@ foreach ($p in 'C:\Program Files\Paperboat\users', (Join-Path $env:APPDATA 'pape
 Get-Service -Name 'Paperboat*' -ErrorAction SilentlyContinue | ForEach-Object Name
 'END'
 '''
+WINDOWS_APPLY_RECORD = r'''
+foreach ($d in (Join-Path $env:APPDATA 'paperboat'), (Join-Path $env:USERPROFILE '.config\paperboat')) {
+  $p = Join-Path $d 'recipe-apply.json'
+  if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks; Get-Content -Raw -LiteralPath $p; exit 0 }
+}
+[Console]::Error.WriteLine('no recipe-apply.json'); exit 3
+'''
+# a web server outside the SSH session (WMI starts it, so closing the connection does not end it)
+WINDOWS_START_APP = r'''
+$d = Join-Path $env:TEMP ('rcp-app' + $req.port)
+New-Item -ItemType Directory -Force -Path $d | Out-Null
+[IO.File]::WriteAllText((Join-Path $d 'index.html'), [string]$req.marker)
+$python = (Get-Command python -ErrorAction Stop).Source
+$line = '"' + $python + '" -m http.server ' + $req.port + ' --bind 127.0.0.1 --directory "' + $d + '"'
+$made = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $line }
+if ($made.ReturnValue -ne 0) { throw ('could not start the web server: ' + $made.ReturnValue) }
+Start-Sleep -Seconds 3
+(Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 ('http://127.0.0.1:' + $req.port + '/')).Content
+'PID ' + $made.ProcessId
+'''
 WINDOWS_PB = r"Get-ChildItem -Path 'C:\Program Files\Paperboat\users\*\bin\pb.exe' | Select-Object -First 1 | ForEach-Object FullName"
 
 
@@ -211,6 +267,21 @@ class Windows:
 
     def drop_hooks(self):
         pass
+
+    def apply_record(self):
+        code, out, err = self.device.snippet('recipe apply record', WINDOWS_APPLY_RECORD, 90)
+        return parse_record(Result(code, out.decode(errors='replace').replace('\r\n', '\n'), err.decode(errors='replace')), 'windows')
+
+    def start_app(self, port, marker):
+        code, out, err = self.device.snippet('local app', WINDOWS_START_APP, 90, port=port, marker=marker)
+        text = out.decode(errors='replace')
+        found = re.search(r'^PID (\d+)\s*$', text, re.M)
+        if code or not found:
+            raise AssertionError('the local app on port %d did not start: %s' % (port, Result(code, text, err.decode(errors='replace')).tail()))
+        return int(found.group(1))
+
+    def stop_app(self, pid):
+        self.device.ps('stop the local app', 'Stop-Process -Id ([int]$req.pid) -Force -ErrorAction SilentlyContinue', pid=pid, timeout=60)
 
     def one_liner(self, url, variable, value, name, version=None, timeout=900):
         if variable not in VARIABLES:
