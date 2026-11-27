@@ -436,10 +436,16 @@ def await_drop(terminal, digest, remote_hash, bound=DROP_BOUND):
     unanswered = None
     arrived = False
     while True:
-        pump(terminal, 2)
+        closed = None
+        try:
+            pump(terminal, 2)
+        except RuntimeError as error:  # pb may print its notice and exit: the notice is the reason
+            closed = error
         refused = drop_refused(terminal.output)
         if refused:
             raise RuntimeError('the dropped file was not uploaded: ' + refused)
+        if closed:
+            raise closed
         if arrived:  # one more look at the terminal after the file appeared
             return
         try:

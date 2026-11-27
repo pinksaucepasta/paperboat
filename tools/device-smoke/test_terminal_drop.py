@@ -48,6 +48,11 @@ class Drop(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'not on the target within 0 s'):
             tl.await_drop(self.terminal(), 'abc', lambda: None, bound=0)
 
+    def test_the_notice_is_the_reason_when_pb_exits_right_after_it(self):
+        terminal = self.terminal('print("[paperboat] file transfer unavailable; pasting original path", flush=True)')
+        with self.assertRaisesRegex(RuntimeError, 'file transfer unavailable; pasting original path'):
+            tl.await_drop(terminal, 'abc', lambda: None, bound=20)
+
     def test_a_pb_that_exits_fails(self):
         with self.assertRaisesRegex(RuntimeError, 'terminal closed'):
             tl.await_drop(self.terminal('pass'), 'abc', lambda: None, bound=20)
