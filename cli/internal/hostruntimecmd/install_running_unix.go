@@ -397,7 +397,7 @@ var (
 var systemdRun = "/usr/bin/systemd-run"
 
 // detachedLauncher runs a Linux install, commit or rollback step as a transient systemd service (Tailscale's
-// clientupdate does the same with systemd-run --wait --pipe --collect, clientupdate.go:381). Under sudo the step was
+// clientupdate does the same with systemd-run --wait --pipe --collect, feature/clientupdate/clientupdate.go:381). Under sudo the step was
 // in sudo's terminal session: closing the terminal made sudo-rs kill it about 3 s later even with every signal
 // ignored, and killing sudo at a bound hung it up (device checks 11-27, Ubuntu sudo-rs 0.2.13). As a service of PID 1
 // it finishes whatever happens to pb, sudo or the terminal; --wait and --pipe keep its output, input and exit status
@@ -412,7 +412,7 @@ func detachedLauncher(arguments []string, invokingUID string) []string {
 	default:
 		return nil
 	}
-	if info, err := os.Stat(systemdRun); err != nil || !info.Mode().IsRegular() || !systemdRunSupported() {
+	if info, err := os.Stat(systemdRun); err != nil || !info.Mode().IsRegular() || systemctlPath() == "" || !systemdRunSupported() {
 		return nil
 	}
 	// One fixed name per step and account: a second concurrent step is refused by systemd, and pb can ask whether
@@ -425,7 +425,7 @@ func detachedUnit(operation, invokingUID string) string {
 }
 
 // systemdRunSupported reports systemd 236 or newer (--collect; --pipe is 235, --wait 232), as Tailscale checks
-// (clientupdate.go:400). Older hosts keep the plain sudo child. Tests replace it.
+// (feature/clientupdate/clientupdate.go:402). Older hosts keep the plain sudo child. Tests replace it.
 var systemdRunSupported = sync.OnceValue(func() bool {
 	out, err := exec.Command(systemdRun, "--version").Output()
 	fields := strings.Fields(string(out))
@@ -438,12 +438,22 @@ var systemdRunSupported = sync.OnceValue(func() bool {
 
 // detachedStepRunning reports whether a step's transient service is still running; tests replace it.
 var detachedStepRunning = func(unit string) bool {
+	systemctl := systemctlPath()
+	if systemctl == "" {
+		return true // cannot tell: never restore over a step that may still run (detachedLauncher requires it)
+	}
+	return exec.Command(systemctl, "is-active", "--quiet", unit).Run() == nil
+}
+
+// systemctlPath is where systemctl is (merged /usr or not), or empty: without it pb could not tell a running step,
+// so the step is not detached at all. Tests replace it.
+var systemctlPath = func() string {
 	for _, systemctl := range []string{"/usr/bin/systemctl", "/bin/systemctl"} {
-		if _, err := os.Stat(systemctl); err == nil {
-			return exec.Command(systemctl, "is-active", "--quiet", unit).Run() == nil
+		if info, err := os.Stat(systemctl); err == nil && info.Mode().IsRegular() {
+			return systemctl
 		}
 	}
-	return true // cannot tell: never restore over a step that may still run
+	return ""
 }
 
 // errStepStillRunning: pb stopped waiting (its bound, or Ctrl-C ended systemd-run) while the step's service runs on.
@@ -472,7 +482,15 @@ var privilegedInstallCommand = func(ctx context.Context, effectiveUID int, rootH
 	launcher := []string{"/usr/bin/env"}
 	if transient := detachedLauncher(arguments, invokingUID); transient != nil {
 		// The service manager runs the step, not sudo's session: see detachedLauncher.
-		launcher = append(transient, "/usr/bin/env", "HOME="+rootHome, "USER=root", "LOGNAME=root")
+		// A service has no sudo -H: name root's home itself (the caller passes it only when pb runs as root).
+		home := rootHome
+		if home == "" {
+			home = "/root"
+			if account, err := user.LookupId("0"); err == nil && account.HomeDir != "" {
+				home = account.HomeDir
+			}
+		}
+		launcher = append(transient, "/usr/bin/env", "HOME="+home, "USER=root", "LOGNAME=root")
 	}
 	if effectiveUID == 0 {
 		args = append([]string{"HOME=" + rootHome, "USER=root", "LOGNAME=root"}, args...)

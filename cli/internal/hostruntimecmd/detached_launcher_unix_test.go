@@ -28,6 +28,13 @@ func TestInstallStepsRunAsATransientServiceOnLinux(t *testing.T) {
 	previous, previousSupported := systemdRun, systemdRunSupported
 	t.Cleanup(func() { systemdRun, systemdRunSupported = previous, previousSupported })
 	systemdRun, systemdRunSupported = fake, func() bool { return true }
+	// pb not running as root passes no root home: the service still gets root's (device check 11-27: HOME was empty).
+	if runtime.GOOS == "linux" {
+		command := privilegedInstallCommand(context.Background(), 1000, "", "1000", "/usr/local/bin/pb", "__runtime-service", "rollback-supplied")
+		if slices.Contains(command.Args, "HOME=") || !slices.ContainsFunc(command.Args, func(arg string) bool { return len(arg) > len("HOME=/") && arg[:6] == "HOME=/" }) {
+			t.Fatalf("transient step without root's home: %v", command.Args)
+		}
+	}
 	for _, step := range []string{"install-supplied", "commit-supplied", "rollback-supplied", "inventory"} {
 		command := privilegedInstallCommand(context.Background(), 1000, "/root", "1000", "/usr/local/bin/pb", "__runtime-service", step)
 		detached := slices.Contains(command.Args, fake)
