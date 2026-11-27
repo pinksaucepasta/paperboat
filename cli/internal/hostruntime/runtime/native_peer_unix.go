@@ -245,7 +245,9 @@ func transientNativePeerStart(err error) bool {
 	// does: install and recovery need its control pipe, and a carrier that exited left the machine impossible to
 	// reinstall.
 	if errors.Is(err, errNativePeerPending) || errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, enrollment.ErrRenewalRefused) {
+		errors.Is(err, enrollment.ErrRenewalRefused) ||
+		// A request held by the local backoff after a 401 carries the same denial without being an *APIError.
+		errors.Is(err, clientapi.ErrUnauthenticated) {
 		return true
 	}
 	var response *clientapi.APIError
