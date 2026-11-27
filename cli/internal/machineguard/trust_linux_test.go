@@ -518,3 +518,34 @@ func TestLinuxUserTrustFinishesAnInstallCutOffBeforeItsTrust(t *testing.T) {
 		}
 	}
 }
+
+// An earlier install whose guard state was deleted (a manual cleanup, a test run)
+// leaves its Paperboat root at the same owned trust path. That orphan root is
+// replaced, so pb install recovers; any other content is still preserved.
+func TestLinuxSystemTrustReplacesOrphanedPaperboatRoot(t *testing.T) {
+	_, _, oldPEM := renewalFixture(t, 365)
+	_, _, rootPEM := renewalFixture(t, 365)
+	root, err := parseLocalTrustRoot(rootPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	trust := filepath.Join(directory, "trust")
+	bundle := filepath.Join(directory, "bundle.pem")
+	if err = os.Mkdir(trust, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := linuxOwnedTrustPath(trust, localTrustDomain(root))
+	if err = os.WriteFile(path, oldPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, string, ...string) ([]byte, error) {
+		return nil, os.WriteFile(bundle, rootPEM, 0644)
+	}
+	if err = installLinuxSystemTrustAt(t.Context(), trust, bundle, root, rootPEM, uint32(os.Geteuid()), runner); err != nil {
+		t.Fatalf("orphaned Paperboat root blocked install: %v", err)
+	}
+	if contents, _ := os.ReadFile(path); !bytes.Equal(contents, rootPEM) {
+		t.Fatal("orphaned Paperboat root was not replaced")
+	}
+}

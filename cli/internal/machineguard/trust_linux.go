@@ -64,11 +64,18 @@ func installLinuxSystemTrustAt(ctx context.Context, trustDirectory, trustBundle 
 }
 
 func writeLinuxSystemTrustFile(path string, certificatePEM []byte, requiredUID uint32) error {
+	replace := false
 	if existing, err := readRootOwnedTrustFile(path, requiredUID); err == nil {
 		if bytes.Equal(existing, certificatePEM) {
 			return nil
 		}
-		return errors.New("Paperboat Linux trust path contains foreign material; preserved")
+		// An earlier install whose guard state was deleted leaves its own root here.
+		// Only a constrained Paperboat root for the same domain is replaced: that
+		// narrows trust to the active root. Anything else is preserved.
+		if !orphanedPaperboatRoot(existing, certificatePEM) {
+			return fmt.Errorf("Paperboat Linux trust path contains foreign material; preserved: remove %s if it is not yours, then run pb install again", path)
+		}
+		replace = true
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -87,6 +94,13 @@ func writeLinuxSystemTrustFile(path string, certificatePEM []byte, requiredUID u
 	err = errors.Join(err, temporary.Close())
 	if err != nil {
 		return err
+	}
+	if replace {
+		//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=exclusive-link-trust-publication
+		if err = os.Rename(temporary.Name(), path); err != nil {
+			return fmt.Errorf("replace orphaned Paperboat Linux trust certificate: %w", err)
+		}
+		return nil
 	}
 	if err = os.Link(temporary.Name(), path); err != nil {
 		if existing, readErr := readRootOwnedTrustFile(path, requiredUID); readErr == nil && bytes.Equal(existing, certificatePEM) {
@@ -311,4 +325,15 @@ func (out *boundedNSSOutput) Write(data []byte) (int, error) {
 		return 0, errors.New("browser certificate command output exceeds limit")
 	}
 	return out.bytes.Write(data)
+}
+
+// orphanedPaperboatRoot reports whether existing is a constrained Paperboat local
+// root for the same browser domain as active, so replacing it only drops trust.
+func orphanedPaperboatRoot(existing, activePEM []byte) bool {
+	old, err := parseLocalTrustRoot(existing)
+	if err != nil {
+		return false
+	}
+	active, err := parseLocalTrustRoot(activePEM)
+	return err == nil && localTrustDomain(old) == localTrustDomain(active)
 }
