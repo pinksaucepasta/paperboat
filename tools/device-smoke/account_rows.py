@@ -36,7 +36,8 @@ TOKEN_PLATFORMS = ('linux', 'macos', 'windows')
 PORT_PLATFORMS = ('container', 'linux', 'macos', 'windows')
 CHECKS = ('env-vault-reset-locked:container',
           'held-web-ports:container',
-          'env-vault-reset-locked:windows',)
+          'env-vault-reset-locked:windows',
+          'env-vault-reset-locked:macos',)
 BUSY = 'another program is using port 80'  # in both of pb doctor's busy-port titles
 DARWIN_ANCHOR = 'com.apple/000.paperboat-machineguard'
 GUARD = 'paperboat-machineguard.service'
@@ -266,7 +267,7 @@ class WebServer:
     """The web server that holds the machine's ports: only the processes it started are ever stopped."""
 
     def __init__(self, device):
-        self.device, self.pids, self.iis = device, [], False
+        self.device, self.pids, self.iis = device, [], None  # iis: the startup type it had before we started it
 
     def start(self, marker, secure, plain, bind='0.0.0.0'):
         """Linux and macOS: TLS on bind:secure and a redirect on bind:plain (0: any free port). Returns the two ports."""
@@ -289,15 +290,19 @@ class WebServer:
         return found['ports']
 
     def start_iis(self):
-        """Windows: IIS takes :80 through HTTP.sys. Only a stopped IIS is started, and only that one is stopped again."""
-        self.device.device.ps('start IIS', "if ((Get-Service W3SVC -ErrorAction Stop).Status -eq 'Running') { throw 'IIS already runs here' }; "
-                              'Start-Service W3SVC', timeout=180)
-        self.iis = True
+        """Windows: IIS takes :80 through HTTP.sys. Only a stopped IIS is started (a disabled one is enabled for the check); stop()
+        stops that one and gives it its startup type back."""
+        _, said = self.device.device.ps('look at IIS', "$s = Get-Service W3SVC -ErrorAction Stop; '{0} {1}' -f $s.Status, $s.StartType", timeout=90)
+        status, startup = said.split()[-2:]
+        need(status == 'Stopped' and startup in ('Automatic', 'Manual', 'Disabled'), 'IIS is not a stopped service here: %s %s' % (status, startup))
+        self.iis = startup
+        self.device.device.ps('start IIS', "if ($req.startup -eq 'Disabled') { Set-Service W3SVC -StartupType Manual }; Start-Service W3SVC", timeout=180, startup=startup)
 
     def stop(self):
         if self.iis:
-            self.device.device.ps('stop IIS', 'Stop-Service W3SVC -Force', timeout=180)
-            self.iis = False
+            self.device.device.ps('stop IIS', 'Stop-Service W3SVC -Force -ErrorAction SilentlyContinue; Set-Service W3SVC -StartupType $req.startup',
+                                  timeout=180, startup=self.iis)
+            self.iis = None
         while self.pids:
             self.device.sh('sudo -n kill %d 2>/dev/null; true' % self.pids.pop(), timeout=60)
 
@@ -359,7 +364,8 @@ def check_held_ports(check, platform):
                              for port, to in re.findall(r'port = (443|80|https|http) -> \S+ port (\d+)', rules)]
             need({port for port, _ in redirects} == {'443', '80'}, 'no redirect for both held ports: %s in %s' % (redirects, rules[-300:]))
             for port in (443, 80):
-                need(re.search(r'\b%d\b' % web.pids[-1], listening(device, port)), 'the web server does not hold port %d' % port)
+                said = listening(device, port)
+                need(re.search(r'(?:pid=|^p)%d\b' % web.pids[-1], said, re.M), 'the web server (PID %d) does not hold port %d: %s' % (web.pids[-1], port, said[-200:]))
         with steps.step('doctor-healthy-while-held'):
             time.sleep(20)  # past a reconcile
             wait_doctor(device, 'pb doctor healthy with the gateway redirected', True, seconds=120)
