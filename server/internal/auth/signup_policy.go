@@ -8,8 +8,20 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/emailpolicy"
 )
 
-// Resolve verified provider identities before account creation. The canonical
-// lock makes concurrent first-use aliases create one account and two sessions.
+// EmailAlreadyRegisteredError refuses a new provider identity whose canonical
+// address (lowercased, first +tag stripped) already belongs to an account
+// (F13-07). A +tag can be a different mailbox, so accounts are never merged by
+// alias: the second sign-up, in either order, is refused.
+type EmailAlreadyRegisteredError struct{ Canonical string }
+
+func (e *EmailAlreadyRegisteredError) Error() string {
+	return "An account for " + e.Canonical + " already exists. Sign in with that address."
+}
+
+// Resolve verified provider identities before account creation. A known
+// provider subject signs into its account; a new subject gets a new account
+// unless its canonical address is taken, which is refused. The canonical lock
+// makes concurrent first-use aliases create at most one account.
 func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile) (string, string, error) {
 	canonical, err := emailpolicy.Normalize(ctx, tx, profile.Email)
 	if err != nil {
@@ -36,8 +48,5 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 	if err != nil {
 		return "", "", err
 	}
-	if !profile.EmailVerified {
-		return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
-	}
-	return canonical, id, nil
+	return "", "", &EmailAlreadyRegisteredError{Canonical: canonical}
 }
