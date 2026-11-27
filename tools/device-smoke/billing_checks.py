@@ -2,7 +2,8 @@
 """The billing and plan rows of fixture_checks.py. Every check makes its own throwaway account(s) (fresh_account.mjs), pays only on Stripe's
 TEST-MODE pages with the test card, and deletes the account at the end (which cancels its subscription), on every exit path.
 
-  billing-console           F13-04C: Pro monthly bought on the live console's Checkout reaches the paid overview through the test webhook.
+  billing-console           F13-04C: Pro monthly bought on the live console's Checkout reaches the paid overview through the test webhook, after
+                            a first Checkout was left unpaid (L38: the next opens, and the abandoned one can no longer be paid).
                             F13-06: the plan screen and the allowance card (relay and edge series, Direct/Relay/Edge cards) per plan, Free and Pro.
                             F13-04B: switching monthly -> yearly -> monthly in Stripe's portal keeps the bandwidth window to the second,
                             the renewal day and time, the allowance and the bytes already spent (seeded by workspace_usage.py).
@@ -12,7 +13,8 @@ TEST-MODE pages with the test card, and deletes the account at the end (which ca
   plus-alias-signup         F13-07: plus_alias_signup.mjs.
   billing-team-lifecycle    F13-04, the transitions that need no clock: a team bought on the console's Checkout (upgrade), a seat added mid-cycle
                             (charged at once, one more paid invoice, billing date unchanged) and removed (nothing charged, date unchanged), the
-                            plan cancelled and kept in Stripe's portal. Not here: failed payment -> grace -> suspension -> recovery (needs a
+                            plan cancelled and kept in Stripe's portal, the removal surviving it (L37) and shown in the Seats section
+                            before, during and after the cancellation (L38). Not here: failed payment -> grace -> suspension -> recovery (needs a
                             Stripe test clock and the test API key, which only the server holds).
 
 Each prints its failed steps in the receipt and keeps every step in the results directory. A step that fails never stops the others.
@@ -317,12 +319,14 @@ def billing_team_lifecycle(m):
     cancelled = api(m, state, path)
     steps.add('F13-04', 'cancelling ends the plan at the billing date, not now', cancelled['cancel_at_period_end'] and cancelled['state'] == 'active' and cancelled['period_end'] == bought['period_end'],
               'state=%s cancel_at_period_end=%s ends %s' % (cancelled['state'], cancelled['cancel_at_period_end'], cancelled['period_end']))
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'seat-note', '3', '2', 'cancelling', **on_team)
     browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'portal', 'keep', **on_team)
+    browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'seat-note', '3', '2', 'renewing', **on_team)
     kept = api(m, state, path)
     steps.add('F13-04', 'keeping the plan renews it on the same date', not kept['cancel_at_period_end'] and kept['state'] == 'active' and kept['period_end'] == bought['period_end'],
               'state=%s cancel_at_period_end=%s renews %s' % (kept['state'], kept['cancel_at_period_end'], kept['period_end']))
     # the seat removed above was never given back by the owner: undoing the cancellation must not undo the removal
-    steps.add('F13-04', 'keeping the plan keeps the scheduled seat removal: 2 seats from the billing date', removal_kept(kept, bought['period_end']),
+    steps.add('F13-04', 'L37: keeping the plan keeps the scheduled seat removal: 2 seats from the billing date', removal_kept(kept, bought['period_end']),
               'scheduled_seats=%s at %s, seats now %s' % (kept.get('scheduled_seats'), kept.get('scheduled_seats_at'), kept.get('seats_bought')))
     return steps.result('billing-team-lifecycle', 'team bought on console Checkout, seat added (invoiced at once) and removed on a fixed billing date, cancelled and kept')
 

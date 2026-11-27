@@ -175,6 +175,23 @@ const stuck = await keepTyped({ waitForTimeout: async () => {} }, async () => ({
 console.log(JSON.stringify([writes.filter((w) => w === "Card number").length, sameValue("12 / 34", "1234"), sameValue("4242 4242", "42424243"), stuck.includes("did not keep")]))''')
         self.assertEqual(got, [2, True, False, True])
 
+    def test_the_scheduled_removal_line_is_exact(self):
+        got = self.node('''
+import { seatNote, expiredCheckout, sessionOf } from "./billing_console.mjs"
+const page = (date, note) => `Plan\\n${date}\\nDec 27, 2026\\nSeats\\n3 seats\\n1 used · 2 free\\n${note}`
+const ok = (text, cancelling) => seatNote(text, 3, 2, cancelling)[0]
+console.log(JSON.stringify([
+  ok(page("Renews", "3 seats until Dec 27, 2026, then 2."), false),
+  ok(page("Ends", "3 seats until Dec 27, 2026, then 2 if you keep the plan."), true),
+  ok(page("Ends", "3 seats until Dec 27, 2026, then 2."), true),
+  ok(page("Renews", "3 seats until Dec 27, 2026, then 2 if you keep the plan."), false),
+  ok(page("Renews", "3 seats until Dec 28, 2026, then 2."), false),
+  ok(page("Renews", "3 seats until Dec 27, 2026, then 3."), false),
+  ok(page("Renews", ""), false),
+  [expiredCheckout("This checkout session has expired."), expiredCheckout("Subscribe to Paperboat Pro Pay with card")],
+  [sessionOf("https://checkout.stripe.com/c/pay/cs_test_aB1#frag"), sessionOf("https://checkout.stripe.com/") ?? null]]))''')
+        self.assertEqual(got, [True, True, False, False, False, False, False, [True, False], ['cs_test_aB1', None]])
+
     def test_every_paid_invoice_below_the_history_heading_counts(self):
         got = self.node('''
 import { historyOf, paidRows, amount } from "./billing_console.mjs"

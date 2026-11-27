@@ -2,7 +2,9 @@
 // usage: ORIGIN=<console> STATE=<storage state of a THROWAWAY account> PW_CHROMIUM=<chromium> [PW_MODULE=...] node billing_console.mjs
 //   card free|pro|throttled     F13-06: the plan page and the usage page's allowance card agree with the billing and usage APIs;
 //                               console/scripts/check-usage-paths.js (Direct/Relay/Edge cards) runs on the same page
-//   checkout                    F13-04C: Upgrade (Pro, monthly) on the console, Stripe test card, back to the paid overview
+//   checkout                    F13-04C: Upgrade (Pro, monthly) on the console, Stripe test card, back to the paid overview. First a
+//                               Checkout is left unpaid (L38): the next must open under a new operation ID and end the abandoned one
+//   seat-note BOUGHT THEN cancelling|renewing   L38: the Seats section's line about a scheduled removal
 //   portal month|year           Manage billing: switch the billing interval in Stripe's portal, back to the console
 //   portal cancel|keep          Cancel plan / Keep plan in Stripe's portal, back to the console
 //   team-checkout TEAM SEATS    Create team (monthly) on the console, pay on test-mode Checkout, the team's paid overview
@@ -13,7 +15,7 @@
 // Stripe pages are refused unless they are test-mode ones (stripe_pay.mjs; the portal: a test_ session AND the "Sandbox" badge).
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { payTestCheckout } from "./stripe_pay.mjs"
+import { payTestCheckout, testCheckoutURL } from "./stripe_pay.mjs"
 
 export function formatBytes(bytes) {
   const units = ["B", "KB", "MB", "GB", "TB", "PB"]
@@ -31,6 +33,19 @@ export function parseBytes(text) {
 
 // A shown amount matches the API's: the page rounds to three digits and reads a moment apart from the check.
 export const near = (shown, bytes) => Math.abs(parseBytes(shown) - bytes) <= Math.max(0.05 * bytes, 1000)
+
+export const sessionOf = (url) => /cs_test_[A-Za-z0-9]+/.exec(url ?? "")?.[0]
+// What Stripe says on a Checkout session that was ended; any other wording fails the step and is quoted in its detail.
+export const expiredCheckout = (text) => /expired|timed out|no longer (active|available|valid)|not active|all done|could not be found/i.test(text)
+
+// The Seats section's line about a scheduled removal, dated with the billing date the same page shows: [ok, what it shows].
+export function seatNote(text, bought, then, cancelling) {
+  const flat = text.replace(/\s+/g, " ")
+  const date = /(?:Renews|Ends) (\w{3} \d{1,2}, \d{4})/.exec(flat)?.[1]
+  const note = /(\d+) seats? until (\w{3} \d{1,2}, \d{4}), then (\d+)( if you keep the plan)?\./.exec(flat)
+  const ok = Boolean(date && note) && Number(note[1]) === bought && note[2] === date && Number(note[3]) === then && Boolean(note[4]) === cancelling
+  return [ok, `${note?.[0] ?? `no such line; Seats shows: ${/Seats (.{0,90})/.exec(flat)?.[1] ?? "nothing"}`} (billing date ${date})`]
+}
 
 // Everything below the portal's "Invoice history" heading, and the invoices in it marked Paid.
 export const historyOf = (text) => text.split(/invoice history/i).slice(1).join(" ")
@@ -79,7 +94,7 @@ export function cardRows(text, throttledAttr, billing, hosted) {
 export const testPortalURL = (url) => /^https:\/\/billing\.stripe\.com\/p\/session(\/[^?#]*)?\?([^#]*&)?secret=test_/.test(url ?? "")
 
 async function main(argv) {
-  const [command, argument, extra] = argv
+  const [command, argument, extra, last] = argv
   const team = process.env.BILLING_TEAM ?? ""
   const origin = process.env.ORIGIN
   const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
@@ -154,18 +169,60 @@ async function main(argv) {
     if (!found?.length) add("check-usage-paths ran", false, "no steps")
   }
 
-  async function checkout() {
+  // The billing page, freshly loaded (so a new operation ID), with the purchase terms ready to tick.
+  async function upgradeOffer() {
     await openPlan()
     const consent = main_().getByRole("checkbox").first()
     await consent.waitFor({ timeout: 60000 })
     for (let i = 0; i < 30 && !(await consent.isEnabled()); i++) await page.waitForTimeout(1000)
-    const offer = main_().getByRole("button", { name: "Upgrade", exact: true })
-    add("Upgrade is disabled until the purchase terms are ticked", await offer.isDisabled())
-    await consent.click()
+    return { consent, offer: main_().getByRole("button", { name: "Upgrade", exact: true }) }
+  }
+  const atStripe = () => page.waitForURL((u) => u.hostname === "checkout.stripe.com", { timeout: 90000, waitUntil: "commit" })
+
+  // L38: a Checkout left unpaid must not block the next one, and must not stay payable beside it. If the next one is refused, the
+  // abandoned session (still open) is paid instead so the rest of the row runs; the failed step stays failed.
+  async function abandonThenUpgrade() {
+    const operations = []
+    let answered = ""
+    const isCheckout = (r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/v1/billing/workspaces/personal/checkout"
+    page.on("request", (r) => isCheckout(r) && operations.push(r.headers()["idempotency-key"]))
+    page.on("response", (r) => isCheckout(r.request()) && (answered = `HTTP ${r.status()}`))
+    const first = await upgradeOffer()
+    add("Upgrade is disabled until the purchase terms are ticked", await first.offer.isDisabled())
+    await first.consent.click()
     add("the offered plan is Pro at $8/month", /Pro\s+\$8\/month/.test(await main_().innerText()))
-    await offer.click()
-    await page.waitForURL((u) => u.hostname === "checkout.stripe.com", { timeout: 90000, waitUntil: "commit" })
-    add("Upgrade opens a Stripe test-mode Checkout", /\/pay\/cs_test_/.test(page.url()))
+    await first.offer.click()
+    await atStripe()
+    const abandoned = page.url()
+    add("Upgrade opens a Stripe test-mode Checkout", testCheckoutURL(abandoned))
+    const again = await upgradeOffer() // the first Checkout is left unpaid
+    await again.consent.click()
+    await again.offer.click()
+    const opened = await atStripe().then(() => true, () => false)
+    const fresh = opened && testCheckoutURL(page.url()) && sessionOf(page.url()) !== sessionOf(abandoned)
+    const refusal = opened ? "" : (/[^.\n]*(billing operation is pending|operation ID)[^\n]*/i.exec(await main_().innerText().catch(() => ""))?.[0] ?? "")
+    add("L38: with a Checkout left unpaid, a new one under a new operation ID opens its own Checkout",
+      fresh && operations.length === 2 && Boolean(operations[0]) && operations[0] !== operations[1],
+      `${operations.length} requests, ${new Set(operations).size} operation IDs, last ${answered}, new session ${fresh} ${refusal}`)
+    if (!fresh) {
+      await page.goto(abandoned, { waitUntil: "domcontentloaded", timeout: 60000 })
+      return
+    }
+    const old = await context.newPage()
+    await old.goto(abandoned, { waitUntil: "domcontentloaded", timeout: 60000 })
+    let shown = ""
+    let payable = false
+    for (let i = 0; i < 60 && !payable && !expiredCheckout(shown); i++) {
+      await old.waitForTimeout(1000)
+      shown = await old.locator("body").innerText().catch(() => "")
+      for (const frame of old.frames()) payable ||= (await frame.getByPlaceholder("Card number", { exact: true }).count().catch(() => 0)) > 0
+    }
+    add("L38: the abandoned Checkout can no longer be paid", !payable && expiredCheckout(shown), `card form shown: ${payable}; page: ${shown.replace(/\s+/g, " ").slice(0, 150)}`)
+    await old.close()
+  }
+
+  async function checkout() {
+    await abandonThenUpgrade()
     await payTestCheckout(page) // refuses anything but a sandbox session
     await page.waitForURL((u) => u.href.startsWith(origin + "/billing"), { timeout: 180000, waitUntil: "commit" })
     add("Checkout returns to the console's billing page", true)
@@ -257,7 +314,18 @@ async function main(argv) {
       await openPlan()
       const shown = await settled(main_(), (t) => new RegExp(`${wanted} seats?`).test(t))
       add("the billing page shows the new seat count", new RegExp(`${wanted} seats?`).test(shown))
+    } else {
+      // what the buyer is looking at when the removal lands, before any reload
+      await expectNote("L38: right after Remove seats, without a reload", before.seats_bought, wanted, false)
+      await openPlan()
+      await expectNote("L38: after a reload", before.seats_bought, wanted, false)
     }
+  }
+
+  async function expectNote(when, bought, then, cancelling) {
+    const text = await settled(main_(), (t) => seatNote(t, bought, then, cancelling)[0])
+    const [ok, detail] = seatNote(text, bought, then, cancelling)
+    add(`${when}, the Seats section reads "${bought} seats until <billing date>, then ${then}${cancelling ? " if you keep the plan" : ""}."`, ok, detail)
   }
 
   async function invoices() {
@@ -308,7 +376,10 @@ async function main(argv) {
     else if (command === "team-checkout") await teamCheckout(argument, Number(extra))
     else if (command === "seats") await seats(Number(argument))
     else if (command === "invoices") await invoices()
-    else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | invoices")
+    else if (command === "seat-note") {
+      await openPlan()
+      await expectNote(`L38: ${last}`, Number(argument), Number(extra), last === "cancelling")
+    } else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | seat-note BOUGHT THEN cancelling|renewing | invoices")
   } catch (error) {
     const where = page.url().split("?")[0].replace(origin, "").slice(0, 60)
     const why = String(error?.message ?? error).split("\n")[0].replace(/(https?:\/\/[^\s?"']+)\?[^\s"']*/g, "$1").slice(0, 160)
