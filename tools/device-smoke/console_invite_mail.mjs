@@ -44,8 +44,12 @@ const api = async (method, path, data) => {
   return { status: reply.status(), data: body?.data, code: body?.error?.code ?? body?.code }
 }
 const teamPath = `teams/${encodeURIComponent(team)}`
-const pending = async (email) =>
-  ((await api("GET", `${teamPath}/invitations?state=pending&limit=200`)).data?.items ?? []).filter((i) => i.email === email)
+// A failed listing throws: it never reads as "no pending invitation".
+const pending = async (email) => {
+  const reply = await api("GET", `${teamPath}/invitations?state=pending&limit=200`)
+  if (reply.status !== 200 || !Array.isArray(reply.data?.items)) throw new Error(`pending invitations not listed: HTTP ${reply.status} ${reply.code ?? ""}`)
+  return reply.data.items.filter((i) => i.email === email)
+}
 // The row the server shows for the invitation once its outbox says the provider accepted the mail.
 const sent = async (email, after = "") => {
   for (let i = 0; i < 30; i++) {
@@ -130,6 +134,9 @@ async function run() {
   await mailPage.goto(link.href, { timeout: 120000 })
   const asked = await mailPage.getByRole("link", { name: "Sign up" }).waitFor({ timeout: 120000 }).then(() => true, () => false)
   must(asked, "the link asks a signed-out visitor to sign in", new URL(mailPage.url()).host)
+  // From here the account may exist: with a state file, cleanup deletes it (fresh_account.mjs signs in again when the state
+  // holds no session) or reports that it could not.
+  write("state.json", JSON.stringify(await guest.storageState()))
   await signUpForm(mailPage, inbox, seen)
   await mailPage.waitForURL((u) => u.origin === mailOrigin && !u.pathname.startsWith("/auth/"), { waitUntil: "domcontentloaded", timeout: 420000 })
   write("state.json", JSON.stringify(await guest.storageState()))

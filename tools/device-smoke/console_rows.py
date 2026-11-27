@@ -4,8 +4,9 @@
                         (Team Security and Directory against the server) and check-audit-streams.js (Activity streaming) on
                         the smoke team as its owner (SMOKE_OPERATOR_STATE, only read). All three always run.
   console-signout-switch  F2-07: a session signed in for this run only (console_session.mjs, the owner's password file):
-                        check-machines-paging.js and check-machines-paging-stub.js, then console_signout_switch.mjs (switch
-                        Personal <-> team, sign out, old cookies refused, the shared operator session still works).
+                        check-machines-paging.js, then console_signout_switch.mjs (the real table past one page when the account
+                        has over 50 machines, switch Personal <-> team, sign out, old cookies refused, the shared operator
+                        session still works).
   console-invite-mail   F12-02-mail-live: console_invite_mail.mjs invites a disposable inbox of this run to the smoke team,
                         reads the mail, resends from the console, opens the link signed out and signs up; the invitation is
                         cancelled by its id and the throwaway account deleted.
@@ -22,10 +23,11 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parents[1] / 'console' / 'scripts'
 STEP = re.compile(r'^(PASS|FAIL|SKIP) {2}(.*)$')
+ALLOWED_SKIPS = ('offline machine state',)  # not part of a row's cell; every other skipped step is a failure
 EMAIL = re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+')
 
 ADMIN_CHECKS = (('check-f19.js', '/team'), ('check-f19-security.js', '/team'), ('check-audit-streams.js', '/activity'))
-PAGING_CHECKS = (('check-machines-paging.js', '/'), ('check-machines-paging-stub.js', '/'))
+PAGING_CHECKS = (('check-machines-paging.js', '/'),)
 
 
 def fx():
@@ -42,7 +44,7 @@ def steps(label, code, output):
     failed step, is itself a failure: silence never passes."""
     seen = [m.groups() for m in (STEP.match(line) for line in output.splitlines()) if m]
     passed = sum(1 for state, _ in seen if state == 'PASS')
-    failed = ['%s: %s' % (label, text) for state, text in seen if state == 'FAIL']
+    failed = ['%s: %s' % (label, text) for state, text in seen if state == 'FAIL' or (state == 'SKIP' and not text.startswith(ALLOWED_SKIPS))]
     if not failed and (code or not passed):
         failed = ['%s: exit %d with %d passed steps: %s' % (label, code, passed, ' '.join(output.split())[-200:])]
     return passed, failed

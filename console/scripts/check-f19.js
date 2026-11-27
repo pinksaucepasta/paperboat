@@ -89,6 +89,7 @@
       if (url.includes("/api/v1/activity?")) seen.push(url)
       return realFetch(input, init)
     }
+    let remade = false // a choice made again after the shell swap closed its menu
     try {
       // Choose right after arriving, on the static shell the server page is about to replace (a client navigation shows the
       // shell first): the filter must live through that swap. Export (owner only) shows once the workspace role is known.
@@ -104,9 +105,11 @@
         const find = () => [...document.querySelectorAll("[role=menuitemradio],[role=menuitem],[role=option]")].find((i) => i.textContent.trim() === wanted)
         const item = await until(() => find() ?? (!trigger.isConnected && "replaced"), 5000)
         if (item === "replaced") {
+          if (remade) return false
           // The server page replaced the shell under an open menu and the menu went with it: its own failed step, then the
           // choice is made again on the settled page, so the filter and export steps below are still checked.
           pass("a filter menu opened on arrival stays open when the server page replaces the shell", false, current)
+          remade = true
           await until(() => !document.querySelector(".shell-delay"), 30000)
           return choose(current, wanted)
         }
@@ -118,11 +121,13 @@
       pass("Last 7 days can be chosen", await choose("Any time", "Last 7 days"))
       // The server page has replaced the shell once nothing is hidden behind the shell delay and no skeleton is left.
       await until(() => !document.querySelector(".shell-delay") && !main().querySelector('[data-slot="skeleton"]'), 30000)
-      pass(
-        "the filter chosen on arrival survives the server page replacing the shell",
-        [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === "Last 7 days") && /[?&]period=week/.test(location.search),
-        location.search,
-      )
+      // Not testable when the choice had to be made again on the settled page (that run already has its failed step).
+      if (!remade)
+        pass(
+          "the filter chosen on arrival survives the server page replacing the shell",
+          [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === "Last 7 days") && /[?&]period=week/.test(location.search),
+          location.search,
+        )
       pass("the list asks the server for the period", seen.some((url) => /[?&]since=/.test(url)), seen.at(-1) ?? "")
       pass("Only denied can be chosen", await choose("All results", "Only denied"))
       pass("the list asks for denied events only", seen.some((url) => /result=denied/.test(url)), seen.at(-1) ?? "")

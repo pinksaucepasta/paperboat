@@ -47,6 +47,39 @@ async function signOut() {
   await page.getByRole("menuitem", { name: "Sign out" }).click({ timeout: 15000 })
 }
 
+// The real table past one page (check-machines-paging.js reads only the first): Next, ?page=2, Previous. Nothing is stubbed.
+async function paging() {
+  const total = (await (await context.request.get(`${origin}/api/v1/machines/summary?workspace=personal`)).json()).data.total
+  if (total <= 50) return console.log(`INFO  paging not exercised: the account's ${total} machines fit one page`)
+  const table = () =>
+    page.evaluate(() => ({
+      range: document.querySelector("[data-list-range]")?.textContent.trim() ?? "",
+      names: [...document.querySelectorAll("#machines-table tbody tr")].map((row) => row.cells[0]?.innerText.trim()),
+      page: new URL(location.href).searchParams.get("page") ?? "1",
+    }))
+  const reach = async (range, rows, number) => {
+    await until(async () => {
+      const now = await table()
+      return now.range === range && now.names.length === rows && now.page === number
+    })
+    return table()
+  }
+  const second = Math.min(50, total - 50)
+  const first = await reach(`1–50 of ${total}`, 50, "1")
+  log(first.range === `1–50 of ${total}` && first.names.length === 50, "the machine table's first page holds 50", `${first.range}, ${first.names.length} rows`)
+  const press = (name) => page.locator("#machines-table").getByRole("button", { name, exact: true }).click({ timeout: 15000 })
+  await press("Next")
+  const next = await reach(`51–${50 + second} of ${total}`, second, "2")
+  log(
+    next.range === `51–${50 + second} of ${total}` && next.names.length === second && next.page === "2" && !next.names.some((name) => first.names.includes(name)),
+    "Next shows the second page's other machines",
+    `${next.range}, ${next.names.length} rows, ?page=${next.page}`,
+  )
+  await press("Previous")
+  const back = await reach(`1–50 of ${total}`, 50, "1")
+  log(back.range === `1–50 of ${total}` && back.names.length === 50, "Previous goes back to the first page", back.range)
+}
+
 async function run() {
   log((await me(context)) === 200, "the fresh session is signed in")
   const listed = (await (await context.request.get(`${origin}/api/v1/workspaces`)).json()).data?.items ?? []
@@ -72,7 +105,10 @@ async function run() {
     // A workspace without machines draws no card.
     const ok = await until(async () => {
       const got = await card()
-      return got === expected || (expected === "0/0" && got === "")
+      if (got === expected) return true
+      // No card counts only once the page has finished: nothing behind the shell delay, no skeleton left.
+      const settled = await page.evaluate(() => /Machines/.test(document.body.innerText) && !document.querySelector(".shell-delay, main [data-slot=skeleton]"))
+      return expected === "0/0" && got === "" && settled
     })
     log(Boolean(ok), `${label}: Home counts the machines of ${workspace.kind === "team" ? "the team" : "Personal"}`, `page ${(await card()) || "no card"}, server ${expected}`)
   }
@@ -83,6 +119,7 @@ async function run() {
     return log(Boolean(ok), `the switcher changes ${from.kind} → ${to.kind}`, `workspace ${await cookie()}`)
   }
   await shows(personal, "at the start")
+  await paging()
   if (await choose(personal, wanted)) {
     await shows(wanted, "after switching to the team")
     await page.reload({ waitUntil: "networkidle", timeout: 120000 }).catch(() => {})
@@ -104,8 +141,12 @@ async function run() {
   await page.waitForLoadState("domcontentloaded").catch(() => {})
   await sleep(5000)
   await page.goto(`${origin}/machines`, { waitUntil: "networkidle", timeout: 120000 }).catch(() => {})
-  const signedOut = () => !(new URL(page.url()).host === new URL(origin).host && new URL(page.url()).pathname === "/machines")
-  log(signedOut(), "after sign-out /machines goes to sign-in", new URL(page.url()).host)
+  // The console sends a signed-out visitor to /auth/sign-in, which redirects to the provider's sign-in page with its email field.
+  const asked = await until(async () => {
+    const at = new URL(page.url())
+    return (at.host !== new URL(origin).host || at.pathname.startsWith("/auth/")) && (await page.locator('input[name="email"]').count()) > 0
+  })
+  log(Boolean(asked), "after sign-out /machines goes to sign-in", new URL(page.url()).host)
   // The server revoked it, not only the browser's cookies: the cookies saved before the sign-out are refused.
   const replay = await open(before)
   const status = await me(replay)
@@ -116,10 +157,14 @@ async function run() {
 
 try {
   if (action === "run") await run()
-  else if ((await me(context)) === 200) {
-    await signOut()
-    if (!(await until(async () => (await me(context)) === 401, 90000))) throw new Error("the run's session is still signed in")
-    console.log("the run's session was signed out")
+  else {
+    const status = await me(context) // only 401 says the session is gone
+    if (status !== 401) {
+      if (status !== 200) throw new Error(`cannot tell whether the run's session is signed in: /me HTTP ${status}`)
+      await signOut()
+      if (!(await until(async () => (await me(context)) === 401, 90000))) throw new Error("the run's session is still signed in")
+      console.log("the run's session was signed out")
+    }
   }
 } catch (error) {
   failed++

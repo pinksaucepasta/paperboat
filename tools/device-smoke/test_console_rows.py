@@ -47,6 +47,13 @@ class Verdict(unittest.TestCase):
             self.assertIn('<email>', text)
 
 
+class Skips(unittest.TestCase):
+    def test_a_skipped_step_fails_the_row_unless_allowed(self):
+        passed, failed = rows.steps('r', 0, 'PASS  one\nSKIP  permission removal closes the replay  (too short)\n')
+        self.assertEqual((1, 1), (passed, len(failed)))
+        self.assertEqual((1, []), rows.steps('r', 0, 'PASS  one\nSKIP  offline machine state  (OFFLINE_RECORDING not set)\n'))
+
+
 class Cleanup(unittest.TestCase):
     def machines(self):
         m = fixture_checks.Machines.__new__(fixture_checks.Machines)
