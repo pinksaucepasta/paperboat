@@ -501,6 +501,10 @@ func (s unixCarrierInstallation) legacyComponents() ([]*service.NativeTransactio
 // after installation replacement has already restored its files/definitions.
 // It never creates a carrier or interprets a release-version heuristic.
 func RestorePriorNativeRuntime(ctx context.Context, previous Request) error {
+	return restorePriorNativeRuntime(ctx, previous, false)
+}
+
+func restorePriorNativeRuntime(ctx context.Context, previous Request, nativeLockHeld bool) error {
 	paths := platformPaths(previous.UID)
 	installed, err := loadInstallMetadata(paths.metadata, previous.UID)
 	if err != nil {
@@ -510,7 +514,7 @@ func RestorePriorNativeRuntime(ctx context.Context, previous Request) error {
 		return ErrInvalidRequest
 	}
 	if installed.SessionOwnerGeneration != "" {
-		return Repair(ctx, installed)
+		return repairUnix(ctx, installed, nativeLockHeld)
 	}
 	if _, err := readCarrierConfigFile(ctx, paths.instance); err == nil {
 		return ErrInvalidRequest

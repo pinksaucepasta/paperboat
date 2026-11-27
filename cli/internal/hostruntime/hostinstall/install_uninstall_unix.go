@@ -84,7 +84,11 @@ func UninstallPersistedPreservingCLI(ctx context.Context, keep string) error {
 // Stop stops hostd and updated in dependency order without removing their
 // declarations. Recovery is always performed first so an interrupted prior
 // install/repair cannot be hidden by a new stop request.
-func Stop(ctx context.Context, request Request) (resultErr error) {
+func Stop(ctx context.Context, request Request) error { return stopUnix(ctx, request, false) }
+
+// stopUnix is Stop for a caller that may already hold the activation lock (rollback-supplied): flock on a second
+// descriptor of the same file conflicts even in one process, so re-locking would wait out the caller's context.
+func stopUnix(ctx context.Context, request Request, nativeLockHeld bool) (resultErr error) {
 	if os.Geteuid() != 0 {
 		return ErrNotPrivileged
 	}
@@ -92,13 +96,11 @@ func Stop(ctx context.Context, request Request) (resultErr error) {
 		return err
 	}
 	paths := platformPaths(request.UID)
-	activationLock, err := lockUnixInstallState(ctx, paths.updateState)
+	activationLock, err := lockInstallStateUnlessHeld(ctx, paths.updateState, nativeLockHeld)
 	if err != nil {
 		return err
 	}
-	if activationLock != nil {
-		defer func() { resultErr = withCleanup("stop cleanup failed", resultErr, activationLock.Close()) }()
-	}
+	defer func() { resultErr = withCleanup("stop cleanup failed", resultErr, activationLock.Close()) }()
 	if err = prepareUnixNativeRecovery(ctx, paths, request.UID, false); err != nil {
 		return err
 	}

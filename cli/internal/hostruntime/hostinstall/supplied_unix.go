@@ -222,7 +222,8 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 		if bound {
 			// The current image may already be serving. Restoring its pathname
 			// alone does not replace the running supervisor or its worker.
-			if err = Stop(ctx, request); err != nil {
+			// This process holds the activation lock (nativeLock): the nested steps must not take it again.
+			if err = stopUnix(ctx, request, true); err != nil {
 				return err
 			}
 		}
@@ -235,7 +236,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 				return err
 			}
 			restored.Executable = paths.worker
-			return RestorePriorNativeRuntime(ctx, restored)
+			return restorePriorNativeRuntime(ctx, restored, true)
 		}
 		return nil
 	default:

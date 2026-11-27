@@ -83,7 +83,10 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 // Repair re-applies both native role declarations as one transaction. The
 // lifecycle journal is recovered before any declaration or service-manager
 // mutation, so a stale/corrupt prior operation fails closed.
-func Repair(ctx context.Context, request Request) (resultErr error) {
+func Repair(ctx context.Context, request Request) error { return repairUnix(ctx, request, false) }
+
+// repairUnix is Repair for a caller that may already hold the activation lock (see stopUnix).
+func repairUnix(ctx context.Context, request Request, nativeLockHeld bool) (resultErr error) {
 	if os.Geteuid() != 0 {
 		return ErrNotPrivileged
 	}
@@ -98,13 +101,11 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 	if persisted.Source.SHA256 != request.Source.SHA256 || persisted.Source.Length != request.Source.Length || persisted.Source.Version != request.Source.Version {
 		return ErrInvalidRequest
 	}
-	activationLock, err := lockUnixInstallState(ctx, paths.updateState)
+	activationLock, err := lockInstallStateUnlessHeld(ctx, paths.updateState, nativeLockHeld)
 	if err != nil {
 		return err
 	}
-	if activationLock != nil {
-		defer func() { resultErr = withCleanup("repair cleanup failed", resultErr, activationLock.Close()) }()
-	}
+	defer func() { resultErr = withCleanup("repair cleanup failed", resultErr, activationLock.Close()) }()
 	if err = prepareUnixNativeRecovery(ctx, paths, request.UID, false); err != nil {
 		return err
 	}

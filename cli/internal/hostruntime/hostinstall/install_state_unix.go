@@ -658,6 +658,23 @@ func lockUnixInstallState(ctx context.Context, root string) (io.Closer, error) {
 	return updated.LockUnixNativeInstall(ctx, root)
 }
 
+type heldLock struct{}
+
+func (heldLock) Close() error { return nil }
+
+// lockInstallStateUnlessHeld takes the activation lock unless this process already holds it. flock on a second open
+// file description of activation.lock conflicts even within one process, so re-locking waits out the caller's context.
+func lockInstallStateUnlessHeld(ctx context.Context, root string, held bool) (io.Closer, error) {
+	if held {
+		return heldLock{}, ctx.Err()
+	}
+	lock, err := lockUnixInstallState(ctx, root)
+	if err == nil && lock == nil {
+		return heldLock{}, nil
+	}
+	return lock, err
+}
+
 func secureRootDirectory(path string, mode os.FileMode) error {
 	if err := mkdirAllExactMode(path, mode); err != nil {
 		return err
