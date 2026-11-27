@@ -366,3 +366,30 @@ func TestDispatchRejectsRedirectWithoutForwardingBearer(t *testing.T) {
 	default:
 	}
 }
+
+// L41: a TLS handshake failure (edge has no certificate for the runtime name)
+// happens before any request byte is sent, so the outcome is certain: the
+// preview must be failed, not left allocating as "uncertain".
+func TestDispatchTLSHandshakeFailureIsCertainNotUncertain(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	provider, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := false
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+	defer server.Close()
+	// Default client does not trust the test certificate: handshake fails.
+	dispatcher, err := New(Config{Resolver: &testRouteResolver{route: MachineRoute{EnvironmentID: "env_1", BaseURL: server.URL}}, Signer: provider, Issuer: "issuer", Client: &http.Client{}, Timeout: time.Second, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = dispatcher.Dispatch(context.Background(), testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || dispatchErr.Uncertain || errors.Is(err, previewv1.ErrDispatchUncertain) || dispatchErr.Code != "machine_unreachable" {
+		t.Fatalf("handshake failure = %#v", err)
+	}
+	if reached {
+		t.Fatal("request reached the server")
+	}
+}

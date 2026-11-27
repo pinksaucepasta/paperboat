@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -223,8 +225,20 @@ func (d *Dispatcher) Dispatch(ctx context.Context, request previewv1.DispatchReq
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "application/json")
 	httpRequest.Header.Set("Cache-Control", "no-store")
+	// Track whether any request byte left this process. A failure before that
+	// (dial, TLS handshake: e.g. the edge has no certificate for the runtime
+	// name) cannot have reached the machine, so the outcome is certain and the
+	// preview fails cleanly instead of staying allocating.
+	var wroteRequest atomic.Bool
+	httpRequest = httpRequest.WithContext(httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
+		WroteHeaderField: func(string, []string) { wroteRequest.Store(true) },
+		WroteHeaders:     func() { wroteRequest.Store(true) },
+	}))
 	response, err := d.client.Do(httpRequest)
 	if err != nil {
+		if !wroteRequest.Load() && !errors.Is(err, runtimeattachment.ErrRouteMoving) {
+			return previewv1.DispatchOutcome{}, &DispatchError{Code: "machine_unreachable", Retryable: true, Cause: err}
+		}
 		return previewv1.DispatchOutcome{}, classifyTransportError(requestCtx, err)
 	}
 	outcome, decodeErr := decodeOutcome(response.Body, request, response.StatusCode)
