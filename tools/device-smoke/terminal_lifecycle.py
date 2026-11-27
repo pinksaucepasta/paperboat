@@ -481,6 +481,16 @@ def await_local_paste(terminal, name, bound=DROP_BOUND):
         pump(terminal, 1)
 
 
+def await_paste_mode(terminal, bound=DROP_BOUND):
+    """A Windows client: wait until pb turns bracketed paste on. A terminal brackets a drop only after that; before it the
+    drop is the plain path on every OS (L40). A Windows console, unlike a Unix tty, also drops brackets sent before pb
+    switched it to VT input, so sending them earlier tests nothing a user can do."""
+    terminal.expect(PASTE_MODE_ON, timeout=bound)
+
+
+PASTE_MODE_ON = '\x1b[?2004h'
+
+
 def drop_file(terminal, pb, target, path, digest, same_machine=False):
     """Drop `path` as a terminal does (a bracketed paste of the path, no Enter) right now: nothing is waited for."""
     terminal.send(b'\x1b[200~' + str(path).encode() + b'\x1b[201~')
@@ -524,6 +534,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
         if drop:  # before anything else, also before asking what the target is: that takes seconds
             if announce:  # the ssh login to the Windows client is not part of pb connect
                 terminal.expect(announce)
+                await_paste_mode(terminal)
             drop_file(terminal, pb, target, *drop)
             phases = ['drop_local_path' if drop[2] else 'drop_uploaded']
         elif windows_target.is_windows(pb, target):

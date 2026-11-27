@@ -48,6 +48,29 @@ class Drop(unittest.TestCase):
             tl.drop_file(terminal, 'pb', 'peer', Path('/tmp/drop.bin'), 'abc')
         self.assertIn(b'GOT /tmp/drop.bin END', terminal.output)
 
+    def test_a_windows_client_drops_only_after_pb_turns_bracketed_paste_on(self):
+        # As a Windows console: input sent before pb asks for bracketed paste loses its brackets (here: all of it).
+        console = textwrap.dedent('''
+            import os, sys, termios, time, tty, select
+            tty.setraw(0, termios.TCSANOW)
+            time.sleep(0.7)
+            while select.select([0], [], [], 0)[0]:
+                os.read(0, 1024)
+            os.write(1, b'\\x1b[?2004h')
+            data = b''
+            while not data.endswith(b'\\x1b[201~'):
+                data += os.read(0, 1024)
+            os.write(1, b'GOT ' + data[6:-6] + b' END')
+            time.sleep(30)
+        ''')
+        terminal = self.terminal(console)
+        tl.await_paste_mode(terminal, bound=20)
+        with patch.object(tl, 'received_hash', side_effect=lambda *a: 'abc' if b'END' in terminal.output else None):
+            tl.drop_file(terminal, 'pb', 'peer', Path('/tmp/drop.bin'), 'abc')
+        self.assertIn(b'GOT /tmp/drop.bin END', terminal.output)
+        with self.assertRaisesRegex(RuntimeError, 'expected fixture output'):
+            tl.await_paste_mode(self.terminal('import time; time.sleep(30)'), bound=1)
+
     def test_the_unavailable_notice_fails_even_if_the_file_is_there(self):
         terminal = self.terminal('print("[paperboat] file transfer unavailable; pasting original path", flush=True); import time; time.sleep(30)')
         with self.assertRaisesRegex(RuntimeError, 'file transfer unavailable; pasting original path'):
