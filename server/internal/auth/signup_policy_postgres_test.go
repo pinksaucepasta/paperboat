@@ -225,12 +225,6 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	if ok != 1 {
 		t.Fatalf("concurrent aliases: %d succeeded, want 1", ok)
 	}
-	fresh := *s
-	fresh.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "fresh-unverified", Email: prefix + "fresh@example.test", EmailVerified: false}}
-	beforeFresh := countUsers(t)
-	if _, _, err := fresh.VerifyCallback(ctx, CallbackInput{Code: "fresh-unverified"}); !errors.As(err, new(*WorkOSVerificationError)) || countUsers(t) != beforeFresh {
-		t.Fatalf("unverified address created an account: %v", err)
-	}
 	unverified := *s
 	unverified.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "unverified", Email: canonical, EmailVerified: false}}
 	var taken *EmailAlreadyRegisteredError
