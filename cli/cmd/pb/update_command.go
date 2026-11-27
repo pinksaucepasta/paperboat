@@ -320,7 +320,9 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 	if result.CandidateRejected != nil {
 		fmt.Fprintf(command.OutOrStdout(), "The downloaded update %s failed verification (%s). Run `pb update download` to fetch it again.\n", result.CandidateRejected.Version, updateRejectionText(result.CandidateRejected.Reason))
 	}
-	if result.Candidate != nil {
+	// An updater finishing an installed update reported an empty candidate (no id): nothing to review or approve, and
+	// printing it read "Downloaded Paperboat  (/, 0 bytes) ... pb update --approve " (smoke 11-27).
+	if result.Candidate != nil && result.Candidate.ID != "" {
 		writePreparedUpdate(command, result.Candidate)
 	} else if result.ActivationFinishing {
 		fmt.Fprintln(command.OutOrStdout(), "Activation: installed, finishing the last step (retrying)")

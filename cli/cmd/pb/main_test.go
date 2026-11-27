@@ -811,13 +811,14 @@ func TestUpdateRefusesABadApprovalIDAndAnUnreadableSourceWithAClearMessage(t *te
 
 // An update that is installed but whose last step keeps failing must not read as "Activation: complete".
 func TestUpdateStatusShowsAFinishThatIsBeingRetriedOrGaveUp(t *testing.T) {
-	retrying := updated.ControlResponse{Status: "ok", Transaction: workerupdate.TransactionState{CommitPending: true}}
+	retrying := updated.ControlResponse{Status: "ok", Transaction: workerupdate.TransactionState{CommitPending: true}, Candidate: &workerupdate.PreparedCandidate{}}
 	result := updateStatusCommandResult("2026.11.09.1", retrying, nil)
 	var output bytes.Buffer
 	command := &cobra.Command{}
 	command.Flags().Bool("json", false, "")
 	command.SetOut(&output)
-	if err := writeUpdateStatusResult(command, result); err != nil || !result.ActivationFinishing || !strings.Contains(output.String(), "finishing the last step") {
+	if err := writeUpdateStatusResult(command, result); err != nil || !result.ActivationFinishing || !strings.Contains(output.String(), "finishing the last step") ||
+		strings.Contains(output.String(), "Downloaded Paperboat") || strings.Contains(output.String(), "--approve") {
 		t.Fatalf("retrying finish: %+v %q %v", result, output.String(), err)
 	}
 	gaveUp := updated.ControlResponse{Status: "ok", Transaction: workerupdate.TransactionState{Failure: updateflow.FailureCommit, Quarantined: true}}

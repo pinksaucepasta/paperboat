@@ -372,7 +372,9 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 				response.CandidateRejected = &CandidateRejection{Version: state.CandidateVersion, Reason: reason}
 			}
 		}
-		if candidateErr == nil {
+		// No prepared candidate (an installed update finishing) is no candidate, as in download: an empty one read as a
+		// download to approve with no version and no id (smoke 11-27).
+		if candidateErr == nil && candidate.ID != "" {
 			response.Candidate = &candidate
 		}
 	}
