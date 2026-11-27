@@ -19,15 +19,6 @@ func (e *EmailAlreadyRegisteredError) Error() string {
 	return "An account for " + e.Canonical + " already exists. Sign in with that address."
 }
 
-// EmailAliasNotAllowedError refuses a new sign-up whose address has a +tag
-// (F13-07, coordinator decision 2026-11-27): a +tag can be a different
-// mailbox, so it may never claim the base address first.
-type EmailAliasNotAllowedError struct{ Canonical string }
-
-func (e *EmailAliasNotAllowedError) Error() string {
-	return "Sign-up with a plus address is not allowed. Sign up with " + e.Canonical + "."
-}
-
 func hasPlusTag(email string) bool {
 	local, _, _ := strings.Cut(strings.TrimSpace(email), "@")
 	return strings.Contains(local, "+")
@@ -75,17 +66,21 @@ func resolveWorkOSIdentity(ctx context.Context, tx *db.Tx, profile WorkOSProfile
 	err = tx.QueryRow(ctx, `SELECT id FROM paperboat.users WHERE canonical_email=$1 OR paperboat.canonical_email_address(primary_email)=$1
  ORDER BY (canonical_email=$1) DESC NULLS LAST,created_at,id LIMIT 1`, canonical).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if hasPlusTag(profile.Email) {
-			// Same answer as a claimed address, so an unverified email learns nothing.
-			if !profile.EmailVerified {
-				return "", "", &WorkOSVerificationError{Reason: "email_not_verified"}
-			}
-			return "", "", &EmailAliasNotAllowedError{Canonical: canonical}
-		}
 		return canonical, newID("user"), nil
 	}
 	if err != nil {
 		return "", "", err
+	}
+	// F13-07: only a plus address, or the exact address itself, is refused when
+	// the canonical address has an account. A plain address whose canonical
+	// form is held only by +tag accounts is its own new account (never merged).
+	var exact bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE lower(btrim(primary_email))=$1)`,
+		strings.ToLower(strings.TrimSpace(profile.Email))).Scan(&exact); err != nil {
+		return "", "", err
+	}
+	if !hasPlusTag(profile.Email) && !exact {
+		return canonical, newID("user"), nil
 	}
 	// An unverified address must not learn whether an account exists.
 	if !profile.EmailVerified {

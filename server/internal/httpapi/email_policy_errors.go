@@ -15,12 +15,6 @@ func writeEmailPolicyError(w http.ResponseWriter, r *http.Request, err error) bo
 		writeError(w, r, http.StatusConflict, "email_already_registered", taken.Error())
 		return true
 	}
-	var alias *auth.EmailAliasNotAllowedError
-	if errors.As(err, &alias) {
-		logHTTPRejection(r, http.StatusBadRequest, "email_alias_not_allowed", alias)
-		writeError(w, r, http.StatusBadRequest, "email_alias_not_allowed", alias.Error())
-		return true
-	}
 	status, code := 0, ""
 	var policy error
 	switch {

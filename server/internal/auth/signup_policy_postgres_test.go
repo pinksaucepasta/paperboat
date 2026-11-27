@@ -58,31 +58,25 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 		}
 		return n
 	}
-	refusedAlias := func(t *testing.T, err error, canonical string) {
-		t.Helper()
-		var alias *EmailAliasNotAllowedError
-		if !errors.As(err, &alias) || alias.Canonical != canonical || alias.Error() != "Sign-up with a plus address is not allowed. Sign up with "+canonical+"." {
-			t.Fatalf("want plus-address refusal for %s, got %v", canonical, err)
-		}
-	}
 	canonical := prefix + ".one@example.test"
-	// Order 1: x+tag first is refused outright, so it can never claim x; then x signs up.
-	start := countUsers(t)
-	_, tagSession, err := login("tag-first", strings.ToUpper(prefix)+".One+first@EXAMPLE.TEST")
-	refusedAlias(t, err, canonical)
-	if tagSession.Token != "" || countUsers(t) != start {
-		t.Fatal("a refused plus-address sign-up created an account or session")
+	// Order 1 (F13-07): x+tag first signs up normally; x then signs up as its own
+	// separate account, never merged into the +tag one.
+	tagUser, tagSession, err := login("tag-first", strings.ToUpper(prefix)+".One+first@EXAMPLE.TEST")
+	if err != nil || tagSession.UserID != tagUser.ID {
+		t.Fatalf("plus address with no canonical account was not signed up: %v", err)
+	}
+	if tagUser.PrimaryEmail != prefix+".one+first@example.test" {
+		t.Fatalf("contact address = %q, want the exact address", tagUser.PrimaryEmail)
 	}
 	first, session, err := login("first", strings.ToUpper(prefix)+".One@EXAMPLE.TEST")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.UserID != first.ID {
-		t.Fatal("initial session has wrong account")
+	if first.ID == tagUser.ID || session.UserID != first.ID || first.PrimaryEmail != canonical {
+		t.Fatalf("x after x+tag was merged or got the wrong address: %+v", first)
 	}
-	// The contact address is the exact verified address (lowercased).
-	if first.PrimaryEmail != canonical {
-		t.Fatalf("contact address = %q, want the exact address", first.PrimaryEmail)
+	if got, _, err := login("tag-first", prefix+".one+first@example.test"); err != nil || got.ID != tagUser.ID {
+		t.Fatalf("x+tag account cannot sign in after x signed up: %v", err)
 	}
 	before := countUsers(t)
 	for i, email := range []string{canonical, prefix + ".one+second@example.test", prefix + ".ONE+second+third@EXAMPLE.TEST"} {
