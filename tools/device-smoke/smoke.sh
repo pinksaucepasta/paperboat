@@ -1412,7 +1412,7 @@ RECIPE_CHECKS="recipe-lifecycle recipe-errors recipe-vaults recipe-api-tokens re
 RECIPE_MACHINE_CHECKS="recipe-install:linux recipe-install:macos recipe-install:windows"
 # account_rows.py (same harness, an account of its own: a vault reset replaces the account's ENV keys): F10-07
 # env-vault-reset-locked, F27-05 held-web-ports, F1-03 pair-token-refusals (waits out a token's 10 minute lifetime).
-ACCOUNT_CHECKS="env-vault-reset-locked:container"
+ACCOUNT_CHECKS="env-vault-reset-locked:container held-web-ports:container"
 ACCOUNT_MACHINE_CHECKS=""
 harness_checks_run() { # harness_checks_run SCRIPT CONTAINER_IDS REAL_MACHINE_IDS
   local script=$1 id os setting out line status secs detail ids=()

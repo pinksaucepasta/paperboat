@@ -34,7 +34,8 @@ import recipe_devices as rd
 VAULT_PLATFORMS = ('container', 'macos', 'windows')
 TOKEN_PLATFORMS = ('linux', 'macos', 'windows')
 PORT_PLATFORMS = ('container', 'linux', 'macos', 'windows')
-CHECKS = ('env-vault-reset-locked:container',)
+CHECKS = ('env-vault-reset-locked:container',
+          'held-web-ports:container',)
 BUSY = 'another program is using port 80'  # in both of pb doctor's busy-port titles
 DARWIN_ANCHOR = 'com.apple/000.paperboat-machineguard'
 GUARD = 'paperboat-machineguard.service'
@@ -208,7 +209,7 @@ def check_token_refusals(check, platform):
 
     def refuse(kind):
         done = refused(target.one_liner(urls['own'], 'PB_TOKEN', tokens[kind], name, check.pin), 'the enrollment one-liner with a %s token' % kind, REFUSALS[kind])
-        need('Create a new enrollment with Add machine' in ' '.join(done.text.split()), 'no way out in the refusal: ' + done.tail())
+        need('create a new enrollment with add machine' in ' '.join(done.text.split()).lower(), 'no way out in the refusal: ' + done.tail())
         need(tokens[kind] not in done.text, 'the refusal prints the token')
         not_added()
     with steps.step('used-token'):
