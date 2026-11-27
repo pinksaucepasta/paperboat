@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
@@ -19,16 +22,20 @@ func TestGuardProbeMissDoesNotMaskDiscoveryFailure(t *testing.T) {
 	useGuardDomains(t, "", "", invalid)
 	oldReady, oldPrepare := existingMachineGuardReady, prepareMachineGuardForInstall
 	t.Cleanup(func() { existingMachineGuardReady, prepareMachineGuardForInstall = oldReady, oldPrepare })
-	existingMachineGuardReady = func(context.Context, string, int) error {
-		return &fs.PathError{Op: "open", Path: `\\.\pipe\PaperboatMachineGuard`, Err: fs.ErrNotExist}
-	}
 	prepareMachineGuardForInstall = func() error { return nil }
-	err := installMachineGuard(context.Background(), guardInstallRequest(t), nil)
-	if err == nil || errors.Is(err, fs.ErrNotExist) || !errors.Is(err, invalid) {
-		t.Fatalf("install error = %v; want the discovery failure without the probe miss", err)
+	misses := []error{
+		&fs.PathError{Op: "open", Path: `\\.\pipe\PaperboatMachineGuard`, Err: fs.ErrNotExist},
+		&net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}, // a socket with no listener
 	}
-	if f := errorreport.ProjectFault(context.Background(), "hostinstall", "install", "guard", "operation_failed", err); f.Cause == "not_found" || f.Errno == 2 {
-		t.Fatalf("fault cause %q errno %d; the probe miss masked the real cause", f.Cause, f.Errno)
+	for _, miss := range misses {
+		existingMachineGuardReady = func(context.Context, string, int) error { return miss }
+		err := installMachineGuard(context.Background(), guardInstallRequest(t), nil)
+		if err == nil || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) || !errors.Is(err, invalid) {
+			t.Fatalf("probe miss %v: install error = %v; want the discovery failure without the probe miss", miss, err)
+		}
+		if f := errorreport.ProjectFault(context.Background(), "hostinstall", "install", "guard", "operation_failed", err); f.Cause == "not_found" || f.Errno == 2 {
+			t.Fatalf("fault cause %q errno %d; the probe miss masked the real cause", f.Cause, f.Errno)
+		}
 	}
 }
 

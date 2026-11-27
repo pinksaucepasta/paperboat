@@ -305,7 +305,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 
 	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: hostinstall.InstallationTarget(sourceIdentity), Source: sourceIdentity, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress}
-	if err := hostinstall.Validate(request, 0); err != nil {
+	if err := hostinstall.ValidateFresh(request); err != nil {
 		return fmt.Errorf("validate Windows host installation request: %w", err)
 	}
 	fmt.Fprintln(stderr, "Requesting administrator approval to install Paperboat Windows services...")

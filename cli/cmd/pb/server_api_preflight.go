@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -41,7 +42,7 @@ func checkServerIsAPI(ctx context.Context, client *http.Client, serverURL string
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	recorder := &statusRecorder{next: client.Transport}
+	recorder := &statusRecorder{next: client.Transport, limit: serverProbeMaxBody}
 	if recorder.next == nil {
 		recorder.next = http.DefaultTransport
 	}
@@ -58,7 +59,8 @@ func checkServerIsAPI(ctx context.Context, client *http.Client, serverURL string
 // installPreflightServer checks, before pb install changes anything, the server the installed service will
 // use: the --server choice or the build's default. With neither, an existing installation's server is kept.
 func installPreflightServer(command *cobra.Command) error {
-	server := selectedInstallServer(command)
+	// A --server given is checked as given: an invalid or non-API choice is refused, never replaced.
+	server := strings.TrimSpace(workspaceServerOverride(command))
 	if server == "" {
 		server = strings.TrimSpace(buildinfo.DefaultServerURL)
 	}
@@ -80,11 +82,17 @@ func installPreflightServer(command *cobra.Command) error {
 	return checkServerIsAPI(command.Context(), authDependenciesOf(command.Context()).httpClient(), normalized)
 }
 
-// statusRecorder keeps the status of the last response a client received (0: none).
+// serverProbeMaxBody bounds what the server check reads: a client configuration is small, and the URL is
+// not yet trusted.
+const serverProbeMaxBody = 64 << 10
+
+// statusRecorder keeps the status of the last response a client received (0: none) and, with a limit,
+// fails a body read past it.
 type statusRecorder struct {
-	next http.RoundTripper
-	mu   sync.Mutex
-	last int
+	next  http.RoundTripper
+	limit int64
+	mu    sync.Mutex
+	last  int
 }
 
 func (r *statusRecorder) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -93,8 +101,33 @@ func (r *statusRecorder) RoundTrip(request *http.Request) (*http.Response, error
 		r.mu.Lock()
 		r.last = response.StatusCode
 		r.mu.Unlock()
+		if r.limit > 0 && response.Body != nil {
+			response.Body = &cappedBody{ReadCloser: response.Body, left: r.limit}
+		}
 	}
 	return response, err
+}
+
+// cappedBody returns an error once more than its limit is read.
+type cappedBody struct {
+	io.ReadCloser
+	left int64
+}
+
+func (b *cappedBody) Read(p []byte) (int, error) {
+	if b.left <= 0 {
+		var one [1]byte
+		if n, _ := b.ReadCloser.Read(one[:]); n > 0 {
+			return 0, errors.New("server response exceeds the size limit")
+		}
+		return b.ReadCloser.Read(p)
+	}
+	if int64(len(p)) > b.left {
+		p = p[:b.left]
+	}
+	n, err := b.ReadCloser.Read(p)
+	b.left -= int64(n)
+	return n, err
 }
 
 func (r *statusRecorder) status() int {
@@ -103,16 +136,21 @@ func (r *statusRecorder) status() int {
 	return r.last
 }
 
-// pairServerURLBeforeIdentity refuses a fresh pairing (no machine registration in stateRoot) that has no
-// server URL from --server or the build, before anything is written under stateRoot.
+// pairServerURLBeforeIdentity checks, for a fresh pairing (no machine registration in stateRoot), the server
+// it will use (--server, else the build's) before anything is written under stateRoot: missing, invalid or
+// not the Paperboat API is refused.
 func pairServerURLBeforeIdentity(command *cobra.Command, stateRoot string) error {
-	server, _ := command.Flags().GetString("server")
-	if strings.TrimSpace(server) != "" || strings.TrimSpace(buildinfo.DefaultServerURL) != "" {
-		return nil
-	}
 	if _, err := os.Lstat(filepath.Join(stateRoot, "machine-registration.json")); !errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	_, err := pairPreflightServerURL("")
-	return err
+	server, _ := command.Flags().GetString("server")
+	server = strings.TrimSpace(server)
+	if server == "" {
+		server = strings.TrimSpace(buildinfo.DefaultServerURL)
+	}
+	normalized, err := pairPreflightServerURL(server)
+	if err != nil {
+		return err
+	}
+	return checkServerIsAPI(command.Context(), authDependenciesOf(command.Context()).httpClient(), normalized)
 }

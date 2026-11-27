@@ -26,7 +26,7 @@ def git(*args):
 def api_url(value):
     parsed = urllib.parse.urlsplit(value.strip())
     host = (parsed.hostname or '').lower()
-    if parsed.scheme != 'https' or not host or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
+    if parsed.scheme != 'https' or not host or '@' in parsed.netloc or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
         raise argparse.ArgumentTypeError('--server-url must be the https Paperboat API URL')
     if host.startswith(('app.', 'console.')):
         raise argparse.ArgumentTypeError('--server-url must be the API, not the console host ' + host)

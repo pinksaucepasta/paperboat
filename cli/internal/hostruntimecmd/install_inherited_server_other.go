@@ -1,6 +1,6 @@
-//go:build !windows
+//go:build !windows && !darwin && !linux
 
 package hostruntimecmd
 
-// InheritedInstallServer is only resolved on Windows; elsewhere it reports that it cannot tell.
+// InheritedInstallServer is resolved on Windows, Linux and macOS; elsewhere it reports that it cannot tell.
 func InheritedInstallServer() (string, bool) { return "", false }

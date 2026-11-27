@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,7 +80,7 @@ func TestPairCommandWithoutServerURLStopsBeforeBootstrap(t *testing.T) {
 	savedServer, savedNoSystemd := buildinfo.DefaultServerURL, hostruntimecmd.NoSystemd
 	buildinfo.DefaultServerURL, hostruntimecmd.NoSystemd = "", func() bool { return false }
 	defer func() { buildinfo.DefaultServerURL, hostruntimecmd.NoSystemd = savedServer, savedNoSystemd }()
-	stateRoot := shorttemp.Dir(t)
+	stateRoot := filepath.Join(shorttemp.Dir(t), "runtime")
 	bootstrapped := false
 	command := pairCommand()
 	command.SetContext(withAuthDependencies(t.Context(), func(d *authDependencies) {
@@ -95,6 +98,9 @@ func TestPairCommandWithoutServerURLStopsBeforeBootstrap(t *testing.T) {
 	}
 	if bootstrapped {
 		t.Fatal("pair reached bootstrap without a server URL")
+	}
+	if _, err := os.Lstat(stateRoot); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("pair created its state root before refusing: %v", err)
 	}
 }
 

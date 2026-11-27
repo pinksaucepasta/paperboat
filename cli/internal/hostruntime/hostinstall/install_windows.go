@@ -3131,6 +3131,16 @@ func windowsLifecycleManagerWithState(layout service.Layout, hostd, daemon, upda
 	})
 }
 
+// ValidateFresh is Validate for a new installation (bootstrap), which must also name a valid Paperboat
+// server. Validate alone does not check the control URL: an existing installation whose stored URL is
+// empty or not normalized must still commit, repair, update and uninstall.
+func ValidateFresh(request Request) error {
+	if err := ValidateControlURL(request.ControlURL); err != nil {
+		return hostInstallFailure("invalid Paperboat server URL", ErrInvalidRequest, err)
+	}
+	return Validate(request, 0)
+}
+
 func Validate(request Request, _ int) error {
 	if request.Schema != SchemaV1 {
 		return hostInstallFailure("schema", ErrInvalidRequest)
@@ -3149,9 +3159,6 @@ func Validate(request Request, _ int) error {
 	}
 	if request.EnrollmentPending {
 		return hostInstallFailure("enrollment is pending", ErrInvalidRequest)
-	}
-	if err := ValidateControlURL(request.ControlURL); err != nil {
-		return hostInstallFailure("invalid Paperboat server URL", ErrInvalidRequest, err)
 	}
 	listenHost, listenPort, listenErr := net.SplitHostPort(request.HelperListenAddress)
 	if listenErr != nil || listenPort == "" || net.ParseIP(listenHost) == nil || !net.ParseIP(listenHost).IsLoopback() {

@@ -19,7 +19,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
@@ -127,8 +126,9 @@ func pairCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			serverURL = strings.TrimSpace(serverURL)
 			if serverURL != "" {
-				serverURL, err = config.NormalizeServerURL(serverURL)
+				serverURL, err = pairPreflightServerURL(serverURL)
 				if err != nil {
 					return err
 				}
@@ -140,10 +140,8 @@ func pairCommand() *cobra.Command {
 				serverURL = strings.TrimSpace(buildinfo.DefaultServerURL)
 			}
 			if fresh {
+				// The server answered as the API in pairServerURLBeforeIdentity.
 				if serverURL, err = pairPreflightServerURL(serverURL); err != nil {
-					return err
-				}
-				if err := checkServerIsAPI(command.Context(), authDependenciesOf(command.Context()).httpClient(), serverURL); err != nil {
 					return err
 				}
 			}
