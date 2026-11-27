@@ -72,7 +72,7 @@ def browser(m, steps, cell, state, script, *args, timeout=900, team=None):
     """Runs one browser script and records its steps under `cell`; returns them (all recorded, a failed one stops none)."""
     calm()
     try:
-        env = dict(m.env, **({'STATE': state} if state else {}), **({'BILLING_TEAM': team} if team else {}))
+        env = dict(m.env, BILLING_TEAM=team or '', **({'STATE': state} if state else {}))
         done = fx.run(['node', str(fx.HERE / script), *args], env=env, check=False, timeout=timeout)
         found = parse_steps(done.stdout + done.stderr)
     except subprocess.TimeoutExpired:
@@ -84,8 +84,8 @@ def browser(m, steps, cell, state, script, *args, timeout=900, team=None):
 
 
 def paid_invoices(found):
-    """The number of paid invoices the `invoices` command saw, or None."""
-    return next((s['paid'] for s in found if 'paid' in s), None)
+    """The number of paid invoices the `invoices` command saw, or None when that step did not pass."""
+    return next((s['paid'] for s in found if 'paid' in s and s.get('ok')), None)
 
 
 def api(m, state, path):
@@ -249,10 +249,12 @@ def bandwidth_throttle_send(m):
     deadline = time.monotonic() + 480
     while True:
         relayed = hosted_relay_bytes(api(m, state, usage_path(overview, datetime.datetime.now(datetime.timezone.utc))))
-        if relayed >= SEND_BYTES or time.monotonic() > deadline:
+        # at least three sends: the one before the cap and two after it, so the capped traffic itself is in the series
+        if relayed >= 3 * SEND_BYTES or time.monotonic() > deadline:
             break
         time.sleep(60)
-    steps.add('F13-06', 'the relayed sends are counted in the relay series', relayed >= SEND_BYTES, '%d relayed bytes counted, each send is %d' % (relayed, SEND_BYTES))
+    steps.add('F13-06', 'the relayed sends, the capped ones too, are counted in the relay series', relayed >= 3 * SEND_BYTES,
+              '%d relayed bytes counted for at least three sends of %d' % (relayed, SEND_BYTES))
     browser(m, steps, 'F13-06', state, 'billing_console.mjs', 'card', 'throttled')
     return steps.result('bandwidth-throttle-send', 'capped workspace: relayed pb send finishes intact at 512 kbit/s and says why; the console card says Slowed')
 
@@ -284,6 +286,11 @@ def delete_if_made(m, directory):
         m.leftovers.append('a sign-up that never reached the console may remain at the identity provider; its disposable address is in %s/account.json' % directory)
 
 
+def removal_kept(billing, billing_date):
+    """Three seats stay until the billing date, and two are what renews then."""
+    return tuple(billing.get(k) for k in ('seats_bought', 'scheduled_seats', 'scheduled_seats_at', 'allowance_bytes')) == (3, 2, billing_date, 300_000_000_000)
+
+
 def billing_team_lifecycle(m):
     steps = Steps()
     _, state = m.account('team')
@@ -293,7 +300,9 @@ def billing_team_lifecycle(m):
     try:
         bought = api(m, state, path)
     except RuntimeError as error:
-        steps.add('F13-04', 'a paid team to change', False, 'not run: %s' % error)
+        bought = {'state': str(error)}
+    if bought.get('state') != 'active' or not bought.get('allowance_bytes'):  # an unpaid team is never changed
+        steps.add('F13-04', 'a paid team to change', False, 'not run: Checkout left state=%s' % bought.get('state'))
         return steps.result('billing-team-lifecycle', '')
     on_team = {'team': team}
     invoices = paid_invoices(browser(m, steps, 'F13-04', state, 'billing_console.mjs', 'invoices', **on_team))
@@ -313,8 +322,8 @@ def billing_team_lifecycle(m):
     steps.add('F13-04', 'keeping the plan renews it on the same date', not kept['cancel_at_period_end'] and kept['state'] == 'active' and kept['period_end'] == bought['period_end'],
               'state=%s cancel_at_period_end=%s renews %s' % (kept['state'], kept['cancel_at_period_end'], kept['period_end']))
     # the seat removed above was never given back by the owner: undoing the cancellation must not undo the removal
-    steps.add('F13-04', 'keeping the plan keeps the scheduled seat removal: 2 seats from the billing date', kept.get('scheduled_seats') == 2,
-              'scheduled_seats=%s, seats billed now %s' % (kept.get('scheduled_seats'), kept.get('seats_bought')))
+    steps.add('F13-04', 'keeping the plan keeps the scheduled seat removal: 2 seats from the billing date', removal_kept(kept, bought['period_end']),
+              'scheduled_seats=%s at %s, seats now %s' % (kept.get('scheduled_seats'), kept.get('scheduled_seats_at'), kept.get('seats_bought')))
     return steps.result('billing-team-lifecycle', 'team bought on console Checkout, seat added (invoiced at once) and removed on a fixed billing date, cancelled and kept')
 
 

@@ -101,6 +101,14 @@ class TeamLifecycle(unittest.TestCase):
     def test_the_invoice_count_comes_from_the_invoices_step(self):
         self.assertEqual(b.paid_invoices([{'step': 'a', 'ok': True}, {'step': 'invoices', 'ok': True, 'paid': 2}]), 2)
         self.assertIsNone(b.paid_invoices([{'step': 'invoices completed', 'ok': False}]))
+        self.assertIsNone(b.paid_invoices([{'step': 'invoices', 'ok': False, 'paid': 0}]))
+
+    def test_the_removal_must_survive_without_taking_effect_early(self):
+        date = '2026-12-27T06:34:08Z'
+        kept = {'seats_bought': 3, 'scheduled_seats': 2, 'scheduled_seats_at': date, 'allowance_bytes': 300_000_000_000}
+        self.assertTrue(b.removal_kept(kept, date))
+        for broken in ({'scheduled_seats': None}, {'seats_bought': 2}, {'scheduled_seats_at': '2027-01-01T00:00:00Z'}, {'allowance_bytes': 200_000_000_000}):
+            self.assertFalse(b.removal_kept({**kept, **broken}, date), broken)
 
 
 class Fence(unittest.TestCase):
@@ -151,6 +159,13 @@ import { payTestCheckout } from "./stripe_pay.mjs"
 const page = { url: () => "https://checkout.stripe.com/c/pay/cs_live_abc", getByText: () => { throw new Error("touched") }, frames: () => { throw new Error("touched") } }
 console.log(JSON.stringify(await payTestCheckout(page).then(() => "paid", (e) => e.message)))''')
         self.assertIn('refusing to pay', got)
+
+    def test_every_paid_invoice_below_the_history_heading_counts(self):
+        got = self.node('''
+import { historyOf, paidRows, amount } from "./billing_console.mjs"
+const text = "Invoice history\\nNov 27\\n$15.00\\nPaid\\nsee invoice history\\nNov 27\\n$30.00\\nPaid"
+console.log(JSON.stringify([paidRows(historyOf(text)), paidRows(historyOf("Paid plan, no history")), amount("-$10"), amount("$1,200.50")]))''')
+        self.assertEqual(got, [2, 0, -10, 1200.5])
 
     def test_card_and_plan_text_are_compared_with_billing(self):
         got = self.node('''

@@ -32,6 +32,10 @@ export function parseBytes(text) {
 // A shown amount matches the API's: the page rounds to three digits and reads a moment apart from the check.
 export const near = (shown, bytes) => Math.abs(parseBytes(shown) - bytes) <= Math.max(0.05 * bytes, 1000)
 
+// Everything below the portal's "Invoice history" heading, and the invoices in it marked Paid.
+export const historyOf = (text) => text.split(/invoice history/i).slice(1).join(" ")
+export const paidRows = (history) => (history.match(/\bPaid\b/g) ?? []).length
+
 // "$12.50" -> 12.5, "-$3" -> -3
 export const amount = (text) => Number(text.replace(/[$,]/g, ""))
 
@@ -228,7 +232,11 @@ async function main(argv) {
     const text = await settled(main_(), (t) => /now · then/.test(t))
     const preview = /(-?\$[\d,.]+) now · then (-?\$[\d,.]+) on (\w{3} \d{1,2})/.exec(text.replace(/\s+/g, " "))
     add("the change shows what it costs now and from which date", Boolean(preview), preview?.[0] ?? text.replace(/\s+/g, " ").slice(0, 200))
-    if (preview) add(more ? "an added seat is charged now" : "a removed seat charges nothing now", more ? amount(preview[1]) > 0 : amount(preview[1]) <= 0, preview[0])
+    if (preview) {
+      add(more ? "an added seat is charged now" : "a removed seat charges nothing now", more ? amount(preview[1]) > 0 : amount(preview[1]) === 0, preview[0])
+      const next = (wanted * before.product.unit_amount) / 100
+      add(`the next invoice is the price of ${wanted} seats`, amount(preview[2]) === next, `shows ${preview[2]}, ${wanted} seats cost $${next}`)
+    }
     await main_().getByRole("button", { name: more ? "Buy seats" : "Remove seats", exact: true }).click()
     // an added seat is there at once; a removed one stays paid and usable until the billing date, where the lower count is scheduled
     const done = (b) => (more ? b.seats_bought === wanted : b.scheduled_seats === wanted)
@@ -254,10 +262,10 @@ async function main(argv) {
 
   async function invoices() {
     await openPortal()
-    const text = await settled(page.locator("body"), (t) => /Invoice history/i.test(t))
-    await page.waitForTimeout(3000)
-    const history = (await page.locator("body").innerText()).split(/invoice history/i)[1] ?? ""
-    const paid = (history.match(/\bPaid\b/g) ?? []).length
+    await settled(page.locator("body"), (t) => /invoice history[\s\S]*\bPaid\b/i.test(t))
+    await page.waitForTimeout(5000) // the rows arrive together; a late one would otherwise be missed
+    const history = historyOf(await page.locator("body").innerText())
+    const paid = paidRows(history)
     add("invoices", paid > 0, `${paid} paid: ${history.replace(/\s+/g, " ").slice(0, 180)}`)
     steps.at(-1).paid = paid
   }
@@ -303,7 +311,8 @@ async function main(argv) {
     else throw new Error("usage: card free|pro|throttled | checkout | portal month|year|cancel|keep | team-checkout TEAM SEATS | seats N | invoices")
   } catch (error) {
     const where = page.url().split("?")[0].replace(origin, "").slice(0, 60)
-    add(`${command} ${argument ?? ""} completed`, false, `${String(error?.message ?? error).split("\n")[0].slice(0, 160)} (on ${where})`)
+    const why = String(error?.message ?? error).split("\n")[0].replace(/(https?:\/\/[^\s?"']+)\?[^\s"']*/g, "$1").slice(0, 160)
+    add(`${command} ${argument ?? ""} completed`, false, `${why} (on ${where})`)
     if (process.env.BILLING_SHOT) await page.screenshot({ path: process.env.BILLING_SHOT, fullPage: true }).catch(() => {})
   } finally {
     await browser.close()
