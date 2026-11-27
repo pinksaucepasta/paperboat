@@ -351,3 +351,5 @@ ac1095ce while both go.mod files pin 2d32e5f0.
 - **F21-37 stays hand-proven (2026-11-27):** quiet public TCP/TLS streams closing at the edge idle limit while HTTPS keeps
   answering has no E2E row: it needs shared staging to itself and edge A restarted with a short limit. Rechecked by hand
   on staging that day (see CHECKLIST.md F21-37). A row, if ever written, must refuse to run from an outdated checkout.
+- **Mac tests touch the real daemon (2026-11-27):** some `cli` `hostruntimecmd` tests on macOS act on the real
+  `paperboatd` launchd job. Make them use a test-only label or a fake, so a test run never disturbs an installed pb.
