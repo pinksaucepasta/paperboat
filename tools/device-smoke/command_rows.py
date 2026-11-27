@@ -111,6 +111,16 @@ def daemon_unit_text():
     return sh('systemctl', '--user', 'cat', 'paperboatd')[1]
 
 
+# these rows change or read ENV values: on a machine whose vault is locked they cannot run (ENV_VAULT_ROWS is reported SKIP
+# with that reason, never PASS; --require-vault makes it a failure for a shard that unlocked the vault itself)
+ENV_VAULT_ROWS = {'C143', 'C144', 'C286'}
+
+
+def vault_locked():
+    code, o, e = run('env', 'list', '--json')
+    return code != 0 and 'ENV vault is locked' in o + e
+
+
 class Row:
     def __init__(self, ident, command):
         self.ident, self.command, self.failures = ident, command.split(), []
@@ -283,13 +293,26 @@ def rows(args):
         r = Row(ident, name); r.help(); r.invalid(hint='accepts|Usage|usage|team'); r.invalid('no-such-team-recb', hint='.')
         out.append(r)
 
+    official = re.fullmatch(r'20\d\d\.\d\d\.\d\d\.\d+', installed) is not None  # a release tag, not a dev-<commit> build
     for ident, name in (('C218', 'update check'), ('C219', 'update download')):
         r = Row(ident, name); r.help()
-        custom = run(*r.command, '--json')
-        reply = custom[1] + custom[2]
-        # On a custom build the documented answer is a clear refusal naming the way out.
-        r.expect(custom[0] != 0 and 'custom build' in reply and ('--from' in reply or 'update --force' in reply),
-                 'official-update command gave no clear answer on a custom build')
+        if official:  # a release build: the command works and answers valid JSON about this install
+            code, o, e = run(*r.command, '--json', timeout=600)
+            try:
+                reply = json.loads(o)
+            except ValueError:
+                reply = {}
+            r.expect(code == 0 and reply.get('ok') is True, '%s on a release build did not succeed: %s' % (name, (o + e)[-300:]))
+            if ident == 'C218':
+                data = reply.get('data') or {}
+                r.expect(data.get('installed_version') == installed and data.get('latest_version') and data.get('verified') is True,
+                         'update check does not report the installed version, the latest one and a verified answer: %s' % data)
+        else:
+            custom = run(*r.command, '--json')
+            reply = custom[1] + custom[2]
+            # On a custom build the documented answer is a clear refusal naming the way out.
+            r.expect(custom[0] != 0 and 'custom build' in reply and ('--from' in reply or 'update --force' in reply),
+                     'official-update command gave no clear answer on a custom build')
         out.append(r)
 
     r = Row('C228', 'config'); r.help(); r.invalid('bogus')
@@ -416,15 +439,22 @@ def main():
     parser.add_argument('--peer', help='another machine alias to resolve and access')
     parser.add_argument('--only', default='', help='comma list of row ids')
     parser.add_argument('--sudo-password-stdin', action='store_true')
+    parser.add_argument('--require-vault', action='store_true', help='fail, not skip, the ENV rows when the vault is locked')
     args = parser.parse_args()
     args.sudo_password = sys.stdin.readline().rstrip('\n') if args.sudo_password_stdin else None
     failed = 0
     only = set(filter(None, args.only.split(',')))
-    selected = access_rows(args) if only and only <= ACCESS_ROWS else (rows(args) + access_rows(args))
+    # the access rows run first: rows() ends by reinstalling the machine guard, and for a few seconds after that install
+    # returns, name lookups still answer "No machine has that name or ID"
+    selected = access_rows(args) if only and only <= ACCESS_ROWS else (access_rows(args) + rows(args))
+    locked = not args.require_vault and any(r.ident in ENV_VAULT_ROWS and r.failures for r in selected) and vault_locked()
     for row in selected:
         if only and row.ident not in only:
             continue
         status = 'PASS' if not row.failures else 'FAIL'
+        if locked and row.ident in ENV_VAULT_ROWS and row.failures:
+            status = 'SKIP'
+            row.failures = ['needs an unlocked ENV vault on this machine (`pb env unlock`)']
         failed += status == 'FAIL'
         print(json.dumps({'check': 'command-row', 'row': row.ident, 'command': 'pb ' + ' '.join(row.command),
                           'status': status, 'failures': row.failures}), flush=True)
