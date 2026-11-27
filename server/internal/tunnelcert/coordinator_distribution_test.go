@@ -392,7 +392,8 @@ func TestCoordinatorActivatesReadyEdgesAroundAStraggler(t *testing.T) {
 
 // A first certificate activated but never recorded on the domain (the worker crashed, or its commit conflicted, between
 // Activate and CommitDomainCertificateReady) must not leave the domain without one, and must never order from the CA
-// again: the next pass adopts it, and after domain generation bumps it is re-staged from its own bundle.
+// again: the next pass adopts it, and after domain generation bumps it is re-staged from its own bundle. The same holds
+// for a renewal whose commit was lost (the domain still records the superseded certificate).
 func TestCoordinatorRecoversFirstCertificateNeverRecordedOnTheDomain(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	issuer := &testIssuer{bundle: testBundle(t, []string{"app.example.test"}, now, 60*24*time.Hour)}
@@ -433,10 +434,12 @@ func TestCoordinatorRecoversFirstCertificateNeverRecordedOnTheDomain(t *testing.
 	if err != nil || !found || current.State != StateActive || current.CertificateReference != reissued.Certificate.Reference {
 		t.Fatalf("current = %+v found=%v err=%v", current, found, err)
 	}
-	// Once recorded, a mismatching active row is still refused (stale/partial publication).
-	domain.CertificateReference = "tcert_not_the_active_one"
-	if _, err := coordinator.Ensure(context.Background(), domain); !errors.Is(err, ErrGenerationConflict) {
-		t.Fatalf("recorded domain with a mismatching active row = %v, want ErrGenerationConflict", err)
+	// A renewal whose commit was lost: the domain still records the certificate it superseded. The active one is
+	// adopted for the worker to record, not refused until the recorded one expires, and not ordered again.
+	domain.CertificateReference = orphan.Certificate.Reference
+	recorded, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil || !recorded.Issued || recorded.Certificate.Reference != reissued.Certificate.Reference || len(issuer.seen) != 1 {
+		t.Fatalf("domain recording a superseded certificate = %+v, %v, issuer calls %d; want the active one adopted", recorded, err, len(issuer.seen))
 	}
 }
 

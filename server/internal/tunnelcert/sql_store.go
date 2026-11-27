@@ -512,7 +512,9 @@ func (s *SQLStore) CommitDomainCertificateReady(ctx context.Context, accountID, 
 			// renewed by the certificate worker without a domain.create row,
 			// but an issuing projection with no operation is an unsafe partial
 			// commit and must roll back both updates.
-			if domainContext.CertificateState != "ready" || domainContext.CertificateReference == "" {
+			// A domain that has recorded a certificate renews without one, also after a failed attempt
+			// (renewing/failed): refusing those left a renewal uncommittable until the old certificate expired.
+			if domainContext.CertificateReference == "" {
 				return ErrGenerationConflict
 			}
 		}
