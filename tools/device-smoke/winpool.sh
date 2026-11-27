@@ -27,6 +27,14 @@ POOL=winpool
 
 die() { echo "winpool: $*" >&2; exit 1; }
 
+# With ~/.config/paperboat-dev/winpool-gh.repo (owner/name; optional .token) machines start in that runner repository, on
+# that owner's own job limit, so they leave the main repository's slots to CI and releases. Without it: this repository.
+win_gh() {
+  local conf=$HOME/.config/paperboat-dev/winpool-gh
+  [ -s "$conf.repo" ] || { gh "$@"; return; }
+  if [ -s "$conf.token" ]; then GH_REPO=$(cat "$conf.repo") GH_TOKEN=$(cat "$conf.token") gh "$@"; else GH_REPO=$(cat "$conf.repo") gh "$@"; fi
+}
+
 # Writes the winpool-N hosts and makes ~/.ssh/config include them: the checks pass only a host name to ssh.
 configure() {
   [ -f "$HOME/.ssh/winpool_controller" ] || die "missing ~/.ssh/winpool_controller (its public half is the repository variable WINPOOL_CONTROLLER_PUBKEY)"
@@ -63,7 +71,7 @@ start() {
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of ${#SLOTS[@]} machines are free (winpool.sh list)"
   free=("${free[@]:0:count}")
   for n in "${free[@]}"; do ssh-keygen -q -R "[127.0.0.1]:$((22200 + n))" -f "$KNOWN" >/dev/null 2>&1 || true; done
-  gh workflow run winpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
+  win_gh workflow run winpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
   for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; done
   flock -u 9
   pool_revoke "${free[@]}" || echo "winpool: could not revoke the previous machine records of ${free[*]}; sweep retries" >&2 # leftovers of the runner that held these slots

@@ -128,6 +128,9 @@ tools/device-smoke/linuxpool.sh stop 1        # hands it back; it stays up for t
 - With `~/.config/paperboat-dev/linuxpool-gh.{repo,token}` (0600) on the controller, `start` (macpool.sh too) dispatches the same workflow in that
   repository, whose account has its own job limit and its own tunnel key (`permitlisten=` 22301-22308 and 22401-22412 only).
   After changing `linuxpool.yml` or `macpool.yml`, copy it there.
+- Windows has its own file, `~/.config/paperboat-dev/winpool-gh.repo` (plus an optional `.token`): a third owner's runner repository, so the main
+  repository keeps its job limit for CI and releases. GitHub runs 20 jobs per owner at once. Each tunnel key and the jump host's `PermitListen` list
+  the ports it may open: a new slot number needs its port in both.
 - A host is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
 
 ### Pool runners revoke their machine records (linuxpool, macpool, winpool)
