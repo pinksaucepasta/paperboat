@@ -28,16 +28,21 @@ class Page(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
         body = b"xplat-https-ok"; self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
-threading.Thread(target=http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1]) + 3000), Page).serve_forever, daemon=True).start()
+# in its own thread: on macOS HTTPServer's start looks its host name up, which can take half a minute and must not delay
+# the TCP origin below
+threading.Thread(target=lambda: http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1]) + 3000), Page).serve_forever(), daemon=True).start()
 srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(("127.0.0.1", int(sys.argv[1]))); srv.listen(4); srv.settimeout(90)
 while True:
     c, _ = srv.accept(); c.settimeout(30); h = hashlib.sha256(); n = 0
-    while True:
-        b = c.recv(65536)
-        if not b: break
-        h.update(b); n += len(b)
-    c.sendall(("%d %s\n" % (n, h.hexdigest())).encode()); c.shutdown(socket.SHUT_WR); c.close()
+    try:
+        while True:
+            b = c.recv(65536)
+            if not b: break
+            h.update(b); n += len(b)
+        c.sendall(("%d %s\n" % (n, h.hexdigest())).encode()); c.shutdown(socket.SHUT_WR); c.close()
+    except OSError:  # a peer that only checked the port (connect and close) must not end the origin
+        c.close()
 '''
 
 # An HTTP origin on port 720 (below 1024), wildcard-bound so an unprivileged user may bind it on macOS too.
@@ -146,7 +151,21 @@ def domain_of(dev):
 
 def t_access(src, dst):
     port = 21000 + sum(map(ord, src.name + dst.name)) % 2000
-    done = src.run([py(src), '-c', DRIVER, src.pb_path, dst.alias, str(port), str(port + 5000), ORIGIN, py(dst), domain_of(src), LOW_ORIGIN], timeout=300)
+    # the port-720 origin runs as the ordinary user. macOS and Windows let it bind there; a Linux machine (unlike a Docker
+    # container) reserves ports below 1024 for root, so its limit is lowered for this check only and put back afterwards
+    limit = None
+    if dst.os == 'linux':
+        limit = dst.run(['sysctl', '-n', 'net.ipv4.ip_unprivileged_port_start']).text.strip()
+        if limit.isdigit() and int(limit) > 720:
+            lowered = dst.run(['sudo', '-n', 'sysctl', '-q', '-w', 'net.ipv4.ip_unprivileged_port_start=720'])
+            assert lowered.rc == 0, 'the target cannot let its user bind port 720: ' + lowered.errtext[-200:]
+        else:
+            limit = None
+    try:
+        done = src.run([py(src), '-c', DRIVER, src.pb_path, dst.alias, str(port), str(port + 5000), ORIGIN, py(dst), domain_of(src), LOW_ORIGIN], timeout=300)
+    finally:
+        if limit:
+            dst.run(['sudo', '-n', 'sysctl', '-q', '-w', 'net.ipv4.ip_unprivileged_port_start=' + limit])
     assert done.rc == 0, 'driver: %s %s' % (done.text[-300:], done.errtext[-300:])
     out = json.loads(done.text.strip().splitlines()[-1])
     assert out.get('forward'), 'the 1 MiB exchange through the forward was not byte-exact with half-close: %s' % out

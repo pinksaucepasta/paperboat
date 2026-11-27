@@ -31,6 +31,9 @@ BIG = (b"0123456789abcdef" * 64 + b"\n") * 16384
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     address_family = socket.AF_INET6 if ":" in bind else socket.AF_INET
     daemon_threads = True
+    def server_bind(self):  # HTTPServer's own looks the address's host name up, which can take minutes on a runner
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = bind, port
 class H(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     def log_message(self, *a): pass
@@ -79,6 +82,7 @@ def confirm_delete(dev, name):
 # tunnel's 5 s dial times out with a 504 origin_timeout page: that is the origin not being up, not a tunnel that is not ready.
 WAIT_ORIGIN = ('import socket,sys,time\n'
                'host,port=sys.argv[1],int(sys.argv[2]);end=time.time()+150\n'
+               'host="127.0.0.1" if host=="0.0.0.0" else host\n'  # Windows cannot connect to the all-addresses address
                'while time.time()<end:\n'
                '    try:\n'
                '        c=socket.create_connection((host,port),2);c.sendall(b"GET / HTTP/1.0\\r\\n\\r\\n");ok=c.recv(12).startswith(b"HTTP/");c.close()\n'

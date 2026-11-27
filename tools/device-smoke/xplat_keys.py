@@ -10,6 +10,7 @@ Results: tools/device-smoke/results/xplat-keys-<stamp>.json.
 """
 from results_dir import results_dir
 import json
+import os
 import sys
 import time
 import uuid
@@ -24,7 +25,8 @@ from xplat_term import Terminal  # noqa: E402
 
 _argv = xplat_term.client_argv
 # the Windows PC takes a password over ssh (SSHPASS), unlike the key-based unix clients
-xplat_term.client_argv = lambda src, tail: (['sshpass', '-e'] if src.os == 'windows' else []) + _argv(src, tail)
+# sshpass only where the Windows machine signs in with a password (SSHPASS); a pool runner signs in with a key
+xplat_term.client_argv = lambda src, tail: (['sshpass', '-e'] if src.os == 'windows' and os.environ.get('SSHPASS') else []) + _argv(src, tail)
 
 READER = r'''
 import os, sys, time

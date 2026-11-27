@@ -39,8 +39,10 @@ def session_id(src, dst, name):
 def close_session(src, dst, session):
     first = json.loads(src.pb('session', 'close', dst.alias, session, '--json').text)
     token = first['data']['confirmation_token']
+    began = time.time()  # only the confirmed close is timed, not the preview before it
     done = src.pb('session', 'close', dst.alias, session, '--json', '--confirm', token, timeout=60)
     assert done.rc == 0, 'close failed: ' + (done.text + done.errtext)[-200:]
+    return time.time() - began
 
 
 def t_close(src, dst, shell):
@@ -61,9 +63,7 @@ def t_close(src, dst, shell):
         job = lambda: dst.run(['sh', '-c', "pgrep -f '^sleep %d$' | head -1" % sleep_seconds]).text.strip()
         assert job(), 'the background job did not start'
         session = session_id(src, dst, name)
-        began = time.time()
-        close_session(src, dst, session)
-        took = time.time() - began
+        took = close_session(src, dst, session)
         gone_at_return = not alive(dst, pid)
         deadline = time.time() + 2
         while alive(dst, pid) and time.time() < deadline:

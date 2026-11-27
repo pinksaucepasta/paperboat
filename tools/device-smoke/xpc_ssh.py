@@ -67,6 +67,7 @@ try:
     origin = subprocess.Popen([pb, "exec", machine, "--", bpy, "-c", origin_code, op], **quiet); procs.append(origin)
     local_origin = subprocess.Popen([sys.executable, "-c", origin_code, cp], **quiet); procs.append(local_origin)
     time.sleep(6)
+    listen(cp, local_origin)  # the origin behind -R is ready before anything is forwarded to it
     fwd = subprocess.Popen([pb, "ssh", machine, "--", "-N", "-o", "ExitOnForwardFailure=yes", "-L", "127.0.0.1:%s:127.0.0.1:%s" % (lp, op)], **quiet); procs.append(fwd)
     listen(lp, fwd); out["L"] = exchange(socket.create_connection(("127.0.0.1", int(lp)), timeout=30)) == want; stop(fwd)
     fwd = subprocess.Popen([pb, "ssh", machine, "--", "-N", "-o", "ExitOnForwardFailure=yes", "-D", "127.0.0.1:%s" % dp], **quiet); procs.append(fwd)
@@ -79,6 +80,9 @@ try:
     done = subprocess.run([pb, "exec", machine, "--", bpy, "-c", client, rp], capture_output=True, text=True, timeout=90)
     out["R"] = done.stdout.strip() == want
     out["R_detail"] = (done.stdout + done.stderr).strip()[-120:]
+    if not out["R"]:  # say whether the origin behind the reverse forward was still there
+        dead = local_origin.poll() is not None
+        out["R_local_origin"] = "exited %s: %s" % (local_origin.returncode, local_origin.stderr.read().decode(errors="replace")[-300:]) if dead else "running"
 finally:
     for p in procs: stop(p)
 print(json.dumps(out))
@@ -120,7 +124,11 @@ ssh-keygen -q -t ed25519 -N '""' -C xpc-agent-key -f "$d\k"
 ssh-add "$d\k" 2>&1 | Out-Null
 $want = (ssh-keygen -lf "$d\k.pub").Split(' ')[1]
 "WANT $want"
-& $pb ssh $args[1] -- -A 'ssh-add -l' 2>&1
+# in a job with closed stdin and a limit: the output is kept even when pb ssh never returns, and that is reported
+$job = Start-Job { param($pb, $machine) $null | & $pb ssh $machine -- -A 'ssh-add -l' 2>&1 | ForEach-Object { "$_" } } -ArgumentList $pb, $args[1]
+if (-not (Wait-Job $job -Timeout 60)) { "HUNG" }
+Receive-Job $job
+Stop-Job $job; Remove-Job -Force $job
 ssh-add -d "$d\k" 2>&1 | Out-Null
 Remove-Item -Recurse -Force $d
 '''
@@ -134,6 +142,8 @@ def t_agent(src, dst):
     text = (done.text + done.errtext)
     want = next((line.split()[1] for line in text.splitlines() if line.startswith('WANT ')), None)
     assert want, 'no agent key on the client: ' + text[-300:]
+    assert 'HUNG' not in text.splitlines(), \
+        'pb ssh -A ran the command but did not exit within 60 s; output so far: ' + ' '.join(l for l in text.splitlines() if l != 'HUNG' and not l.startswith('WANT '))[-300:]
     text = '\n'.join(line for line in text.splitlines() if not line.startswith('WANT '))
     if dst.os == 'windows':
         assert want not in text and 'agent' in text.lower(), 'a Windows target must say an agent cannot be forwarded and must not see the key: ' + text[-400:]

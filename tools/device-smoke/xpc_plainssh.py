@@ -43,7 +43,10 @@ def target_user(src, host):
     config = (src.read(src.home + ('\\.ssh\\paperboat_config' if src.os == 'windows' else '/.ssh/paperboat_config')) or b'').decode('utf-8', 'replace')
     for line in config.splitlines():
         if line.startswith('Match host %s user ' % host):
-            return line.split('user ', 1)[1].strip().strip('"').split(',')[0]
+            # `Match host H user "a,b" exec "..."`: only the user pattern, which may be quoted, is the name
+            value = line.split(' user ', 1)[1].strip()
+            value = value[1:].split('"', 1)[0] if value.startswith('"') else value.split()[0]
+            return value.split(',')[0]
     raise AssertionError('no managed Match block for %s' % host)
 
 
@@ -59,6 +62,7 @@ def plain(src, dst, *command, timeout=120):
     quoted = ','.join("'%s'" % ('"' + a.replace('"', '\\"') + '"').replace("'", "''") for a in argv)
     done = src.sh('''$e = Join-Path $env:TEMP 'xpc-ssh-err.txt'; $o = Join-Path $env:TEMP 'xpc-ssh-out.txt'; Remove-Item $e, $o -ErrorAction SilentlyContinue
 $p = Start-Process ssh -ArgumentList %s -RedirectStandardError $e -RedirectStandardOutput $o -PassThru -NoNewWindow
+$null = $p.Handle  # without the cached handle Windows PowerShell leaves ExitCode empty
 if (-not $p.WaitForExit(%d)) { taskkill /PID $p.Id /T /F | Out-Null; 'XPC-TIMEOUT' }
 'XPC-RC ' + $p.ExitCode; 'XPC-OUT'; [IO.File]::ReadAllText($o); 'XPC-ERR'; [IO.File]::ReadAllText($e); Remove-Item $e, $o -ErrorAction SilentlyContinue''' % (quoted, (timeout - 20) * 1000), timeout=timeout)
     text = done.text.replace('\r', '')
@@ -119,7 +123,10 @@ def t_hook(dev):
                 done = dev.pb('env', 'hook', shell, '--install', timeout=120)
                 assert done.rc == 0, '%s hook install: %s' % (shell, (done.text + done.errtext)[-200:])
             installed = dev.read(path)
-            assert installed.count(b'pb env') + installed.count(b'paperboat') >= 1 and installed.startswith(original.rstrip(b'\r\n')[:20]), 'user text lost: %r' % installed[:60]
+            # pb adds its line at the top (before a ~/.bashrc's early return for non-interactive shells): the user's text must
+            # still be there, whole and in one piece
+            user_text = original[3:] if original.startswith(b'\xef\xbb\xbf') else original
+            assert user_text.rstrip(b'\r\n') in installed, 'user text lost: %r' % installed[:200]
             lines = [l for l in installed.splitlines() if b'paperboat' in l.lower() or b'pb env' in l]
             assert len(lines) == 1, '%s: %d hook lines after two installs: %r' % (shell, len(lines), lines)
             if dev.os == 'windows':
