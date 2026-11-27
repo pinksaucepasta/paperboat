@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -229,14 +231,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, request previewv1.DispatchReq
 	// (dial, TLS handshake: e.g. the edge has no certificate for the runtime
 	// name) cannot have reached the machine, so the outcome is certain and the
 	// preview fails cleanly instead of staying allocating.
-	var wroteRequest atomic.Bool
+	var wroteRequest, tlsStarted atomic.Bool
 	httpRequest = httpRequest.WithContext(httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
-		WroteHeaderField: func(string, []string) { wroteRequest.Store(true) },
-		WroteHeaders:     func() { wroteRequest.Store(true) },
+		TLSHandshakeStart: func() { tlsStarted.Store(true) },
+		WroteHeaderField:  func(string, []string) { wroteRequest.Store(true) },
+		WroteHeaders:      func() { wroteRequest.Store(true) },
 	}))
 	response, err := d.client.Do(httpRequest)
 	if err != nil {
-		if !wroteRequest.Load() && !errors.Is(err, runtimeattachment.ErrRouteMoving) {
+		if !wroteRequest.Load() && requestCtx.Err() == nil && networkUnreached(err, tlsStarted.Load()) {
 			return previewv1.DispatchOutcome{}, &DispatchError{Code: "machine_unreachable", Retryable: true, Cause: err}
 		}
 		return previewv1.DispatchOutcome{}, classifyTransportError(requestCtx, err)
@@ -308,6 +311,25 @@ func allErrorLeavesMatch(err error, allowed ...error) (matched bool) {
 
 var errLeaseExpired = errors.New("preview lease deadline has passed")
 var errRemoteResponseInvalid = errors.New("preview dispatch response is invalid")
+
+// networkUnreached reports a network dial or TLS handshake failure. Caller
+// cancels, route moves and local failures (the PostgreSQL route lookup in the
+// edge dialer) are not, and keep their usual classification.
+func networkUnreached(err error, tlsStarted bool) bool {
+	if errors.Is(err, runtimeattachment.ErrRouteMoving) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var connectErr *pgconn.ConnectError
+	var pgErr *pgconn.PgError
+	if errors.As(err, &connectErr) || errors.As(err, &pgErr) {
+		return false
+	}
+	if tlsStarted {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
+}
 
 func classifyTransportError(ctx context.Context, err error) error {
 	if errors.Is(err, runtimeattachment.ErrRouteMoving) {

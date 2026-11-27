@@ -570,7 +570,7 @@ func directPreviewDispatchError(err error) (dispatch *previewdispatch.DispatchEr
 
 func previewDispatchCodeKnown(code string) bool {
 	switch code {
-	case "machine_unavailable", "machine_route_moving", "route_resolution_failed", "route_unavailable", "lease_expired", "credential_mint_failed", "request_encoding_failed", "timeout", "canceled", "transport_failed", "remote_response_read_failed", "remote_invalid_response", "remote_uncertain", "remote_binding_mismatch", "remote_rejected":
+	case "machine_unavailable", "machine_route_moving", "machine_unreachable", "route_resolution_failed", "route_unavailable", "lease_expired", "credential_mint_failed", "request_encoding_failed", "timeout", "canceled", "transport_failed", "remote_response_read_failed", "remote_invalid_response", "remote_uncertain", "remote_binding_mismatch", "remote_rejected":
 		return true
 	default:
 		return false
@@ -603,6 +603,10 @@ func writePreviewDispatchError(w http.ResponseWriter, r *http.Request, err error
 	case "machine_route_moving":
 		w.Header().Set("Retry-After", "2")
 		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The machine was moving to another edge and was not reached; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
+	case "machine_unreachable":
+		// Dial or TLS handshake failed before any request byte was sent (L41).
+		w.Header().Set("Retry-After", "2")
+		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The machine could not be reached and nothing was sent; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
 	case "route_unavailable":
 		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusServiceUnavailable, dispatch.Code, "control_unavailable", "The selected machine route is unavailable. Refresh the machine connection, then create a new preview with a new Idempotency-Key.", "changed", false, "refresh_machine", err)
 	case "lease_expired":

@@ -6,18 +6,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	wire "github.com/pinksaucepasta/paperboat/shared/previewdispatch"
 )
 
@@ -376,8 +380,8 @@ func TestDispatchTLSHandshakeFailureIsCertainNotUncertain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reached := false
-	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+	var reached atomic.Bool
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached.Store(true) }))
 	defer server.Close()
 	// Default client does not trust the test certificate: handshake fails.
 	dispatcher, err := New(Config{Resolver: &testRouteResolver{route: MachineRoute{EnvironmentID: "env_1", BaseURL: server.URL}}, Signer: provider, Issuer: "issuer", Client: &http.Client{}, Timeout: time.Second, Now: func() time.Time { return now }})
@@ -389,7 +393,74 @@ func TestDispatchTLSHandshakeFailureIsCertainNotUncertain(t *testing.T) {
 	if !errors.As(err, &dispatchErr) || dispatchErr.Uncertain || errors.Is(err, previewv1.ErrDispatchUncertain) || dispatchErr.Code != "machine_unreachable" {
 		t.Fatalf("handshake failure = %#v", err)
 	}
-	if reached {
+	if reached.Load() {
 		t.Fatal("request reached the server")
+	}
+}
+
+func l41Dispatcher(t *testing.T, client *http.Client, baseURL string) *Dispatcher {
+	t.Helper()
+	provider, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	dispatcher, err := New(Config{Resolver: &testRouteResolver{route: MachineRoute{EnvironmentID: "env_1", BaseURL: baseURL}}, Signer: provider, Issuer: "issuer", Client: client, Timeout: time.Second, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dispatcher
+}
+
+// A failure after the request headers were written may have reached the machine.
+func TestDispatchFailureAfterHeadersStaysUncertain(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	}))
+	defer server.Close()
+	_, err := l41Dispatcher(t, server.Client(), server.URL).Dispatch(context.Background(), testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || !dispatchErr.Uncertain || dispatchErr.Code == "machine_unreachable" {
+		t.Fatalf("post-write failure = %#v", err)
+	}
+}
+
+func TestDispatchRouteMovingKeepsItsCode(t *testing.T) {
+	client := &http.Client{Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: runtimeattachment.ErrRouteMoving}
+	}}}
+	_, err := l41Dispatcher(t, client, "https://machine.rt.example.test").Dispatch(context.Background(), testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || dispatchErr.Code != "machine_route_moving" {
+		t.Fatalf("route moving = %#v", err)
+	}
+}
+
+func TestDispatchCallerCancelBeforeDialIsNotUnreachable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &http.Client{Transport: &http.Transport{DialContext: func(dialCtx context.Context, _, _ string) (net.Conn, error) {
+		cancel()
+		<-dialCtx.Done()
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: dialCtx.Err()}
+	}}}
+	_, err := l41Dispatcher(t, client, "https://machine.rt.example.test").Dispatch(ctx, testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || dispatchErr.Code == "machine_unreachable" || !dispatchErr.Uncertain {
+		t.Fatalf("caller cancel = %#v", err)
+	}
+}
+
+// A local failure in the dialer (route lookup in PostgreSQL) is not a network miss.
+func TestDispatchLocalDialerFailureIsNotUnreachable(t *testing.T) {
+	client := &http.Client{Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, &pgconn.PgError{Code: "57P01"}
+	}}}
+	_, err := l41Dispatcher(t, client, "https://machine.rt.example.test").Dispatch(context.Background(), testDispatchRequest())
+	var dispatchErr *DispatchError
+	if !errors.As(err, &dispatchErr) || dispatchErr.Code == "machine_unreachable" {
+		t.Fatalf("local dialer failure = %#v", err)
 	}
 }
