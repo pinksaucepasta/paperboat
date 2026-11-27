@@ -126,6 +126,8 @@ class NoShellVariableInSingleQuotes(unittest.TestCase):
     """A python -c program in single quotes is never expanded by the shell, so "$CT_HOME" reaches python literally and the
     file it names is never found (the fresh machines of the final re-check failed that way). Such programs read HOME from os.environ."""
     PATTERN = re.compile(r"python3? -c '[^']*\$CT_")
+    # fresh_pair_lib.sh is sent to the container's shells: CT_* are not set there, so a variable inside any single-quoted command is literal
+    SENT_TO_CONTAINER = re.compile(r"(python3?|bash|sh) -c '[^']*\$CT_")
 
     def test_no_variable_in_single_quoted_python(self):
         found = []
@@ -134,6 +136,11 @@ class NoShellVariableInSingleQuotes(unittest.TestCase):
                 if self.PATTERN.search(line):
                     found.append(f'{path.name}:{n}: {line.strip()[:120]}')
         self.assertEqual(found, [], 'a shell variable inside a single-quoted python -c program is not expanded (read HOME from os.environ):\n' + '\n'.join(found))
+
+    def test_library_sent_to_containers_expands_nothing_in_single_quotes(self):
+        found = [f'fresh_pair_lib.sh:{n}: {l.strip()[:120]}' for n, l in enumerate((HERE / 'fresh_pair_lib.sh').read_text().splitlines(), 1)
+                 if self.SENT_TO_CONTAINER.search(l)]
+        self.assertEqual(found, [], 'CT_* are unset inside the container: use ~ in a single-quoted container command:\n' + '\n'.join(found))
 
 
 if __name__ == '__main__':
