@@ -122,7 +122,14 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	if g.reserved.Claims == nil {
 		g.reserved.Claims = map[string]claim{}
 	}
-	g.claims = &claimBook{Claims: g.reserved.Claims}
+	g.claims = &claimBook{Claims: g.reserved.Claims, bound: func(ip string) bool {
+		for _, lease := range g.leases {
+			if lease.ip == ip {
+				return true
+			}
+		}
+		return false
+	}}
 	g.restoreInherited()
 	defer retirePlatform(cfg)
 	defer g.startPreviewPAC(ctx)()

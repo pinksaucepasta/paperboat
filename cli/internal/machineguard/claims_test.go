@@ -125,3 +125,48 @@ func TestRepairAtTheClaimCapReplacesTheHeldClaim(t *testing.T) {
 		t.Fatalf("re-pair at cap: got %q err %v, want %q", got, err, held)
 	}
 }
+
+// pb reset re-pairs at once: the new record can be acquired before the inventory that releases the old one. The
+// old record's still-active claim yields the server's address when nothing is bound there, never while it is,
+// and never to another account.
+func TestResetRepairTakesTheAddressOfTheOldRecordsActiveClaim(t *testing.T) {
+	book, now := newClaimBook(), time.Now()
+	bound := map[string]bool{}
+	book.bound = func(ip string) bool { return bound[ip] }
+	slot := netip.MustParseAddr("127.100.0.29")
+	if _, err := book.assign(claimKey{UID: "1001", Account: "acct", Machine: "m_old"}, slot, now); err != nil {
+		t.Fatal(err)
+	}
+	bound["127.100.0.29"] = true
+	if got, _ := book.assign(claimKey{UID: "1001", Account: "acct2", Machine: "m_x"}, slot, now); got == slot.String() {
+		t.Fatal("another account took an active claim's address")
+	}
+	early, _ := book.assign(claimKey{UID: "1001", Account: "acct", Machine: "m_new"}, slot, now)
+	if early == slot.String() {
+		t.Fatal("the new record took an address the old record's listener is still bound at")
+	}
+	// The old record's listener closes; the new record's next acquire (a daemon restart) moves to the address.
+	bound["127.100.0.29"] = false
+	got, err := book.assign(claimKey{UID: "1001", Account: "acct", Machine: "m_new"}, slot, now)
+	if err != nil || got != slot.String() {
+		t.Fatalf("re-pair after reset: got %q err %v, want %s", got, err, slot)
+	}
+	if _, still := book.Claims[claimKey{UID: "1001", Account: "acct", Machine: "m_old"}.String()]; still {
+		t.Fatal("the old record's claim still holds the address")
+	}
+}
+
+// A claim at another address stays there while a listener is bound at it: one machine's ports never split.
+func TestClaimDoesNotMoveWhileItsListenersAreBound(t *testing.T) {
+	book, now := newClaimBook(), time.Now()
+	bound := map[string]bool{}
+	book.bound = func(ip string) bool { return bound[ip] }
+	key := claimKey{UID: "1001", Account: "acct", Machine: "m"}
+	book.Claims[claimKey{UID: "1002", Account: "other", Machine: "o"}.String()] = claim{IP: "127.100.0.29"}
+	first, _ := book.assign(key, netip.MustParseAddr("127.100.0.29"), now)
+	delete(book.Claims, claimKey{UID: "1002", Account: "other", Machine: "o"}.String())
+	bound[first] = true
+	if again, _ := book.assign(key, netip.MustParseAddr("127.100.0.29"), now); again != first {
+		t.Fatalf("a bound claim moved from %s to %s", first, again)
+	}
+}
