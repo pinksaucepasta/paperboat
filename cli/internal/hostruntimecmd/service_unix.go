@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -119,6 +120,11 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 		return err
 	}
 	if args[0] == "install-supplied" || args[0] == "commit-supplied" || args[0] == "rollback-supplied" {
+		// A half-done install or rollback must not end with the terminal: Ctrl-C, a hangup or a terminate sudo relays
+		// from it are ignored, and writes to pb's closed output return EPIPE instead of killing the step (device check
+		// 11-27: a resumed rollback died of SIGPIPE writing its error). Tailscale ignores SIGPIPE the same way
+		// (tailscaled.go:623).
+		signal.Ignore(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGPIPE)
 		var recover func(context.Context) error
 		hooks := hostinstall.PreparedUpdateHooks{}
 		if args[0] == "install-supplied" {

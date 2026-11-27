@@ -371,6 +371,31 @@ var (
 	suppliedRecoveryBound  = 45 * time.Second
 )
 
+// systemdRun is the transient-unit launcher; tests replace it.
+var systemdRun = "/usr/bin/systemd-run"
+
+// detachedLauncher runs a Linux install, commit or rollback step as a transient systemd service (Tailscale's
+// clientupdate does the same with systemd-run --wait --pipe --collect, clientupdate.go:381). Under sudo the step was
+// in sudo's terminal session: closing the terminal made sudo-rs kill it about 3 s later even with every signal
+// ignored, and killing sudo at a bound hung it up (device checks 11-27, Ubuntu sudo-rs 0.2.13). As a service of PID 1
+// it finishes whatever happens to pb, sudo or the terminal; --wait and --pipe keep its output, input and exit status
+// for pb, and KillMode=process leaves anything it started running. macOS needs no launcher: its sudo never kills a
+// child that ignores the hangup (service_unix.go ignores it), so the step stays a plain child there.
+func detachedLauncher(arguments []string) []string {
+	if runtime.GOOS != "linux" || len(arguments) != 2 || arguments[0] != "__runtime-service" {
+		return nil
+	}
+	switch arguments[1] {
+	case "install-supplied", "commit-supplied", "rollback-supplied":
+	default:
+		return nil
+	}
+	if info, err := os.Stat(systemdRun); err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	return []string{systemdRun, "--quiet", "--wait", "--pipe", "--collect", "--property=KillMode=process"}
+}
+
 // yieldInstallIO marks an update's context: its privileged children run at idle I/O and nice 10 (e4586fcee).
 type yieldInstallIO struct{}
 
@@ -391,11 +416,16 @@ var privilegedInstallCommand = func(ctx context.Context, effectiveUID int, rootH
 	}
 	args = append(args, executable)
 	args = append(args, arguments...)
+	launcher := []string{"/usr/bin/env"}
+	if transient := detachedLauncher(arguments); transient != nil {
+		// The service manager runs the step, not sudo's session: see detachedLauncher.
+		launcher = append(transient, "/usr/bin/env", "HOME="+rootHome, "USER=root", "LOGNAME=root")
+	}
 	if effectiveUID == 0 {
 		args = append([]string{"HOME=" + rootHome, "USER=root", "LOGNAME=root"}, args...)
-		return exec.CommandContext(ctx, "/usr/bin/env", args...)
+		return exec.CommandContext(ctx, launcher[0], append(launcher[1:], args...)...)
 	}
-	sudo := []string{"-H", "--", "/usr/bin/env"}
+	sudo := append([]string{"-H", "--"}, launcher...)
 	if os.Getenv("PB_RECIPE") != "" {
 		// A recipe install never asks for a password (PLAN F26): without passwordless sudo it fails at once.
 		sudo = append([]string{"-n"}, sudo...)
