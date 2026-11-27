@@ -36,6 +36,7 @@ NEEDS = {
     'console-signout-switch': ['console_tools', 'operator_session', 'operator_password', 'team_admin'],
     'console-invite-mail': ['console_tools', 'operator_session', 'team_admin'],
     'console-recording-replay': ['console_tools', 'fixture_host'],
+    'staging-edge-outage': ['staging_stack'],
     # recipe_checks.py: throwaway console accounts and containers; the clean real machines are optional (their rows are NOT RUN without)
     **{check: ['console_tools', 'fixture_host'] for check in recipe_checks.CHECKS + account_rows.CHECKS},
     'billing-console': ['console_tools', 'workspace_db'],
@@ -145,6 +146,21 @@ def operator_password():
     return None
 
 
+def staging_stack():
+    """Read only: every target is provably staging, and every staging edge is ready and heartbeating."""
+    import staging_edge_outage
+    staging = staging_edge_outage.Staging(*staging_edge_outage.settings())
+    try:
+        staging.guard()
+        stale = [c for c, _, node in staging.edges if not (lambda h: h[0] and h[1] < 30)(staging.heartbeat_age(node))]
+    except (RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+        stale, reason = None, str(error)[:200]
+    if stale is None or stale:
+        return 'the staging stack is not usable (%s). Fix: set SMOKE_STAGING_API and staging_host; deploy/staging.py status, then deploy/staging.py edge IMAGE (%s)' % (
+            reason if stale is None else 'edge not ready: ' + ', '.join(stale), FIX_ACCOUNTS)
+    return None
+
+
 def s3_keys():
     for name in ('.f19-s3ak', '.f19-s3sk'):
         path = Path.home() / name
@@ -210,7 +226,7 @@ def workspace_db():
 
 
 VERIFIERS = {f.__name__: f for f in (workspace_db, team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
-                                      s3_keys, fixture_host, windows_rsync, console_tools, operator_password)}
+                                      s3_keys, fixture_host, windows_rsync, console_tools, operator_password, staging_stack)}
 
 
 def selected(args):

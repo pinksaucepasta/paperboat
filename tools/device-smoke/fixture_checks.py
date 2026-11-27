@@ -3,6 +3,7 @@
 
 usage: fixture_checks.py free-plan|config-team-default|team-business|recording-key-rotation|fresh-install-window|billing-console|bandwidth-throttle-send|plus-alias-signup|billing-team-lifecycle
        fixture_checks.py console-team-admin|console-signout-switch|console-invite-mail|console-recording-replay   (console_rows.py)
+       fixture_checks.py staging-edge-outage   (staging_edge_outage.py: STAGING only)
 Each check makes its own throwaway machines in Docker containers on SMOKE_FIXTURE_HOST (fixture_machine.sh: paired as the
 account of a stored console session), runs the unchanged check script against them and revokes them on every exit path.
 Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"}; exit 0 only for PASS.
@@ -36,6 +37,7 @@ import threading
 import time
 
 import console_rows
+import staging_edge_outage
 import ct_env
 import dev_targets
 from results_dir import results_dir
@@ -434,7 +436,7 @@ def fresh_install_window(m):
 
 
 CHECKS = {'free-plan': free_plan, 'config-team-default': config_team_default, 'team-business': team_business, 'recording-key-rotation': recording_key_rotation,
-          'fresh-install-window': fresh_install_window, **console_rows.CHECKS}
+          'fresh-install-window': fresh_install_window, 'staging-edge-outage': staging_edge_outage.check, **console_rows.CHECKS}
 
 
 def main(argv):

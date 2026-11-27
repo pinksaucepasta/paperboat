@@ -103,6 +103,26 @@ expired token; about 12 minutes because the expired token is waited out). The ro
 on Windows. Not automated: a pairing the server refuses as an unsupported platform (no supported test OS can send one).
 
 
+## Staging edge outage (F21-17)
+
+`fixture_checks.py staging-edge-outage` (`smoke.sh` row `staging-edge-outage`, `staging_edge_outage.py`) runs on **staging only**.
+It makes a public tunnel and a public preview on a paired staging fixture, cuts every staging edge off the staging control server
+for 100 s (DROP rules inside the edge's network namespace; a timer on the staging host removes them even if the run dies), and
+requires every URL to keep answering with the marker during the cut and for 60 s after it, then to drop (404) only when deleted.
+It refuses to change anything unless the API host has an `stg` label and is not `SMOKE_OPERATOR_API`, the fixture's pb is signed in
+to it and each edge's own `control_url` is it. One run at a time. It disturbs shared staging: nothing else may use the staging
+edge during the row.
+
+| Setting | Default |
+|---|---|
+| `staging_host` (top level) | none |
+| `SMOKE_STAGING_API` | none, e.g. `https://REGION.stg.DOMAIN:18443` |
+| `SMOKE_STAGING_MACHINE` | `pb-stg-a` (a paired container on `staging_host`) |
+| `SMOKE_STAGING_EDGES` | `pb-stg-edge:18446:stg_managed_edge` (container, public HTTPS port, node id; comma separated) |
+
+Needed beforehand: the staging server, edge and fixture on the build under test (`deploy/staging.py status`, `check`, `edge IMAGE`).
+F21-37 (idle public TCP and TLS-passthrough streams) has no row: staging has no public TCP or TLS routes (`public_routes: []`).
+
 ## Extra Windows machines (winpool)
 
 `winpool.sh` turns up to fourteen GitHub-hosted `windows-latest` runners into temporary Windows test machines, so
