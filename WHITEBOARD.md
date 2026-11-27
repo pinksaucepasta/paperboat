@@ -4,6 +4,9 @@ Everything here is after launch unless its group says otherwise (user decision 2
 
 ## Soon: right after the smoke
 
+### Unverified first sign-up can claim an address (L36)
+A new WorkOS subject with email_verified=false still creates an account (WorkOS SSO and test fixtures report unverified, so refusing it locked out real users and was reverted). Such an account then blocks the verified owner's x+tag/exact sign-up with 409. Fix after launch: let a verified sign-up take over an address held only by an unverified account that never verified, or require verification per auth method.
+
 ### Refresh vs ban row-lock order (found in L36 review)
 WorkOS session refresh locks the session row (FOR UPDATE OF s, held across the WorkOS call) and then updates the users row; operator ban locks users FOR UPDATE and then revokes sessions. Postgres resolves the rare deadlock by aborting one side; if refresh loses, the rotated refresh token is rolled back and that user is signed out once. Fix: take the users row lock first in refresh (separate lock before the session row), or update users in a second transaction. Already there before L36; impact is one sign-out of an account being banned.
 
