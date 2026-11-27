@@ -10,7 +10,7 @@ import (
 // fills in the names and dates the server sends in details.
 var recipeMessages = map[string]string{
 	"invalid_recipe":        "The recipe file is not valid. Fix the listed errors and try again.",
-	"invalid_recipe_reach":  "The recipe's \"reach\" list names something this workspace does not have. Fix it and try again.",
+	"invalid_recipe_reach":  "The recipe's [[reach]] names something this workspace does not have. Fix it and try again.",
 	"unknown_vault":         "The recipe reads an ENV vault this workspace does not have. List them with `pb env vault list`.",
 	"unknown_repository":    "The recipe names a config repository that is not connected. Connect one with `pb config repository connect <url>`.",
 	"vault_key_missing":     "The recipe reads an ENV vault whose key could not be wrapped for it. Unlock ENV with `pb env unlock`, then run the command again.",

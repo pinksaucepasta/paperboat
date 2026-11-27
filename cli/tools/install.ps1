@@ -143,15 +143,15 @@ try {
     $installedPb = Invoke-PaperboatInstall $download
     Write-Host "Installed pb to $installedPb"
   }
-  if ($recipe -or $null -ne $tokenFile) {
-    # One pairing path: a recipe (pb pair reads PB_RECIPE; an already paired machine is left as it is) or an
-    # enrollment token file, both named by PB_NAME else the computer name. It uses the installed binary and never
-    # purges an existing identity.
+  if ($recipe) {
+    # pb pair reads PB_RECIPE; an already paired machine is left as it is.
+    $pairArgs = @('pair')
+    Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
+  } elseif ($null -ne $tokenFile) {
     if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$env:COMPUTERNAME }
     $name = $name.Trim().ToLowerInvariant()
-    $pairArgs = @('pair')
-    if (-not $recipe) { $pairArgs += @('--enrollment-token-file', $tokenFile) }
-    $pairArgs += @('--name', $name)
+    # Pairing uses the installed binary and never purges an existing identity.
+    $pairArgs = @('pair', '--enrollment-token-file', $tokenFile, '--name', $name)
     Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
   } else {
     # No token: continue into the browser approval, which adds this computer to the account.

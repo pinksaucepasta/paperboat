@@ -64,7 +64,7 @@ func runWindowsInstaller(t *testing.T, r *fakeRelease, noSSHKeygen bool, env ...
 		script += "$env:PATH = '" + filepath.Join(r.root, "empty") + "'\n"
 	}
 	// pwsh on Linux is not Windows: the installer's OS guard (checked by its own test) is cut out so its download logic runs here.
-	script += "$text = (Get-Content -Raw -LiteralPath '" + r.powershell + "') -replace '(?m)^if \\(\\$PSVersionTable\\.PSEdition -eq ''Core'' -and -not \\$IsWindows\\).*$', ''\n$text = $text -replace '(?m)^  \\$principal = .*$', '' -replace '(?m)^  if \\(-not \\$principal\\.IsInRole.*$', ''\nInvoke-Expression $text\n"
+	script += "$text = (Get-Content -Raw -LiteralPath '" + r.powershell + "') -replace '(?m)^if \\(\\$PSVersionTable\\.PSEdition -eq ''Core'' -and -not \\$IsWindows\\).*$', ''\nInvoke-Expression $text\n"
 	if err := os.WriteFile(harness, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -247,18 +247,5 @@ func TestInstallPowerShellOnANonWindowsHostSaysWhichCommandToUse(t *testing.T) {
 	out, err := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", "install.ps1").CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "this command is for Windows") || strings.Contains(string(out), "Download") {
 		t.Fatalf("pwsh on this host: err %v, output %q", err, out)
-	}
-}
-
-// A recipe install pairs through the same path as a token install, named by PB_NAME (the Windows recipe row gave the
-// machine the computer's hostname). The administrator check is cut out above: pwsh on Linux has no Windows principal.
-func TestInstallPowerShellRecipeInstallPairsWithPBName(t *testing.T) {
-	r := windowsRelease(t)
-	calls, out, err := runWindowsInstaller(t, r, false, "PB_RECIPE=pbr_"+strings.Repeat("a", 63), "PB_NAME=Runner-7")
-	if err != nil {
-		t.Fatalf("installer failed: %v\n%s", err, out)
-	}
-	if joined := strings.Join(calls, "\n"); !strings.Contains(joined, "pb pair --name runner-7") {
-		t.Fatalf("recipe pair did not get PB_NAME: %q", calls)
 	}
 }
