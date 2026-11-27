@@ -171,6 +171,48 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 		c.resetNameGenerationLocked(ctx)
 		return err
 	}
+	// pb reset re-pairs a machine as a new record at the old record's server address. Close the listeners of
+	// machines that left the snapshot and release their claims before acquiring, so the new record gets the
+	// address pb machine list shows (smoke 1127: the guard still saw the old claim active and gave .37, not .29).
+	present := make(map[string]bool, len(peers))
+	for _, peer := range peers {
+		if peer != nil {
+			present[peer.GetPeerId()] = true
+		}
+	}
+	var gone []*guardedRoute
+	for key, route := range c.routes {
+		if !present[route.machineID] {
+			gone = append(gone, route)
+			delete(c.routes, key)
+		}
+	}
+	if len(gone) > 0 {
+		cleanup := c.launchCleanupLocked(func() error {
+			var causes []error
+			// One policy change for all of them, as for the removed routes below (350 ms per listener at 1000 machines).
+			if batch, ok := nameClient.(interface {
+				ReleaseMachines(context.Context, []netip.AddrPort) error
+			}); ok && len(gone) > 1 {
+				var listeners []netip.AddrPort
+				for _, route := range gone {
+					listeners = append(listeners, netip.AddrPortFrom(route.address, uint16(route.port)))
+				}
+				causes = append(causes, lifecycleCleanup(batch.ReleaseMachines(ctx, listeners)))
+			}
+			for _, route := range gone {
+				causes = append(causes, route.close())
+			}
+			return coordinatorFailure("removed local routes could not close", causes...)
+		})
+		select {
+		case <-cleanup.done:
+		case <-ctx.Done():
+			c.resetNameGenerationLocked(ctx)
+			return errors.Join(ctx.Err(), context.Cause(ctx))
+		}
+	}
+	c.replaceClaimsLocked(ctx, nameClient)
 	wanted := make(map[string]*guardedRoute)
 	wantedWeb := make(map[string]guardedWebRoute)
 	names := make(map[string]netip.Addr)
@@ -367,15 +409,6 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 			diagnosticlog.TryWarn("some machine names were not published; the others work", "error", err)
 		}
 	}
-	// Claims are released only against the last complete inventory read (every machine, online or not), never
-	// against the routable peers: an offline machine keeps its address, and a withdrawal (expired services, a
-	// rejected snapshot, an outage) releases nothing. The guard holds released claims 7 days and refuses an
-	// empty set while claims exist.
-	if machines := c.claimMachines; c.cfg.AccountID != "" && len(machines) > 0 {
-		if err := nameClient.ReplaceClaims(ctx, c.cfg.AccountID, machines); err != nil {
-			diagnosticlog.TryWarn("local machine address claims were not updated; the guard keeps them", "error", err)
-		}
-	}
 	var removedRoutes []*guardedRoute
 	for key, route := range c.routes {
 		if _, ok := wanted[key]; !ok {
@@ -419,6 +452,18 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 	c.routes = wanted
 	c.webRoutes = wantedWeb
 	return nil
+}
+
+// Claims are released only against the last complete inventory read (every machine, online or not), never
+// against the routable peers: an offline machine keeps its address, and a withdrawal (expired services, a
+// rejected snapshot, an outage) releases nothing. The guard holds released claims 7 days and refuses an
+// empty set while claims exist.
+func (c *Coordinator) replaceClaimsLocked(ctx context.Context, nameClient guardedNameClient) {
+	if machines := c.claimMachines; c.cfg.AccountID != "" && len(machines) > 0 {
+		if err := nameClient.ReplaceClaims(ctx, c.cfg.AccountID, machines); err != nil {
+			diagnosticlog.TryWarn("local machine address claims were not updated; the guard keeps them", "error", err)
+		}
+	}
 }
 
 func (c *Coordinator) withdrawGuardedLocked() {
