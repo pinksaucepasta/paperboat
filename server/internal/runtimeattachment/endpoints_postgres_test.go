@@ -325,6 +325,28 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
 		t.Fatalf("readiness with one of two live edges serving = %v, want not serving", err)
 	}
+	// The machine's carrier is up on both edges and the second has not observed the route yet: not ready (525).
+	exec(`UPDATE runtime_carrier_attachments SET ready=true WHERE machine_id=$1`, f.machine)
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness with both carriers up and one edge serving = %v, want not serving", err)
+	}
+	// The second edge's carrier is still connecting (inside the attach window): still waited for (migration 526).
+	exec(`UPDATE runtime_carrier_attachments SET ready=false WHERE machine_id=$1 AND edge_node_id=$2`, f.machine, backupNode)
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness with the second carrier still attaching = %v, want not serving", err)
+	}
+	// The machine never reached the second edge (firewalled: its carrier row exists but never came up past the
+	// attach window): that edge does not hold readiness back, the reachable one serves (F2, support_f5af40d7).
+	exec(`UPDATE runtime_carrier_attachments SET attached_at=now()-interval '1 minute' WHERE machine_id=$1 AND edge_node_id=$2`, f.machine, backupNode)
+	if err := gate(); err != nil {
+		t.Fatalf("readiness waited for an edge the machine never reached: %v", err)
+	}
+	// No carrier up anywhere past the window (no edge counts): not ready, never vacuously ready.
+	exec(`UPDATE runtime_carrier_attachments SET ready=false,attached_at=now()-interval '1 minute' WHERE machine_id=$1`, f.machine)
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness with no carrier up = %v, want not serving", err)
+	}
+	exec(`UPDATE runtime_carrier_attachments SET ready=true,attached_at=now() WHERE machine_id=$1`, f.machine)
 	exec(`UPDATE control_tunnel_nodes SET drain_deadline=now()+interval '1 hour' WHERE id=$1`, backupNode)
 	if err := gate(); err != nil {
 		t.Fatalf("readiness waited for a draining edge: %v", err)
