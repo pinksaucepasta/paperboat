@@ -105,3 +105,58 @@ func TestLifecycleRollbackLeavesRolesAloneWhenTheExecutableWasNeverSwapped(t *te
 		t.Fatalf("a failure before the executable was swapped disturbed the roles: %v", calls)
 	}
 }
+
+// A failed bound pb update --from left the failed build's root privileged service running (smoke 11-27, Mac and
+// Linux: 2 pins live). That role runs a pinned executable, so the worker-slot check never restarted it: rollback
+// rewrote its definition back to the prior pin and "started" a service already running the candidate's program.
+// A running role whose definition the replacement changed is stopped before its definition is restored.
+func TestLifecycleRollbackRestartsARoleWhoseDefinitionTheReplacementChanged(t *testing.T) {
+	root := shorttemp.MachineDir(t)
+	image := filepath.Join(root, "image")
+	if err := writeFile(image, "prior exact image and configuration"); err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	var mu sync.Mutex
+	newRole := func(id, executable string) *fakeTransactionalComponent {
+		component := newFakeTransactionalComponent(id, &calls, &mu)
+		component.status = NativeComponentStatus{ID: id, Installed: true, Enabled: true, Running: true, Ready: true, Definition: []byte("ExecStart=" + executable)}
+		return component
+	}
+	privileged := newRole("privileged", "/opt/paperboat/releases/pins/old/pb daemon __runtime-host-service")
+	carrier := newRole("carrier", "/opt/paperboat/releases/pins/carrier/pb daemon __runtime-carrier")
+	manager, err := NewLifecycleManager(LifecycleConfig{
+		StateRoot: filepath.Join(root, "lifecycle"), NativeInstallation: fileInstallationState{image},
+		Components:        []TransactionalComponent{privileged, carrier},
+		RunsReplacedImage: func(NativeComponentStatus) bool { return false },
+		ImageSwapped:      func([]byte) bool { return true },
+		RestartsWhenRedefined: func(status NativeComponentStatus) bool {
+			return bytes.Contains(status.Definition, []byte("__runtime-host-service"))
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("the new version's daemon never became ready")
+	err = manager.Replace(context.Background(), func(context.Context) error {
+		mu.Lock()
+		privileged.status.Definition = []byte("ExecStart=/opt/paperboat/releases/pins/new/pb daemon __runtime-host-service") // the candidate's pin, started
+		// The carrier's unit is rewritten with the candidate's render but its process is not restarted.
+		carrier.status.Definition = []byte("ExecStart=/opt/paperboat/releases/pins/carrier/pb daemon __runtime-carrier --new-flag")
+		calls = nil
+		mu.Unlock()
+		return failure
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("replace error = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	joined := strings.Join(calls, ",")
+	if !strings.Contains(joined, "privileged:stop,privileged:restore") {
+		t.Fatalf("rollback calls %q: the role running the candidate's pin was not stopped before its restore", joined)
+	}
+	if strings.Contains(joined, "carrier:stop") {
+		t.Fatalf("rollback restarted the carrier, whose process never left the prior program: %q", joined)
+	}
+}

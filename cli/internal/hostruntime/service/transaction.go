@@ -88,6 +88,11 @@ type LifecycleConfig struct {
 	// actually replaced when a rollback begins. A replacement that failed before touching the executable
 	// restarts nothing.
 	ImageSwapped func(captured []byte) bool
+	// RestartsWhenRedefined identifies roles whose process the replacement restarted from their new definition
+	// (the privileged host service, on a pinned executable). Running with a definition the replacement changed,
+	// such a role runs the candidate's program and is restarted on rollback. Roles whose definition is rewritten
+	// without a restart (the carrier) must not match: they still run the prior program and keep their connections.
+	RestartsWhenRedefined func(NativeComponentStatus) bool
 }
 
 type LifecycleManager struct {
@@ -100,6 +105,7 @@ type LifecycleManager struct {
 	rollbackTimeout    time.Duration
 	runsReplacedImage  func(NativeComponentStatus) bool
 	imageSwapped       func([]byte) bool
+	restartsRedefined  func(NativeComponentStatus) bool
 }
 
 type lifecycleOperation string
@@ -164,6 +170,7 @@ func NewLifecycleManager(config LifecycleConfig) (*LifecycleManager, error) {
 		rollbackTimeout:    rollbackTimeout,
 		runsReplacedImage:  config.RunsReplacedImage,
 		imageSwapped:       config.ImageSwapped,
+		restartsRedefined:  config.RestartsWhenRedefined,
 	}, nil
 }
 
@@ -526,11 +533,16 @@ func (m *LifecycleManager) rollbackKeeping(ctx context.Context, journal lifecycl
 		// A role that runs the replaced executable may still be running the candidate's image even when
 		// its unit and state look unchanged (or were changed and then restored without a restart):
 		// stop it so the restore below starts it on the restored executable.
+		current, inspectErr := component.Inspect(ctx)
 		restart := swapped && before.Running && m.runsReplacedImage(before)
+		// A role the replacement restarted from a changed definition (a pinned executable, which the check above
+		// does not see) runs the candidate's program: restoring its definition alone leaves that process up, since a
+		// start of a running service starts nothing (systemctl start, launchctl kickstart without -k).
+		restart = restart || (journal.Operation == lifecycleReplace && m.restartsRedefined != nil && before.Running &&
+			inspectErr == nil && current.Running && !bytes.Equal(current.Definition, before.Definition) && m.restartsRedefined(before))
 		if restart && component.ID() == self {
 			restart, finishSelf = false, func(context.Context) error { return nil } // stopping the caller's own service would end this recovery
 		}
-		current, inspectErr := component.Inspect(ctx)
 		if !restart && inspectErr == nil && sameComponentStatus(current, before) {
 			continue
 		}

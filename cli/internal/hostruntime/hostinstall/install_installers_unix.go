@@ -185,6 +185,11 @@ func buildLifecycleManager(request Request, paths installPaths, host, hostd, upd
 		RunsReplacedImage: func(status service.NativeComponentStatus) bool {
 			return bytes.Contains(status.Definition, []byte(paths.worker))
 		},
+		// The privileged host service is restarted from its new (pinned) definition by the replacement; the
+		// carrier's unit is rewritten without a restart (publishUnixControlLifetime) and must keep running.
+		RestartsWhenRedefined: func(status service.NativeComponentStatus) bool {
+			return bytes.Contains(status.Definition, []byte("__runtime-host-service"))
+		},
 		// The baseline names the executable that was installed; the slot holding anything else means the
 		// replacement reached the executable and roles may be running the candidate's image.
 		ImageSwapped: func(captured []byte) bool {
