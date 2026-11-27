@@ -475,6 +475,11 @@ func TestAbandonedCheckoutIsExpiredForNewCheckout(t *testing.T) {
 	if _, err := s.Checkout(ctx, user, user+"@example.test", "", code, "second-"+x, ok, cancel, 1); err != nil || f.checkouts != 2 || len(f.expired) != 1 || f.expired[0] != "cs_test" {
 		t.Fatalf("new checkout after an abandoned one: err=%v checkouts=%d expired=%v", err, f.checkouts, f.expired)
 	}
+	// A retry of the newest checkout replays its open session and never expires it.
+	f.checkoutState = "open"
+	if _, err := s.Checkout(ctx, user, user+"@example.test", "", code, "second-"+x, ok, cancel, 1); err != nil || len(f.expired) != 1 || f.checkouts != 2 {
+		t.Fatalf("retry of the same checkout: err=%v expired=%v checkouts=%d", err, f.expired, f.checkouts)
+	}
 	f.checkoutState = "complete"
 	if _, err := s.Checkout(ctx, user, user+"@example.test", "", code, "third-"+x, ok, cancel, 1); !errors.Is(err, billing.ErrCheckoutPending) || f.checkouts != 2 {
 		t.Fatalf("checkout after a completed one: err=%v checkouts=%d", err, f.checkouts)

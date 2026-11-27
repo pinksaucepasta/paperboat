@@ -220,7 +220,7 @@ func (s *WorkspaceService) Checkout(ctx context.Context, account, email, team, p
 	// The newest checkout's Stripe state is read before the transaction: WorkspaceTx holds the team write
 	// lock, and no provider call runs under a database lock (F21-20). The transaction uses it only if that
 	// checkout is still the newest.
-	priorState, err := s.priorCheckoutState(ctx, account, team)
+	priorState, err := s.priorCheckoutState(ctx, account, team, key)
 	if err != nil {
 		return CheckoutSession{}, err
 	}
@@ -546,7 +546,8 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 	if err != nil {
 		return false, err
 	}
-	if initial, err = s.reapplySeatReductionOnResume(ctx, initial); err != nil {
+	initial, dropReduction, err := s.reapplySeatReductionOnResume(ctx, initial)
+	if err != nil {
 		return false, err
 	}
 	processed := false
@@ -680,9 +681,9 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 		// A scheduled seat reduction is kept while the subscription is cancelling: Stripe releases the schedule
 		// on cancel, and if the customer keeps the plan reapplySeatReductionOnResume schedules it again (L37).
 		// It is dropped once it can no longer apply: the subscription ended or was replaced, or the cancel was
-		// lifted without the reduction being scheduled again (the team uses more seats than it leaves).
+		// lifted without the reduction being scheduled again (Stripe refused it, or the team uses more seats).
 		if newSubscription || current.Status == "canceled" || current.Status == "incomplete_expired" ||
-			(!current.CancelAtPeriodEnd && current.ScheduleID == "" && wasCancelling) {
+			(!current.CancelAtPeriodEnd && current.ScheduleID == "" && (wasCancelling || dropReduction)) {
 			if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1`, workspaceID); err != nil {
 				return err
 			}
@@ -706,7 +707,7 @@ type checkoutProviderState struct {
 	err     error
 }
 
-func (s *WorkspaceService) priorCheckoutState(ctx context.Context, account, team string) (checkoutProviderState, error) {
+func (s *WorkspaceService) priorCheckoutState(ctx context.Context, account, team, key string) (checkoutProviderState, error) {
 	workspaceID := "personal:" + account
 	if team != "" {
 		workspaceID = "team:" + team
@@ -726,9 +727,9 @@ func (s *WorkspaceService) priorCheckoutState(ctx context.Context, account, team
 	}
 	out.session, out.err = s.stripe.GetCheckoutSession(ctx, prior.ProviderSessionID)
 	// An abandoned checkout (L38) stays open on Stripe for a day and would block every new checkout of the
-	// workspace. Expire our own recorded session first; if it completed meanwhile Stripe refuses, and the
+	// workspace. Expire our own recorded session first (never on a retry of that same checkout, which replays it); if it completed meanwhile Stripe refuses, and the
 	// re-read reports the completion, which still blocks a second subscription.
-	if expirer, ok := s.stripe.(checkoutSessionExpirer); ok && out.err == nil && out.session.Status == "open" &&
+	if expirer, ok := s.stripe.(checkoutSessionExpirer); ok && out.key != key && out.err == nil && out.session.Status == "open" &&
 		out.session.ID == prior.ProviderSessionID && out.session.CustomerID == prior.ProviderCustomerID && out.session.CheckoutOperation == out.key {
 		_ = expirer.ExpireCheckoutSession(ctx, prior.ProviderSessionID)
 		out.session, out.err = s.stripe.GetCheckoutSession(ctx, prior.ProviderSessionID)

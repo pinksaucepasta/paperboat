@@ -43,7 +43,8 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := 0
-	webhook := func() {
+	var webhookErr func(bool) error
+	webhookErr = func(must bool) error {
 		t.Helper()
 		n++
 		var event billing.StripeWebhook
@@ -51,10 +52,13 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 		event.Type = "customer.subscription.updated"
 		event.Data.Object.ID = sub.ID
 		event.Data.Object.Object = "subscription"
-		if _, err := service.HandleWebhook(ctx, event); err != nil {
+		_, err := service.HandleWebhook(ctx, event)
+		if must && err != nil {
 			t.Fatal(err)
 		}
+		return err
 	}
+	webhook := func() { t.Helper(); webhookErr(true) }
 	scheduled := func(want int, when string) {
 		t.Helper()
 		w, err := service.Overview(ctx, owner, team)
@@ -74,6 +78,14 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 	resumed := fake.subs[sub.ID]
 	resumed.CancelAtPeriodEnd = false
 	fake.subs[sub.ID] = resumed
+	// The first attempt fails after Stripe created the schedule: the event stays unacknowledged, and the
+	// retry rewrites that schedule instead of trusting it.
+	fake.fail[sub.ID] = true
+	if err := webhookErr(false); err == nil {
+		t.Fatal("a failed reschedule acknowledged the event")
+	}
+	scheduled(2, "after a failed reschedule")
+	before = len(fake.reductions)
 	webhook()
 	if len(fake.reductions) != before+1 {
 		t.Fatalf("keeping the plan did not schedule the reduction again: %+v", fake.reductions)
@@ -91,4 +103,27 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 		t.Fatalf("repeat event scheduled again: %+v", fake.reductions)
 	}
 	scheduled(2, "after a repeat event")
+	// Cancel and keep-plan both land before either is recorded: Stripe shows no schedule, the row never said
+	// cancelling. The reduction is scheduled again all the same.
+	lost := fake.subs[sub.ID]
+	lost.ScheduleID = ""
+	fake.subs[sub.ID] = lost
+	webhook()
+	if len(fake.reductions) != before+2 || fake.subs[sub.ID].ScheduleID == "" {
+		t.Fatalf("a schedule lost without a recorded cancel was not restored: %+v", fake.reductions)
+	}
+	scheduled(2, "after restoring a lost schedule")
+	// The team now uses more seats than the reduction leaves: the reduction is dropped, renewal stays at 3.
+	for _, m := range []string{"usr_resume_a_" + x, "usr_resume_b_" + x} {
+		insertUser(t, store, m, m+"@example.test")
+		exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, m)
+	}
+	lost = fake.subs[sub.ID]
+	lost.ScheduleID = ""
+	fake.subs[sub.ID] = lost
+	webhook()
+	w, err := service.Overview(ctx, owner, team)
+	if err != nil || w.ScheduledQuantity != nil {
+		t.Fatalf("an impossible reduction was kept: %+v err=%v", w, err)
+	}
 }
