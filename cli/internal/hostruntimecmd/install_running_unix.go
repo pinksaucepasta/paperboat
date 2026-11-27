@@ -189,7 +189,11 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 				failure.step = step
 				return failure
 			}
-			return runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", err, stderrReason(reason), runtimeContextFailure(callCtx))
+			printed := ""
+			if reason.String() != "" { // a step that wrote nothing left no reason above
+				printed = " (its reason is printed above)"
+			}
+			return runtimeFailure("installing the supplied Paperboat executable failed"+printed+"; if administrator access was declined, approve it and rerun `pb install`", err, stderrReason(reason), runtimeContextFailure(callCtx))
 		}
 		return nil
 	}
@@ -204,7 +208,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if ctx.Err() != nil {
 		// Cancelled before the privileged step: start nothing, with the same authored failure and cause a
 		// cancelled start of it gave.
-		return "", runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", runtimeContextFailure(ctx))
+		return "", runtimeFailure("installing the supplied Paperboat executable failed; if administrator access was declined, approve it and rerun `pb install`", runtimeContextFailure(ctx))
 	}
 	// The privileged step is not held to the caller's deadline, like a package manager install (Tailscale
 	// clientupdate/clientupdate.go:511 and :642 run apt-get and dnf without one): killing sudo at that deadline left

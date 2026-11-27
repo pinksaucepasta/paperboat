@@ -188,7 +188,7 @@ func TestUpdateWhoseDaemonCannotStartIsReportedAsRolledBack(t *testing.T) {
 	err := fmt.Errorf("install: %w", hostinstall.ErrUpdateNotReady)
 	failure := classifyCommandFailure(err)
 	message := commandFailureMessage(err, failure)
-	if failure.kind != commandRejected || !strings.Contains(message, "previous version was restored") || !strings.Contains(message, "nothing was changed") || strings.Contains(message, "administrator") {
+	if failure.kind != commandRejected || !strings.Contains(message, "previous version was restored") || !strings.Contains(message, "nothing was changed") || strings.Contains(message, "administrator") || strings.Contains(message, "printed above") {
 		t.Fatalf("kind=%v message=%q", failure.kind, message)
 	}
 	result := classifyCLIJSONError(err)
