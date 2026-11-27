@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
@@ -11,7 +12,9 @@ import (
 // the verified email become membership, and an SSO sign-in through a team's WorkOS organization
 // satisfies that team's Require SSO (and queues JIT provisioning where the team allows it).
 func recordTeamSignInTx(ctx context.Context, tx *db.Tx, account, email string, profile WorkOSProfile) error {
-	if profile.EmailVerified {
+	// Directory invitations are auto-accepted only for the exact address they
+	// name: a +tag can be a different mailbox from x (F13-07, L36).
+	if profile.EmailVerified && strings.EqualFold(strings.TrimSpace(profile.Email), email) {
 		if err := teams.AcceptDirectoryInvitationsTx(ctx, tx, account, email); err != nil {
 			return err
 		}
