@@ -206,7 +206,7 @@ Get-Service -Name 'Paperboat*' -ErrorAction SilentlyContinue | ForEach-Object Na
 'END'
 '''
 WINDOWS_APPLY_RECORD = r'''
-foreach ($d in (Join-Path $env:APPDATA 'paperboat'), (Join-Path $env:USERPROFILE '.config\paperboat')) {
+foreach ($d in (Join-Path $env:LOCALAPPDATA 'Paperboat'), (Join-Path $env:APPDATA 'paperboat'), (Join-Path $env:USERPROFILE '.config\paperboat')) {
   $p = Join-Path $d 'recipe-apply.json'
   if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks; Get-Content -Raw -LiteralPath $p; exit 0 }
 }
