@@ -76,23 +76,30 @@ func actionPing(command *cobra.Command, args []string) error {
 		return invocationError(errors.New("--timeout must be greater than zero and no more than 1m"))
 	}
 	ctx := actionContext(command, args)
-	dependencies, err := buildDeps(ctx)
+	prepared, err := preparePing(command.Context(), command.ErrOrStderr(), func(prepareCtx context.Context) (pingPrepared, error) {
+		dependencies, err := buildDeps(ctx)
+		if err != nil {
+			return pingPrepared{}, err
+		}
+		if dependencies.peerLocal == nil {
+			return pingPrepared{}, errors.New("pb ping requires an authenticated Paperboat server")
+		}
+		machine, err := resolveMachineWarmFirst(prepareCtx, args[0], func() (*api.Client, error) { return backendClient(ctx) })
+		if err != nil {
+			return pingPrepared{}, err
+		}
+		if !machine.Online {
+			return pingPrepared{}, &api.APIError{Code: "machine_offline", Message: "This machine is offline."}
+		}
+		if err := requireLocalDaemonService(prepareCtx, dependencies.cfg); err != nil {
+			return pingPrepared{}, fmt.Errorf("prepare local peer transport: %w", err)
+		}
+		return pingPrepared{dependencies: dependencies, machine: machine}, nil
+	})
 	if err != nil {
 		return err
 	}
-	if dependencies.peerLocal == nil {
-		return errors.New("pb ping requires an authenticated Paperboat server")
-	}
-	machine, err := resolveMachineWarmFirst(command.Context(), args[0], func() (*api.Client, error) { return backendClient(ctx) })
-	if err != nil {
-		return err
-	}
-	if !machine.Online {
-		return &api.APIError{Code: "machine_offline", Message: "This machine is offline."}
-	}
-	if err := requireLocalDaemonService(command.Context(), dependencies.cfg); err != nil {
-		return fmt.Errorf("prepare local peer transport: %w", err)
-	}
+	dependencies, machine := prepared.dependencies, prepared.machine
 	target := resolver.ConnectInfo{TargetKind: "machine", MachineID: machine.ID, Machine: machine.Alias, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
 	report := pingReport{Schema: "paperboat.ping/v1", MachineID: machine.ID, MachineName: machine.Alias, Sent: count, Samples: make([]pingSample, 0, count)}
 	previousSelection := ""
@@ -192,5 +199,50 @@ func nativeSnapshotPath(path string) string {
 		return "relay"
 	default:
 		return ""
+	}
+}
+
+type pingPrepared struct {
+	dependencies *deps
+	machine      api.UserMachine
+}
+
+// Before its first sample pb ping resolves the target and makes sure the local
+// daemon serves. On Windows that can stall (a cold daemon start, a busy pipe)
+// while printing nothing; say so after pingPrepareNotice and give up after
+// pingPrepareTimeout even if a step ignores its context.
+var (
+	pingPrepareNotice  = 3 * time.Second
+	pingPrepareTimeout = localDaemonReadyTimeout + 15*time.Second
+)
+
+var errPingPrepareTimeout = errors.New("pb ping could not reach the local Paperboat service in time; run `pb doctor`, then retry")
+
+func preparePing(ctx context.Context, notices io.Writer, prepare func(context.Context) (pingPrepared, error)) (pingPrepared, error) {
+	prepareCtx, cancel := context.WithTimeout(ctx, pingPrepareTimeout)
+	defer cancel()
+	type outcome struct {
+		prepared pingPrepared
+		err      error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		prepared, err := prepare(prepareCtx)
+		done <- outcome{prepared, err}
+	}()
+	notice := time.NewTimer(pingPrepareNotice)
+	defer notice.Stop()
+	for {
+		select {
+		case result := <-done:
+			return result.prepared, result.err
+		case <-notice.C:
+			fmt.Fprintln(notices, "Waiting for the local Paperboat service...")
+		case <-prepareCtx.Done():
+			if ctx.Err() != nil {
+				return pingPrepared{}, ctx.Err()
+			}
+			return pingPrepared{}, fmt.Errorf("%w (waited %s)", errPingPrepareTimeout, pingPrepareTimeout)
+		}
 	}
 }
