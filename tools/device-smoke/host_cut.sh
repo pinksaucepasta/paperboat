@@ -14,6 +14,10 @@
 # those units that passed the output drop. A unit that restarted during the cut got a new cgroup the rules do not
 # match, and a pb of UID outside the units was never cut: both fail the removal.
 #
+# SSH_HOST "local" cuts this machine, without SSH: a check's own client cut (network_drop.py). PB_CUT_ALSO then names
+# further cgroups to cut with the units, relative to /sys/fs/cgroup (the check's own, which holds every pb it starts, and
+# the machine guard's unit). The SSH session, a hosted runner's tunnel and its job agent are in none of them.
+#
 # Where sudo wants a password, PB_CUT_SUDO_FILE names a private file on the controller with it on the first line. It goes
 # over ssh's stdin to the host's sudo only: never an argument, never printed.
 set -euo pipefail
@@ -31,6 +35,9 @@ add)
 esac
 failsafe=${PB_CUT_FAILSAFE:-900}
 [[ $failsafe =~ ^[0-9]+$ ]] || { echo "PB_CUT_FAILSAFE must be seconds" >&2; exit 2; }
+also=${PB_CUT_ALSO:-}
+[[ $also =~ ^[A-Za-z0-9_./\ -]*$ && $also != *..* ]] || { echo "PB_CUT_ALSO must name cgroups" >&2; exit 2; }
+[ -z "$also" ] || [ "$host" = local ] || { echo "PB_CUT_ALSO is for a local cut" >&2; exit 2; }
 password=""
 if [ -n "${PB_CUT_SUDO_FILE:-}" ]; then
   [ -r "$PB_CUT_SUDO_FILE" ] || { echo "PB_CUT_SUDO_FILE cannot be read" >&2; exit 2; }
@@ -42,15 +49,17 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 uid=$1 action=$2 mode=${3:-}; shift $(($# < 3 ? $# : 3))
 state=/run/pbcut.units
 
-units() { # one line a unit: cgroup path (no leading slash) and the cgroup directory's inode
-  local group
-  {
+units() { # one line a unit: cgroup path (no leading slash) and the cgroup directory's inode; nothing without a Paperboat unit
+  local group found
+  found=$(
     for unit in $(systemctl list-units --no-legend --plain --state=active "paperboat-*u$uid.service" "paperboat-*u$uid-*.service" | awk '{print $1}'); do
       systemctl show -p ControlGroup --value "$unit"
     done
     { find "/sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service" -type d -name paperboatd.service 2>/dev/null || true; } |
       sed 's#^/sys/fs/cgroup##'
-  } | while read -r group; do
+  )
+  [ -n "${found//[[:space:]]/}" ] || return 0
+  { echo "$found"; for group in ${PB_CUT_ALSO:-}; do echo "/$group"; done; } | while read -r group; do
     [ -z "$group" ] || echo "${group#/} $(stat -c %i "/sys/fs/cgroup$group")"
   done | sort
 }
@@ -98,7 +107,7 @@ add)
   }
   addresses=("$@")
   systemctl stop pbcut-failsafe.timer >/dev/null 2>&1 || true
-  systemd-run --quiet --collect --unit=pbcut-failsafe --on-active="$PB_CUT_FAILSAFE" /usr/sbin/nft delete table inet pbcut ||
+  systemd-run --quiet --collect --unit=pbcut-failsafe --on-active="$PB_CUT_FAILSAFE" --timer-property=AccuracySec=1s /usr/sbin/nft delete table inet pbcut ||
     { echo "the failsafe timer could not be set: not cut" >&2; exit 1; }
   {
     echo "table inet pbcut {"
@@ -126,6 +135,7 @@ REMOTE
 )
 # line 1 of stdin is the password (or empty), the rest the script: the wrapper takes the line before sudo sees anything,
 # so a sudo that asks for nothing can never hand it to bash as a command
-run="env PB_CUT_FAILSAFE=$failsafe bash -c \"\$script\" host_cut $uid $action $mode $*"
+run="env PB_CUT_FAILSAFE=$failsafe PB_CUT_ALSO=$(printf %q "$also") bash -c \"\$script\" host_cut $uid $action $mode $*"
 wrapper="IFS= read -r pw; script=\$(cat); if sudo -n true 2>/dev/null; then exec sudo -n $run; fi; printf '%s\\n' \"\$pw\" | sudo -S -k -p '' $run"
-{ printf '%s\n' "$password"; printf '%s\n' "$script"; } | ssh -o BatchMode=yes -o ConnectTimeout=15 "$host" "bash -c $(printf '%q' "$wrapper")"
+if [ "$host" = local ]; then runner=(bash -c "$wrapper"); else runner=(ssh -o BatchMode=yes -o ConnectTimeout=15 "$host" "bash -c $(printf '%q' "$wrapper")"); fi
+{ printf '%s\n' "$password"; printf '%s\n' "$script"; } | "${runner[@]}"

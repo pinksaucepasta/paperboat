@@ -5,10 +5,11 @@ the network returning, and a native terminal attaches within the same 30 s.
 
   net_blip.py TARGET [--down-seconds 300]
 
-The blip cuts the CLIENT: network_drop.cut() (iptables owner-drop on Linux, a pf anchor on macOS), or on a Windows
-device (PB_SMOKE_WINDOWS_PB set) winhost's cut_client(), which blocks pb's own traffic there and leaves SSH alone (a
-cut of the peer, SMOKE_PEER_CUT, would leave this client's doctor rightly healthy). It is lifted on every exit path and
-by a failsafe after down-seconds + 180. The Windows cut also has to prove itself (report "cut"). Prints one JSON line.
+The blip cuts the CLIENT: network_drop.cut() on Linux and macOS (see network_drop.py), or on a Windows device
+(PB_SMOKE_WINDOWS_PB set) winhost's cut_client(), which blocks pb's own traffic there and leaves SSH alone (a cut of the
+peer, SMOKE_PEER_CUT, would leave this client's doctor rightly healthy). It is lifted on every exit path and by a
+failsafe after down-seconds + 180. A cut that can show what it blocked has to (report "cut"; all but a container's
+iptables rule). Prints one JSON line.
 """
 import argparse
 import datetime
@@ -22,7 +23,9 @@ from urllib.parse import urlsplit
 
 import network_drop
 from session_cleanup import cleanup
+from session_lifecycle import ready
 from terminal_lifecycle import Terminal
+import windows_target
 import winhost
 
 PB = network_drop.PB
@@ -34,8 +37,10 @@ LATE_SECONDS = 300  # only to tell slow from stuck in the report
 
 
 def exec_ok(target, timeout=25):
+    # a Windows target has no echo program; the platform is asked once, by the precondition, while the network is up
+    shell = ['cmd', '/c'] if windows_target.is_windows(PB, target) else []
     try:
-        return b'blip-ok' in winhost.run_pb(PB, ['exec', target, '--', 'echo', 'blip-ok'], timeout).stdout
+        return b'blip-ok' in winhost.run_pb(PB, ['exec', target, '--', *shell, 'echo', 'blip-ok'], timeout).stdout
     except subprocess.TimeoutExpired:  # expected while the network is down
         return False
 
@@ -75,18 +80,19 @@ def cut_client(seconds):
 
 
 def release_client(block):
+    """Lifts the cut; returns what a Unix cut proves at its removal (the Windows cut's proof is read later)."""
     if network_drop.DEVICE:
         block.release()
-    else:
-        network_drop.release(block)
+        return None
+    return network_drop.release(block)
 
 
-def attach(target, name, deadline):
-    """A native terminal to target answers a marker before the monotonic deadline (RuntimeError otherwise)."""
-    start = time.monotonic()
+def attach(target, name):
+    """When a native terminal to target has its shell's prompt and answered a marker (RuntimeError if it never does)."""
+    windows = windows_target.is_windows(PB, target)
     terminal = Terminal(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     try:
-        terminal.expect(terminal.marker('BLIP', 'stty -echo; '), timeout=max(1, deadline - start))
+        ready(terminal, windows)
         return time.monotonic()
     finally:
         terminal.close()
@@ -128,15 +134,16 @@ def main():
     forced = bool(args.refusal_helper)
     if bool(args.refusal_helper) != bool(args.refusal_endpoint) or forced and not network_drop.DEVICE:
         parser.error('forced refusal needs a Windows device, --refusal-helper and --refusal-endpoint')
-    if not network_drop.DEVICE and network_drop.sudo(*(['pfctl', '-s', 'info'] if network_drop.DARWIN else ['iptables', '-S', 'OUTPUT'])).returncode:
-        raise RuntimeError('needs sudo without a prompt for ' + ('pfctl' if network_drop.DARWIN else 'iptables'))
+    if not network_drop.DEVICE:
+        network_drop.require_cut_tool()
+    network_drop.join_cgroup()
     if not exec_ok(args.target):
         raise SystemExit('precondition: exec to %s does not work before the blip' % args.target)
     name = 'smoke-blip-' + uuid.uuid4().hex[:10]
     report = {}
     since = (network_drop.DEVICE.ps('device clock', '[DateTime]::UtcNow.ToString("o")')[1]
              if network_drop.DEVICE else datetime.datetime.now(datetime.timezone.utc).isoformat())
-    control_block = None
+    control_block = cut_error = None
     block, failsafe = cut_client(args.down_seconds + 180)
     blocked = True
     try:
@@ -161,7 +168,12 @@ def main():
             cut_at, min(DOCTOR_DEADLINE, args.down_seconds), 'unhealthy' if forced else None)
         report['exec_while_down'] = exec_ok(args.target)
         time.sleep(max(0, args.down_seconds - (time.monotonic() - cut_at)))
-        release_client(block)
+        try:
+            proof = release_client(block)
+            if proof:
+                report['cut'] = proof
+        except (RuntimeError, subprocess.SubprocessError) as error:  # it did not hold: still measure the recovery, then fail
+            report['cut'], cut_error = None, str(error)
         blocked = False
         if forced:
             # Keep only the API blocked: real relays now refuse the cached grants
@@ -190,7 +202,7 @@ def main():
                 time.sleep(1)
             report['exec_late_s'] = round(time.monotonic() - restored, 1) if time.monotonic() - restored < LATE_SECONDS else None
         else:
-            answered = attach(args.target, name, restored + RECOVER_SECONDS)
+            answered = attach(args.target, name)
             report['terminal_after_s'] = round(answered - restored, 1)
         if forced:
             events = fence_events(since)
@@ -208,12 +220,15 @@ def main():
             if (report['recovered_registration']['key_generation'] !=
                     report['refusal_rotation']['key_generation_restored']):
                 raise RuntimeError('recovered authority has not applied the restored registration')
-    except RuntimeError as error:  # the terminal missed its deadline
+    except (RuntimeError, subprocess.SubprocessError) as error:  # the terminal missed its deadline
         report['terminal_after_s'] = None
         report['error'] = str(error)
     finally:
         if blocked:
-            release_client(block)
+            try:
+                release_client(block)
+            except (RuntimeError, subprocess.SubprocessError) as error:
+                print(error, file=sys.stderr, flush=True)
         if control_block is not None:
             control_block.release()
         if failsafe is not None and failsafe.poll() is None:
@@ -228,7 +243,9 @@ def main():
         except RuntimeError as error:
             report['cut'] = None
             report['error'] = ' '.join(filter(None, (report.get('error'), str(error))))
-    ok = (report.get('doctor_flipped_after_s') is not None and report.get('exec_while_down') is False
+    if cut_error:
+        report['error'] = ' '.join(filter(None, (report.get('error'), cut_error)))
+    ok = (report.get('doctor_flipped_after_s') is not None and report.get('exec_while_down') is False and not cut_error
           and (not network_drop.DEVICE or bool(report.get('cut')))
           and report.get('exec_after_s') is not None and report['exec_after_s'] <= RECOVER_SECONDS
           and report.get('terminal_after_s') is not None and report['terminal_after_s'] <= RECOVER_SECONDS)
