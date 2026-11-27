@@ -82,6 +82,11 @@ func writeWorkOSCallbackFailure(w http.ResponseWriter, r *http.Request, err erro
 		return
 	}
 	var verification *auth.WorkOSVerificationError
+	if errors.As(err, &verification) && verification.Reason == "email_not_verified" {
+		logHTTPRejection(r, http.StatusForbidden, "email_not_verified", err)
+		writeError(w, r, http.StatusForbidden, "email_not_verified", "Verify your email address, then sign in again.")
+		return
+	}
 	if errors.Is(err, auth.ErrWorkOSImpersonation) || errors.As(err, &verification) && verification.HTTPStatus == http.StatusBadRequest {
 		logHTTPRejection(r, http.StatusUnauthorized, "auth_callback_failed", err)
 		writeError(w, r, http.StatusUnauthorized, "auth_callback_failed", "Authentication callback could not be verified.", err)
