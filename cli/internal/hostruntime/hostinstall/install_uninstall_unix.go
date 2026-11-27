@@ -252,8 +252,10 @@ func removeCommandLink(request Request, paths installPaths) error {
 // (installWorkerCommand): only a symlink of that exact name, owned by the account, pointing at this installation's
 // worker. A regular file there is the account's own previous pb and stays; a symlink is removed, never followed.
 func removeCommandBackups(bin string, uid int, worker string) error {
-	if info, err := os.Lstat(bin); err != nil || !info.IsDir() {
-		return nil // absent, or a link the account made: not ours to walk
+	for _, directory := range []string{filepath.Dir(bin), bin} {
+		if info, err := os.Lstat(directory); err != nil || !info.IsDir() {
+			return nil // absent, or a link the account made (~/.local or its bin): not ours to walk
+		}
 	}
 	entries, err := os.ReadDir(bin)
 	if err != nil {
