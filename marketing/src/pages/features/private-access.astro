@@ -76,7 +76,7 @@ const faq = [
 
   <Beat id="tcp-title" title="Databases as if they were local">
     <p>Anything that speaks TCP works too: a database, Redis, SSH. Every machine gets a private address, the same on all your devices, so you connect to it directly with no extra command.</p>
-    <Term slot="visual" lines={["$ pb resolve staging", "Alias:    staging", "IP:       127.100.0.7", "$ psql -h 127.100.0.7 app", "app=>", "# Option for tools that need localhost or a fixed local port:", "$ pb access machine staging --port 5432 \\", "    --listen 127.0.0.1:5432", "$ psql -h 127.0.0.1 app", "app=>"]} />
+    <Term slot="visual" lines={["$ pb resolve staging", "Alias:    staging", "IP:       127.100.0.7", "$ psql -h 127.100.0.7 app", "app=>", "# For a fixed localhost port:", "$ pb access machine staging --port 5432 \\", "    --listen 127.0.0.1:5432", "$ psql -h 127.0.0.1 app", "app=>"]} />
   </Beat>
 
   <section class="section section-rule" aria-labelledby="details-title">
