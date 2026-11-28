@@ -314,6 +314,23 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 		t.Fatalf("Free usage with a pre-existing tunnel %+v, want 1 of 0", u)
 	}
 	refused(t, check(t, store, personal, PublicTCP), Free, 0)
+	// No change for private access and public HTTP on Free: a tcp_private route is never counted and a new
+	// tunnel (HTTP) still fits the publications limit.
+	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,preserve_host,created_by_actor_id,updated_by_actor_id)
+ VALUES('rte_private_'||$1,$1,'private','private_tcp','catch_all','tcp','127.0.0.1:2',false,$2,$2)`, first, user)
+	if u := func() Usage {
+		var out map[Kind]Usage
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) { out, err = UsageTx(ctx, tx, personal); return }); err != nil {
+			t.Fatal(err)
+		}
+		return out[PublicTCP]
+	}(); u.Used != 1 {
+		t.Fatalf("a private TCP route counted as public TCP: %+v", u)
+	}
+	if err := check(t, store, personal, Publications); err != nil {
+		t.Fatalf("a public HTTP tunnel on Free was refused: %v", err)
+	}
+	exec(`DELETE FROM paperboat.tunnel_routes WHERE id='rte_private_'||$1`, first)
 	// Only live ones count on Pro below: delete the pre-existing one.
 	exec(`UPDATE paperboat.tunnel_routes SET desired_state='deleted',deleted_at=now() WHERE tunnel_id=$1`, first)
 	// Free on a self-hosted tunnel edge (the workspace edge mode decides where its tunnels are served; a
@@ -341,6 +358,12 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 		t.Fatalf("a tunnel of an offline machine counted: %v", err)
 	}
 	exec(`UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine)
+	// No change for paid public TCP on a self-hosted edge: Pro at its limit is still allowed there.
+	exec(`INSERT INTO paperboat.selfhost_pool_policies(capability,mode,scope_kind,scope_id,installation_ids) VALUES('tunnel','self-hosted-only','account',$1,'{}')`, user)
+	if err := check(t, store, personal, PublicTCP); err != nil {
+		t.Fatalf("Pro on a self-hosted edge was limited: %v", err)
+	}
+	exec(`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id=$1`, user)
 	usage := func(scope Scope) Usage {
 		t.Helper()
 		var out map[Kind]Usage
@@ -374,6 +397,9 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(capability,mode,scope_kind,scope_id,installation_ids) VALUES('tunnel','self-hosted-only','team',$1,'{}')`, team)
 	if u := usage(Scope{Team: team}); u.Limit != nil {
 		t.Fatalf("a self-hosted team is not limited, usage %+v", u)
+	}
+	if err := check(t, store, teamScope, PublicTCP); err != nil {
+		t.Fatalf("a team on a self-hosted edge was limited: %v", err)
 	}
 	exec(`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id=$1`, team)
 }
