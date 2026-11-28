@@ -513,20 +513,54 @@ WHERE r.id = ANY($2::text[])`, previews, routes)
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
+	gated, err := navigationGatedResources(ctx, store, previews, routes)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]int{} // hostname -> index in rules: marks of every decision of a hostname add up
 	for _, d := range decisions {
 		key := [2]string{"route", d.Binding.RouteID}
 		if d.Binding.Lifecycle == wire.TunnelEphemeral {
 			key = [2]string{"preview", d.Binding.PublicationID}
 		}
 		l, ok := byResource[key]
-		if (!ok && !free[key]) || seen[d.Binding.Hostname] {
+		navigation := gated[key] && d.Binding.Audience == "public"
+		if !ok && !free[key] && !navigation {
 			continue
 		}
-		seen[d.Binding.Hostname] = true
-		rules = append(rules, wire.IngressIPRule{Hostname: d.Binding.Hostname, Allow: l.allow, Deny: l.deny, FreeRequests: free[key]})
+		if i, dup := seen[d.Binding.Hostname]; dup {
+			rules[i].FreeRequests = rules[i].FreeRequests || free[key]
+			rules[i].NavigationGated = rules[i].NavigationGated || navigation
+			continue
+		}
+		seen[d.Binding.Hostname] = len(rules)
+		rules = append(rules, wire.IngressIPRule{Hostname: d.Binding.Hostname, Allow: l.allow, Deny: l.deny, FreeRequests: free[key], NavigationGated: navigation})
 	}
 	return rules, nil
+}
+
+// navigationGatedResources picks, from the previews (lease ids) and tunnel HTTP routes (route ids) of an edge's
+// decisions, the public ones whose workspace is on the Free plan without the public_browser grant
+// (workspace_navigation_gated): the edge makes their browser page loads sign in.
+func navigationGatedResources(ctx context.Context, store *db.DB, previews, routes []string) (map[[2]string]bool, error) {
+	rows, err := store.Pool().Query(ctx, `SELECT 'preview', p.id FROM preview_leases p
+WHERE p.id = ANY($1::text[]) AND p.access_mode='public' AND paperboat.workspace_navigation_gated('preview',p.id,p.account_id,p.owner_team_id)
+UNION ALL
+SELECT 'route', r.id FROM tunnel_routes r JOIN tunnels t ON t.id=r.tunnel_id
+WHERE r.id = ANY($2::text[]) AND r.protocol='http' AND t.access_mode='public' AND paperboat.workspace_navigation_gated('tunnel',t.id,t.account_id,t.owner_team_id)`, previews, routes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	gated := map[[2]string]bool{}
+	for rows.Next() {
+		var kind, id string
+		if err := rows.Scan(&kind, &id); err != nil {
+			return nil, err
+		}
+		gated[[2]string{kind, id}] = true
+	}
+	return gated, rows.Err()
 }
 
 // freeOwnedResources picks, from the previews (lease ids) and tunnel routes (route ids) of an edge's decisions, those a

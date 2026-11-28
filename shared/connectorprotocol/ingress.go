@@ -120,13 +120,16 @@ type IngressOffline struct {
 // FreeRequests marks a publication a Free account owns: its requests meet the Free request rates
 // (edgelimits.FreeRequests). SignIn marks a public preview whose owner saved a list of viewers: the edge
 // asks every visitor to sign in and forwards only on a browser decision (the server publishes no public
-// decision for it). An entry may carry only these marks. It grants no authority.
+// decision for it). NavigationGated marks a public publication on the Free plan (Paperboat-managed edge): a
+// browser page load needs a browser sign-in, every other request passes as public. An entry may carry only these
+// marks. It grants no authority.
 type IngressIPRule struct {
-	Hostname     string   `json:"hostname"`
-	Allow        []string `json:"allow,omitempty"`
-	Deny         []string `json:"deny,omitempty"`
-	FreeRequests bool     `json:"free_requests,omitempty"`
-	SignIn       bool     `json:"sign_in,omitempty"`
+	Hostname        string   `json:"hostname"`
+	Allow           []string `json:"allow,omitempty"`
+	Deny            []string `json:"deny,omitempty"`
+	FreeRequests    bool     `json:"free_requests,omitempty"`
+	SignIn          bool     `json:"sign_in,omitempty"`
+	NavigationGated bool     `json:"navigation_gated,omitempty"`
 }
 
 // ErrPublicationBlocked is the typed reason an edge refuses a taken-down hostname.

@@ -99,7 +99,10 @@ type Config struct {
 	// PreviewSignIn reports a public preview whose owner saved a list of viewers: the edge serves it as a private
 	// one, to signed-in viewers on their browser decision only.
 	PreviewSignIn func(host string) bool
-	FreeRequests  *FreeRequestLimits
+	// NavigationGated reports a public host on the Free plan: a browser page load (pageLoad) needs a browser sign-in
+	// through BrowserAccess, every other request (API, webhook, WebSocket, subresource) passes as public.
+	NavigationGated func(host string) bool
+	FreeRequests    *FreeRequestLimits
 }
 
 type routeMatchContextKey struct{}
@@ -754,6 +757,29 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErrorPage(w, 401, signInMessage)
 		return
 	}
+	navigationGated := false
+	if matched.Rule.AccessMode == "public" && !privateAuthorized && isAppRouteKind(expectedKind) && p.config.NavigationGated != nil && p.config.NavigationGated(host) && pageLoad(r) {
+		// Free plan: a page load signs in like a private route; the request then still rides the route's public
+		// ingress decision (the sign-in is only a gate).
+		if p.config.BrowserAccess == nil {
+			writeErrorPage(w, http.StatusUnauthorized, freeSignInMessage)
+			return
+		}
+		if _, hasCookie := browserCookie(r, browserEdgeCookie); !hasCookie && len(r.Header.Values("Paperboat-Access-Token")) == 0 && !browserNavigation(r) {
+			writeErrorPage(w, http.StatusUnauthorized, freeSignInMessage)
+			return
+		}
+		gated := matched
+		gated.Rule.AccessMode = "private"
+		var finish func()
+		var ok bool
+		r, finish, ok = p.config.BrowserAccess.authorize(w, r, gated)
+		if !ok {
+			return
+		}
+		defer finish()
+		navigationGated = true
+	}
 	privateRoute := !browserAuthorized && matched.Rule.AccessMode == "private" && (expectedKind == dataCarrierPreviewPrivateRouteKind || expectedKind == string(route.TunnelHTTPSWSS))
 	if privateRoute {
 		// Private routes are reachable only through stable hostd's authenticated
@@ -825,7 +851,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, p.config.MaxBodyBytes)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if isAppRouteKind(expectedKind) { // the app's response gets its headers per route (appResponseHeaders)
-		r = r.WithContext(context.WithValue(r.Context(), appRouteKey{}, appRoute{gated: matched.Rule.AccessMode != "public", preview: expectedKind != string(route.TunnelHTTPSWSS)}))
+		r = r.WithContext(context.WithValue(r.Context(), appRouteKey{}, appRoute{gated: matched.Rule.AccessMode != "public" || navigationGated, preview: expectedKind != string(route.TunnelHTTPSWSS)}))
 	} else {
 		setStrictEdgeHeaders(w.Header())
 	}

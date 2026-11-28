@@ -241,6 +241,7 @@ func TestPrivatePreviewAllowListPostgres(t *testing.T) {
 
 func TestTeamAndLazyPreviewsTakeNoAllowListPostgres(t *testing.T) {
 	f := newPrivatePolicyFixture(t)
+	f.pro()
 	// A public preview limited to its owner alone stays a publish-time choice (pb preview --private).
 	public, _ := f.preview("public", "public", "")
 	if _, err := f.set("preview", public, public, AudienceOwner, 0); !errors.Is(err, ErrPolicyEdgeTransition) {
@@ -290,6 +291,7 @@ func TestPrivateTunnelAllowListPostgres(t *testing.T) {
 // owner, who keeps access, and nobody else.
 func TestStalePublicPolicyOnPrivateTunnelAdmitsOnlyTheOwnerPostgres(t *testing.T) {
 	f := newPrivatePolicyFixture(t)
+	f.pro()
 	id, route, host := f.tunnel("stale", "public")
 	if _, err := f.set("tunnel", id, route, AudiencePublic, 0); err != nil {
 		t.Fatal(err)
@@ -406,6 +408,17 @@ func TestFreeAccountSetsAllowListsPostgres(t *testing.T) {
 	for _, host := range []string{previewHost, privateHost} {
 		f.admits(host, map[string]bool{f.owner: true, f.listed: true, f.domain: true, f.other: false})
 	}
+	// A free public tunnel takes a list too, but the edge keeps it public (only page loads sign in) and it cannot be
+	// set back to "public": on the free plan browser visitors must sign in.
 	public, publicRoute, publicHost := f.tunnel("freepublic", "public")
-	f.listThenPublic(public, publicRoute, publicHost)
+	if _, err := f.set("tunnel", public, publicRoute, AudienceSpecificEmails, 0, "guest@partner.test", "*@company.test"); err != nil {
+		t.Fatalf("allow list on a free public tunnel = %v", err)
+	}
+	if mode := f.edgeMode(publicRoute); mode != "public" {
+		t.Fatalf("edge mode of a listed free public tunnel = %q, want public (page loads gated)", mode)
+	}
+	f.admits(publicHost, map[string]bool{f.owner: true, f.listed: true, f.domain: true, f.other: false})
+	if _, err := f.set("tunnel", public, publicRoute, AudiencePublic, 1); !errors.Is(err, ErrPlanBrowserPublic) {
+		t.Fatalf("free public audience = %v, want ErrPlanBrowserPublic", err)
+	}
 }

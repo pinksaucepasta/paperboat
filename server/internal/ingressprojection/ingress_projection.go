@@ -328,6 +328,24 @@ func (s SQLIngressSource) RestrictedRoute(ctx context.Context, nodeID, epoch, au
 	return rows[0], nil
 }
 
+// NavigationGatedRoute is the decision a browser sign-in on a public HTTP tunnel route of the Free plan stands on:
+// the route's public projection, bound to the private audience of the sign-in. The edge checks it only as the page-load
+// gate; the request itself rides the route's public decision.
+func (s SQLIngressSource) NavigationGatedRoute(ctx context.Context, nodeID, epoch, routeID, hostname string) (wire.IngressDecision, error) {
+	if wire.ValidateIdentifier(nodeID) != nil || wire.ValidateOpaqueEpoch(epoch) != nil || wire.ValidateIdentifier(routeID) != nil || (hostname == "" || len(hostname) > 253) {
+		return wire.IngressDecision{}, wire.ErrIngressDenied
+	}
+	rows, err := s.project(ctx, nodeID, epoch, "public", routeID, hostname)
+	if err != nil {
+		return wire.IngressDecision{}, err
+	}
+	if len(rows) != 1 || rows[0].Binding.Protocol != "http" {
+		return wire.IngressDecision{}, wire.ErrIngressDenied
+	}
+	rows[0].Binding.Audience = "private"
+	return rows[0], nil
+}
+
 // admitPublic keeps the decisions whose workspace is paid up and inside its bandwidth allowance, and records each
 // admitted binding with the accounting authority: one lookup of every route's payer and one group admission per pull
 // (a pull re-admits every route the edge serves, and 1,000 of them one by one outlived the decisions: F21-168).

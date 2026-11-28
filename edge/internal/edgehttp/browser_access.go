@@ -258,6 +258,28 @@ func safeBrowserReturn(path string) bool {
 func browserNavigation(r *http.Request) bool {
 	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document" && !isWebSocketUpgrade(r.Header)
 }
+
+// pageLoad reports a browser page load: a navigation of a document or a frame. A client that sends no Sec-Fetch
+// headers (older browsers, some embedded views) is a page load when it asks for HTML. A WebSocket upgrade, a fetch/XHR
+// and every subresource are not. The Free plan's sign-in gate (Config.NavigationGated) applies only to page loads.
+func pageLoad(r *http.Request) bool {
+	if isWebSocketUpgrade(r.Header) {
+		return false
+	}
+	mode, dest := r.Header.Get("Sec-Fetch-Mode"), r.Header.Get("Sec-Fetch-Dest")
+	if dest == "object" || dest == "embed" { // <object>/<embed> render the HTML as a page without a navigation
+		return true
+	}
+	if mode != "" || dest != "" {
+		return mode == "navigate" && (dest == "document" || dest == "iframe" || dest == "frame" || dest == "")
+	}
+	for _, accept := range r.Header.Values("Accept") {
+		if strings.Contains(strings.ToLower(accept), "text/html") {
+			return true
+		}
+	}
+	return false
+}
 func browserError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, control.ErrBrowserUnauthenticated):

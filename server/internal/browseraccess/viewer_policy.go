@@ -24,19 +24,22 @@ var ErrPolicyConflict = errors.New("viewer policy generation conflict")
 var ErrPolicyOwnerChanged = errors.New("viewer policy owner changed")
 
 type ViewerPolicy struct {
-	ResourceKind     string    `json:"resource_kind"`
-	ResourceID       string    `json:"resource_id"`
-	RouteID          string    `json:"route_id"`
-	OwnerAccountID   string    `json:"owner_account_id"`
-	Audience         string    `json:"audience,omitempty"`
-	TeamID           string    `json:"team_id,omitempty"`
-	AllowedEmails    []string  `json:"allowed_emails,omitempty"`
-	EmailDomain      string    `json:"email_domain,omitempty"`
-	Generation       int64     `json:"generation"`
-	Configured       bool      `json:"configured"`
-	NativeAccessMode string    `json:"native_access_mode"`
-	ServingState     string    `json:"serving_state"`
-	UpdatedAt        time.Time `json:"updated_at,omitempty"`
+	ResourceKind     string   `json:"resource_kind"`
+	ResourceID       string   `json:"resource_id"`
+	RouteID          string   `json:"route_id"`
+	OwnerAccountID   string   `json:"owner_account_id"`
+	Audience         string   `json:"audience,omitempty"`
+	TeamID           string   `json:"team_id,omitempty"`
+	AllowedEmails    []string `json:"allowed_emails,omitempty"`
+	EmailDomain      string   `json:"email_domain,omitempty"`
+	Generation       int64    `json:"generation"`
+	Configured       bool     `json:"configured"`
+	NativeAccessMode string   `json:"native_access_mode"`
+	ServingState     string   `json:"serving_state"`
+	// BrowserSignInRequired is a public route on the Free plan: browser page loads need sign-in by the owner or the
+	// listed emails/domain; APIs, webhooks, WebSockets and subresources still pass unauthenticated.
+	BrowserSignInRequired bool      `json:"browser_sign_in_required,omitempty"`
+	UpdatedAt             time.Time `json:"updated_at,omitempty"`
 }
 
 type SetViewerPolicyRequest struct {
@@ -52,7 +55,8 @@ type SetViewerPolicyRequest struct {
 }
 
 type policyTarget struct {
-	owner, mode                         string
+	owner, mode, ownerTeam              string
+	gated                               bool
 	resourceGeneration, routeGeneration int64
 	expires                             time.Time
 }
@@ -71,7 +75,7 @@ func (s *Service) GetViewerPolicy(ctx context.Context, actor, kind, id, route st
 		if err = requirePolicyManager(ctx, tx, actor, kind, id, target.owner); err != nil {
 			return err
 		}
-		out = ViewerPolicy{ResourceKind: kind, ResourceID: id, RouteID: route, OwnerAccountID: target.owner, NativeAccessMode: target.mode}
+		out = ViewerPolicy{ResourceKind: kind, ResourceID: id, RouteID: route, OwnerAccountID: target.owner, NativeAccessMode: target.mode, BrowserSignInRequired: target.gated}
 		if err = readViewerPolicy(ctx, tx, &out); err != nil {
 			return err
 		}
@@ -103,7 +107,7 @@ func (s *Service) SetViewerPolicy(ctx context.Context, in SetViewerPolicyRequest
 				return err
 			}
 		}
-		if err = ensurePolicyEdgeMode(in.ResourceKind, target.mode, policy.Audience); err != nil {
+		if err = ensurePolicyEdgeMode(in.ResourceKind, target.mode, policy.Audience, target.gated); err != nil {
 			return err
 		}
 		var generation int64
@@ -141,7 +145,7 @@ ON CONFLICT(resource_kind,resource_id,route_id) DO UPDATE SET
 		if err != nil {
 			return err
 		}
-		out = ViewerPolicy{ResourceKind: in.ResourceKind, ResourceID: in.ResourceID, RouteID: in.RouteID, OwnerAccountID: target.owner, NativeAccessMode: target.mode}
+		out = ViewerPolicy{ResourceKind: in.ResourceKind, ResourceID: in.ResourceID, RouteID: in.RouteID, OwnerAccountID: target.owner, NativeAccessMode: target.mode, BrowserSignInRequired: target.gated}
 		if err = readViewerPolicy(ctx, tx, &out); err != nil {
 			return err
 		}
@@ -241,14 +245,19 @@ func loadPolicyTarget(ctx context.Context, tx *db.Tx, kind, id, route string, no
 	var err error
 	switch kind {
 	case "tunnel":
-		err = tx.QueryRow(ctx, `SELECT t.account_id,t.access_mode,t.generation,r.generation,COALESCE(t.expires_at,$3::timestamptz+interval '100 years') FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.id=$1 AND r.id=$2 AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$3) AND r.desired_state='active' AND r.deleted_at IS NULL AND r.protocol='http' FOR UPDATE OF t,r`, id, route, now).Scan(&target.owner, &target.mode, &target.resourceGeneration, &target.routeGeneration, &target.expires)
+		err = tx.QueryRow(ctx, `SELECT t.account_id,t.access_mode,coalesce(t.owner_team_id,''),t.generation,r.generation,COALESCE(t.expires_at,$3::timestamptz+interval '100 years') FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.id=$1 AND r.id=$2 AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$3) AND r.desired_state='active' AND r.deleted_at IS NULL AND r.protocol='http' FOR UPDATE OF t,r`, id, route, now).Scan(&target.owner, &target.mode, &target.ownerTeam, &target.resourceGeneration, &target.routeGeneration, &target.expires)
 	case "preview":
-		err = tx.QueryRow(ctx, `SELECT p.account_id,p.access_mode,p.generation,x.route_generation,LEAST(p.lease_deadline,COALESCE(p.user_deadline,p.lease_deadline),x.expires_at) FROM preview_leases p JOIN preview_routes x ON x.preview_id=p.id AND x.account_id=p.account_id WHERE p.id=$1 AND x.route_id=$2 AND p.terminal_state='active' AND p.lease_deadline>$3 AND x.state='ready' AND x.expires_at>$3 AND NOT EXISTS (SELECT 1 FROM lazy_access_policies lp WHERE 'https://'||lp.hostname=p.endpoint) FOR UPDATE OF p`, id, route, now).Scan(&target.owner, &target.mode, &target.resourceGeneration, &target.routeGeneration, &target.expires)
+		err = tx.QueryRow(ctx, `SELECT p.account_id,p.access_mode,coalesce(p.owner_team_id,''),p.generation,x.route_generation,LEAST(p.lease_deadline,COALESCE(p.user_deadline,p.lease_deadline),x.expires_at) FROM preview_leases p JOIN preview_routes x ON x.preview_id=p.id AND x.account_id=p.account_id WHERE p.id=$1 AND x.route_id=$2 AND p.terminal_state='active' AND p.lease_deadline>$3 AND x.state='ready' AND x.expires_at>$3 AND NOT EXISTS (SELECT 1 FROM lazy_access_policies lp WHERE 'https://'||lp.hostname=p.endpoint) FOR UPDATE OF p`, id, route, now).Scan(&target.owner, &target.mode, &target.ownerTeam, &target.resourceGeneration, &target.routeGeneration, &target.expires)
 	default:
 		return target, ErrInvalid
 	}
 	if err != nil {
 		return target, mapMissing(err)
+	}
+	if target.mode == "public" {
+		if target.gated, err = navigationGated(ctx, tx, kind, id, target.owner, target.ownerTeam, route); err != nil {
+			return target, err
+		}
 	}
 	return target, nil
 }
@@ -295,7 +304,15 @@ func requireBoundPolicyTeam(ctx context.Context, tx *db.Tx, actor, kind, id, own
 	return nil
 }
 
-func ensurePolicyEdgeMode(kind, nativeMode, audience string) error {
+func ensurePolicyEdgeMode(kind, nativeMode, audience string, gated bool) error {
+	if gated {
+		// Free plan on a Paperboat-managed edge: the route stays public at the edge and only browser page loads sign
+		// in, so a policy names who may sign in (owner, emails, domain), never "public".
+		if audience == AudiencePublic {
+			return ErrPlanBrowserPublic
+		}
+		return nil
+	}
 	if kind != "preview" && kind != "tunnel" {
 		return ErrInvalid
 	}
@@ -411,7 +428,14 @@ func applyViewerPolicy(ctx context.Context, tx *db.Tx, a authority, account stri
 	if p.OwnerAccountID != a.owner {
 		return a, ErrNotAuthorized
 	}
-	if a.kind == "tunnel" || a.kind == "preview" {
+	if a.gated {
+		// Free plan (applyNavigationGate): a grant is a sign-in for page loads. A "public" policy left from before the
+		// gate means the owner only.
+		if p.Audience == AudiencePublic {
+			p.Audience = AudienceOwner
+		}
+		a.mode = "private"
+	} else if a.kind == "tunnel" || a.kind == "preview" {
 		if a.nativeMode == "" {
 			a.nativeMode = a.mode
 		}

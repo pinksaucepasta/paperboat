@@ -65,6 +65,7 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel)
 		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
 		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
+		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.billing_workspaces WHERE id='personal:'||$1`, owner)
 		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.users WHERE id IN($1,$2,$3,$4,$5,$6,$7)`, owner, teamViewer, emailViewer, domainViewer, subdomainViewer, suffixViewer, unverifiedViewer)
 	})
 
@@ -76,6 +77,9 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 ($5,$5,'person@sub.company.test',true,'active'),
 ($6,$6,'person@notcompany.test',true,'active'),
 ($7,$7,'person@company.test',false,'active')`, owner, teamViewer, emailViewer, domainViewer, subdomainViewer, suffixViewer, unverifiedViewer)
+	// A Pro owner: public routes stay fully public and every audience behaves as before the Free plan's page-load gate
+	// (free_plan_navigation_gate_postgres_test.go covers the Free plan).
+	exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,product_code,state,provider_subscription_id,period_start,period_end) VALUES('personal:'||$1,$1,'pro-monthly','active','sub_'||$1,now()-interval '1 day',now()+interval '1 day')`, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'browser-host','linux','amd64','/workspace','offline','released')`, machine, owner, "env_vp_"+suffix)
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,'viewer-policy','active','public',1,$3,$4,$5,$2,$6,$6)`, tunnel, owner, "endpoint_"+endpointID, "https://"+host, machine, now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES

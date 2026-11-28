@@ -68,7 +68,13 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 			return d, refused(ctx, a, "viewer_policy_missing")
 		}
 		policyGeneration = a.ViewerPolicyGeneration
-		d, err = (ingressprojection.SQLIngressSource{DB: s.DB}).RestrictedRoute(ctx, node, epoch, a.AccessMode, a.RouteID, a.Hostname)
+		source := ingressprojection.SQLIngressSource{DB: s.DB}
+		if a.NavigationGated {
+			// Free plan: the route is public at the edge; this sign-in only lets a page load through its gate.
+			d, err = source.NavigationGatedRoute(ctx, node, epoch, a.RouteID, a.Hostname)
+		} else {
+			d, err = source.RestrictedRoute(ctx, node, epoch, a.AccessMode, a.RouteID, a.Hostname)
+		}
 	} else if a.ResourceKind == "preview" {
 		d, err = s.preview(ctx, a, node, epoch)
 	} else {
@@ -164,7 +170,7 @@ func (s *Service) recordUsage(ctx context.Context, a browseraccess.Authorization
 func (s *Service) preview(ctx context.Context, a browseraccess.Authorization, node, epoch string) (wire.IngressDecision, error) {
 	var d wire.IngressDecision
 	b := &d.Binding
-	err := s.DB.Pool().QueryRow(ctx, previewSQL, a.ResourceID, a.OwnerAccountID, a.RouteID, node, epoch, a.IssuedAt).Scan(
+	err := s.DB.Pool().QueryRow(ctx, previewSQL, a.ResourceID, a.OwnerAccountID, a.RouteID, node, epoch, a.IssuedAt, a.NavigationGated).Scan(
 		&b.EnvironmentID, &b.AccountID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration,
 		&b.Hostname, &b.OriginScheme, &b.OriginAddress, &d.EdgeNodeID, &d.EdgeProcessEpoch, &d.ConnectorID, &d.SessionID, &d.ProcessGeneration, &d.ConfigGeneration, &d.AssignmentGeneration, &d.ExpiresAt)
 	if err != nil {
@@ -211,7 +217,7 @@ JOIN control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_pr
 WHERE p.id=$1 AND p.account_id=$2 AND a.route_id=$3 AND a.edge_node_id=$4 AND a.edge_process_epoch=$5
  AND p.terminal_state='active' AND p.lease_deadline>$6 AND (p.user_deadline IS NULL OR p.user_deadline>$6)
  AND a.lease_generation>0 AND a.lease_generation<=p.generation AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>$6
- AND p.access_mode IN ('private','team')
+ AND (CASE WHEN $7::boolean THEN p.access_mode='public' AND paperboat.workspace_navigation_gated('preview',p.id,p.account_id,p.owner_team_id) ELSE p.access_mode IN ('private','team') END)
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied'
  AND m.state NOT IN ('pending','revoked','deleted') AND m.public_identity_key=a.machine_identity_public_key
  AND identity.issued_at<=$6 AND identity.expires_at>$6

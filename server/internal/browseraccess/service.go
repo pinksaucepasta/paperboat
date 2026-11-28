@@ -43,6 +43,8 @@ var (
 	ErrAmbiguousTeamAccess  = errors.New("multiple teams authorize browser access; select a team")
 	ErrPolicyEdgeTransition = errors.New("viewer policy requires an edge route transition")
 	ErrPolicyWidening       = errors.New("viewer policy would widen native route access")
+	// ErrPlanBrowserPublic refuses a public viewer policy on the Free plan: browser page loads need sign-in there.
+	ErrPlanBrowserPublic = errors.New("on the free plan, browser visitors must sign in")
 )
 
 type BeginRequest struct {
@@ -111,6 +113,9 @@ type Authorization struct {
 	IssuedAt               time.Time `json:"issued_at"`
 	ExpiresAt              time.Time `json:"expires_at"`
 	SessionExpiresAt       time.Time `json:"session_expires_at"`
+	// NavigationGated is a grant on a public route of the Free plan: it lets a browser page load through the edge's
+	// sign-in gate; the request then rides the route's public ingress decision.
+	NavigationGated bool `json:"navigation_gated,omitempty"`
 }
 type MachineCredentialRequest struct {
 	AccountID    string        `json:"-"`
@@ -277,10 +282,13 @@ func (s *Service) makeRoomForBegin(ctx context.Context, tx *db.Tx, now time.Time
 
 type authority struct {
 	kind, id, owner, mode, nativeMode, route string
-	machine                                  string
-	ownerTeam                                string
-	previewOwnerSession                      string
-	generation, routeGeneration              int64
+	// gated is a native public preview or HTTP tunnel on the Free plan (workspace_navigation_gated): browser grants
+	// treat it as private (owner, or the viewer policy's emails/domain), and only page loads are gated at the edge.
+	gated                       bool
+	machine                     string
+	ownerTeam                   string
+	previewOwnerSession         string
+	generation, routeGeneration int64
 	// accessGeneration fences browser sessions on a tunnel: it moves on access changes, not on ordinary edits.
 	accessGeneration           int64
 	policyAudience             string
@@ -581,7 +589,7 @@ func (s *Service) authorizeMachine(ctx context.Context, key any, host, kind, id,
 		if admitted {
 			expiry = now.Add(decisionTTL)
 		}
-		out = Authorization{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, ResourceGeneration: a.generation, RouteID: a.route, RouteGeneration: a.routeGeneration, ViewerPolicyGeneration: effectiveViewerPolicyGeneration(a), Hostname: host, AccessMode: mode, GrantID: credential, TeamID: a.team, TeamGeneration: int64(a.td.TeamGeneration), MembershipGeneration: int64(a.td.MembershipGeneration), BindingGeneration: int64(a.td.BindingGeneration), GrantGeneration: int64(a.td.GrantGeneration), IssuedAt: now, ExpiresAt: minTime(now.Add(decisionTTL), expiry, a.expires), SessionExpiresAt: expiry}
+		out = Authorization{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, ResourceGeneration: a.generation, RouteID: a.route, RouteGeneration: a.routeGeneration, ViewerPolicyGeneration: effectiveViewerPolicyGeneration(a), Hostname: host, AccessMode: mode, GrantID: credential, TeamID: a.team, TeamGeneration: int64(a.td.TeamGeneration), MembershipGeneration: int64(a.td.MembershipGeneration), BindingGeneration: int64(a.td.BindingGeneration), GrantGeneration: int64(a.td.GrantGeneration), IssuedAt: now, ExpiresAt: minTime(now.Add(decisionTTL), expiry, a.expires), SessionExpiresAt: expiry, NavigationGated: a.gated}
 		return nil
 	})
 	return out, e
@@ -641,7 +649,7 @@ func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicat
 				return err
 			}
 		}
-		out = Authorization{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, ResourceGeneration: a.generation, RouteID: a.route, RouteGeneration: a.routeGeneration, ViewerPolicyGeneration: effectiveViewerPolicyGeneration(a), Hostname: host, AccessMode: mode, GrantID: grant, TeamID: a.team, TeamGeneration: int64(a.td.TeamGeneration), MembershipGeneration: int64(a.td.MembershipGeneration), BindingGeneration: int64(a.td.BindingGeneration), GrantGeneration: int64(a.td.GrantGeneration), IssuedAt: now, ExpiresAt: minTime(now.Add(decisionTTL), newExpiry, a.expires), SessionExpiresAt: newExpiry}
+		out = Authorization{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, ResourceGeneration: a.generation, RouteID: a.route, RouteGeneration: a.routeGeneration, ViewerPolicyGeneration: effectiveViewerPolicyGeneration(a), Hostname: host, AccessMode: mode, GrantID: grant, TeamID: a.team, TeamGeneration: int64(a.td.TeamGeneration), MembershipGeneration: int64(a.td.MembershipGeneration), BindingGeneration: int64(a.td.BindingGeneration), GrantGeneration: int64(a.td.GrantGeneration), IssuedAt: now, ExpiresAt: minTime(now.Add(decisionTTL), newExpiry, a.expires), SessionExpiresAt: newExpiry, NavigationGated: a.gated}
 		return nil
 	})
 	return out, err
@@ -750,6 +758,9 @@ func resolveResource(ctx context.Context, tx *db.Tx, host, kind, id, route strin
 		}
 		a.kind = "preview"
 		a.nativeMode = a.mode
+		if err = applyNavigationGate(ctx, tx, &a); err != nil {
+			return a, err
+		}
 		// Lease ETag generations advance on heartbeats. The attachment route
 		// generation is the stable target/authorization generation; the stored
 		// owner/target tuple separately fences replacement.
@@ -767,7 +778,32 @@ func resolveResource(ctx context.Context, tx *db.Tx, host, kind, id, route strin
 	a.kind = "tunnel"
 	a.nativeMode = a.mode
 	a.sessionCap = a.expires
+	if err = applyNavigationGate(ctx, tx, &a); err != nil {
+		return a, err
+	}
 	return a, nil
+}
+
+// navigationGated reports a native public preview, or a public HTTP tunnel route, whose workspace is on the Free plan
+// without the operator's public_browser grant (SQL workspace_navigation_gated).
+func navigationGated(ctx context.Context, tx *db.Tx, kind, id, owner, ownerTeam, route string) (bool, error) {
+	var gated bool
+	err := tx.QueryRow(ctx, `SELECT paperboat.workspace_navigation_gated($3,$5,$1,NULLIF($2,'')) AND ($3<>'tunnel' OR EXISTS(SELECT 1 FROM tunnel_routes WHERE id=$4 AND protocol='http'))`, owner, ownerTeam, kind, route, id).Scan(&gated)
+	return gated, err
+}
+
+// applyNavigationGate makes a gated public route private for browser grants: the sign-in a page load needs on the
+// Free plan is a private grant (owner, or the viewer policy's emails/domain).
+func applyNavigationGate(ctx context.Context, tx *db.Tx, a *authority) error {
+	if a.mode != "public" {
+		return nil
+	}
+	gated, err := navigationGated(ctx, tx, a.kind, a.id, a.owner, a.ownerTeam, a.route)
+	if err != nil || !gated {
+		return err
+	}
+	a.gated, a.mode = true, "private"
+	return nil
 }
 
 // sessionGeneration is the generation a browser session is bound to: a tunnel's access generation (edits

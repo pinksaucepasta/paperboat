@@ -48,6 +48,8 @@ func browserViewerPolicyError(w http.ResponseWriter, r *http.Request, err error)
 		writeError(w, r, http.StatusConflict, "viewer_policy_owner_changed", "The resource owner changed since this policy was configured. Reload the policy before changing it.")
 	case err == browseraccess.ErrPolicyWidening:
 		writeError(w, r, http.StatusConflict, "native_access_widening_denied", "This access cannot be set: a private preview or tunnel can be limited to its owner or to listed email addresses and domains, and a team one to its owner.")
+	case err == browseraccess.ErrPlanBrowserPublic:
+		writeErrorDetails(w, r, http.StatusConflict, "browser_public_needs_pro", "On the free plan, browser visitors must sign in; APIs and webhooks still pass. Upgrade to Pro for fully public.", map[string]any{"plan": "free"})
 	case err == browseraccess.ErrPolicyEdgeTransition:
 		writeError(w, r, http.StatusConflict, "edge_policy_transition_required", "No viewer policy change was saved. A public preview takes a list of emails or domains as it runs; to make it private or team-only, publish it again.")
 	case err == browseraccess.ErrNotAuthorized:
