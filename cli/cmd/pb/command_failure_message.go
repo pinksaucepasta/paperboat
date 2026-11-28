@@ -348,6 +348,9 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		return "A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`."
 	case *TunnelCreateChangedError:
 		if tunnelID := safeTunnelCreateTarget(owner.TunnelID); tunnelID != "" {
+			if owner.Stage == tunnelViewerAllowStage {
+				return fmt.Sprintf("Tunnel %s was created private, so only you can open it: saving the --allow list failed. Run the same command again to retry, or set the list under \"Allowed viewers\" on the tunnel's page in the console.", tunnelID)
+			}
 			if recovery := safeTunnelCreateRecoveryCommand(tunnelID, owner.RecoveryCommand); recovery != "" {
 				return fmt.Sprintf("Tunnel %s was created, but a later step failed; it was preserved. Recover with `%s`.", tunnelID, recovery)
 			}

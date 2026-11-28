@@ -28,6 +28,7 @@ import { IpRules } from "@/components/tunnels/ip-rules"
 import { ShareWithTeam } from "@/components/tunnels/share-with-team"
 import { TunnelHostnames } from "@/components/tunnels/tunnel-hostnames"
 import { TunnelStatus, tunnelState } from "@/components/tunnels/tunnel-status"
+import { TunnelViewers } from "@/components/tunnels/viewer-access"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -208,6 +209,8 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
 
       <TunnelHostnames tunnel={tunnel} />
 
+      <TunnelViewers tunnel={tunnel} />
+
       <IpRules kind="tunnel" id={tunnel.id} />
 
       {!tunnel.owner_team_id && <ShareWithTeam kind="tunnel" id={tunnel.id} />}
@@ -308,7 +311,7 @@ function useAddressMoveDone(tunnel: Tunnel) {
   }, [moving, host])
 }
 
-const audiences = { public: "Anyone with the address", private: "Only you" } as const
+const audiences = { public: "Anyone with the address", private: "You and allowed viewers" } as const
 
 /** Who can open the tunnel, changed from a caret menu like the machine's Keep awake. */
 function AccessValue({ tunnel }: { tunnel: Tunnel }) {

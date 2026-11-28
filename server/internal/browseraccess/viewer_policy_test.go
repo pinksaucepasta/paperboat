@@ -1,20 +1,23 @@
 package browseraccess
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/shared/viewerallow"
 )
 
 func TestViewerPolicyEmailAndDomainMatchingIsExact(t *testing.T) {
-	allowed, ok := canonicalEmail("Person+preview@Company.COM")
+	allowed, ok := viewerallow.Email("Person+preview@Company.COM")
 	if !ok || allowed != "person+preview@company.com" {
-		t.Fatalf("canonicalEmail returned %q, %v", allowed, ok)
+		t.Fatalf("viewerallow.Email returned %q, %v", allowed, ok)
 	}
-	unicodeDomain, ok := canonicalEmail("person@bücher.example")
+	unicodeDomain, ok := viewerallow.Email("person@bücher.example")
 	if !ok || unicodeDomain != "person@xn--bcher-kva.example" {
 		t.Fatalf("IDNA email returned %q, %v", unicodeDomain, ok)
 	}
-	if !containsEmail([]string{allowed}, "person+preview@company.com") || containsEmail([]string{allowed}, "person@company.com") {
+	if !viewerallow.Allows([]string{allowed}, "person+preview@company.com") || viewerallow.Allows([]string{allowed}, "person@company.com") {
 		t.Fatal("specific-email audience was not exact")
 	}
 	for _, tc := range []struct {
@@ -27,7 +30,7 @@ func TestViewerPolicyEmailAndDomainMatchingIsExact(t *testing.T) {
 		{"Person@XN--BCHER-KVA.example", "bücher.example", true},
 	} {
 		_, addressDomain, found := splitCanonicalEmail(tc.email)
-		domain, valid := canonicalDomain(tc.domain)
+		domain, valid := viewerallow.Domain(tc.domain)
 		if got := found && valid && addressDomain == domain; got != tc.want {
 			t.Errorf("domain match email=%q domain=%q: got %v want %v", tc.email, tc.domain, got, tc.want)
 		}
@@ -54,13 +57,13 @@ func TestViewerPolicyValidationRejectsWildcardsAndAmbiguity(t *testing.T) {
 		"Display Name <person@company.com>", "person@company..com", "person@company.com.",
 		"person@xn--.com", "person@company.com/path", " person@company.com",
 	} {
-		if _, ok := canonicalEmail(raw); ok {
-			t.Errorf("canonicalEmail accepted %q", raw)
+		if _, ok := viewerallow.Email(raw); ok {
+			t.Errorf("viewerallow.Email accepted %q", raw)
 		}
 	}
 	for _, raw := range []string{"*.company.com", "company.com.*", "company..com", "company.com.", "127.0.0.1", "company.com/path", "XN--.com"} {
-		if _, ok := canonicalDomain(raw); ok {
-			t.Errorf("canonicalDomain accepted %q", raw)
+		if _, ok := viewerallow.Domain(raw); ok {
+			t.Errorf("viewerallow.Domain accepted %q", raw)
 		}
 	}
 	policy, err := normalizeViewerPolicy(SetViewerPolicyRequest{Audience: AudienceSpecificEmails, AllowedEmails: []string{"A@Company.com", "a@company.com"}})
@@ -73,6 +76,52 @@ func TestViewerPolicyValidationRejectsWildcardsAndAmbiguity(t *testing.T) {
 	}
 	if len(policy.AllowedEmails) != 0 {
 		t.Fatalf("unexpected email selectors: %#v", policy.AllowedEmails)
+	}
+}
+
+func TestViewerPolicyAllowListTakesAddressesAndExactDomains(t *testing.T) {
+	policy, err := normalizeViewerPolicy(SetViewerPolicyRequest{Audience: AudienceSpecificEmails, AllowedEmails: []string{"User@X.com", "*@Company.com"}})
+	if err != nil || strings.Join(policy.AllowedEmails, ",") != "user@x.com,*@company.com" {
+		t.Fatalf("mixed allow list = %#v, %v", policy.AllowedEmails, err)
+	}
+	for _, bad := range [][]string{{"*"}, {"*@*"}, {"*@com"}, {"*@*.company.com"}, {"a*@company.com"}, {"user@x.com", "*"}, {"*@company.com", "*@COMPANY.com"}, make([]string, 101)} {
+		if _, err := normalizeViewerPolicy(SetViewerPolicyRequest{Audience: AudienceSpecificEmails, AllowedEmails: bad}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("allow list %q = %v, want ErrInvalid", bad, err)
+		}
+	}
+	// The wildcard is a list entry only; the one-domain audience takes a plain domain.
+	if _, err := normalizeViewerPolicy(SetViewerPolicyRequest{Audience: AudienceEmailDomain, EmailDomain: "*@company.com"}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("email_domain accepted a wildcard entry: %v", err)
+	}
+}
+
+// A private resource is narrowed to its owner or to listed people. It is never made public or opened to a team.
+func TestViewerPolicyNeverWidensANativeMode(t *testing.T) {
+	audiences := []string{AudienceOwner, AudienceTeam, AudienceSpecificEmails, AudienceEmailDomain, AudiencePublic}
+	for _, tc := range []struct {
+		kind, mode string
+		allowed    []string
+		refusal    error
+	}{
+		{"tunnel", "public", audiences, nil},
+		{"tunnel", "private", []string{AudienceOwner, AudienceSpecificEmails, AudienceEmailDomain}, ErrPolicyWidening},
+		{"tunnel", "team", []string{AudienceOwner}, ErrPolicyWidening},
+		{"tunnel", "", nil, ErrPolicyWidening},
+		{"preview", "public", []string{AudiencePublic}, ErrPolicyEdgeTransition},
+		{"preview", "private", []string{AudienceOwner, AudienceSpecificEmails, AudienceEmailDomain}, ErrPolicyWidening},
+		{"preview", "team", []string{AudienceOwner}, ErrPolicyWidening},
+	} {
+		for _, audience := range audiences {
+			want := tc.refusal
+			for _, allowed := range tc.allowed {
+				if allowed == audience {
+					want = nil
+				}
+			}
+			if err := ensurePolicyEdgeMode(tc.kind, tc.mode, audience); err != want {
+				t.Errorf("%s native=%q audience=%q = %v, want %v", tc.kind, tc.mode, audience, err, want)
+			}
+		}
 	}
 }
 
@@ -117,7 +166,7 @@ func TestRouteHostResolutionUsesExactAndOneLabelWildcardRules(t *testing.T) {
 }
 
 func splitCanonicalEmail(raw string) (string, string, bool) {
-	canonical, ok := canonicalEmail(raw)
+	canonical, ok := viewerallow.Email(raw)
 	if !ok {
 		return "", "", false
 	}

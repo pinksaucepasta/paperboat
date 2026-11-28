@@ -962,8 +962,8 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 	}
 	if opts.BrowserAccess != nil {
 		viewerPolicyPath := "/v1/browser-access/policies/{resource_kind}/{resource_id}/{route_id}"
-		mux.Handle("GET "+viewerPolicyPath, requireAuth(opts.Auth, http.HandlerFunc(opts.BrowserAccess.ViewerPolicyGet)))
-		mux.Handle("PUT "+viewerPolicyPath, requireAuth(opts.Auth, requireCSRF(opts.Auth, http.HandlerFunc(opts.BrowserAccess.ViewerPolicyPut))))
+		mux.Handle("GET "+viewerPolicyPath, viewerPolicyAuth(opts.Auth, opts.DeviceAuth, "read", http.HandlerFunc(opts.BrowserAccess.ViewerPolicyGet)))
+		mux.Handle("PUT "+viewerPolicyPath, viewerPolicyAuth(opts.Auth, opts.DeviceAuth, "write", requireCSRF(opts.Auth, http.HandlerFunc(opts.BrowserAccess.ViewerPolicyPut))))
 		mux.Handle("POST /v1/browser-access/machine-credentials", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, http.HandlerFunc(opts.BrowserAccess.MachineCredential)))))
 		mux.Handle("POST /v1/browser-access/issue", requireAuth(opts.Auth, requireCSRF(opts.Auth, http.HandlerFunc(opts.BrowserAccess.Issue))))
 		mux.HandleFunc("POST /v1/edge/browser-access/{operation}", opts.BrowserAccess.EdgeRequest)

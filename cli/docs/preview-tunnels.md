@@ -77,6 +77,29 @@ is denied or revoked for that route, and `503 Service Unavailable` means hostd,
 the carrier, edge binding, or authorization authority is temporarily
 unavailable. Responses do not reveal another account's resource.
 
+## Share a private preview or tunnel by email
+
+`--allow` lets named people open a private preview or private HTTP tunnel in a browser, after
+they sign in to Paperboat with a verified email address. You can always open it yourself.
+
+```console
+pb preview 3000 --allow ana@example.com,*@company.com
+pb tunnel create api --port 8080 --allow ana@example.com --allow '*@company.com'
+```
+
+- An entry is an email address or `*@domain`. `*@company.com` admits every address at exactly
+  `company.com`, not at `dev.company.com`. A bare `*` or a domain without a dot is refused, and
+  a list holds up to 100 entries. Quote `*` so your shell does not expand it.
+- `--allow` implies `--private`, so the address is never public. The resource is created
+  private and the list is saved next. If saving fails, only you can open it: `pb preview` stops
+  the preview, and `pb tunnel create` keeps the tunnel and tells you how to retry.
+- On a team's preview or tunnel (or one on a team machine), a listed person also needs the
+  team's access to it. The list only narrows.
+- The list covers browser access. `pb access` from a machine stays with your own account.
+- Change the list later under **Allowed viewers** on the preview's or tunnel's page in the
+  console. Saving signs everyone out, so removed people lose access.
+- `--allow` cannot be used with `--team` or for a TCP tunnel.
+
 ## Create a durable tunnel
 
 Create from a port or origin URL. `--wait` waits for the operation to become

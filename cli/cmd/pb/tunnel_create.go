@@ -42,6 +42,9 @@ func tunnelCreateHumanOutput(result tunnelCreateOutput, origin string) string {
 	}
 	var output strings.Builder
 	fmt.Fprintf(&output, "%s tunnel %s (%s)\n", verb, result.Tunnel.Name, result.Tunnel.ID)
+	if len(result.AllowedViewers) > 0 {
+		fmt.Fprintln(&output, viewerAllowSentence(result.AllowedViewers))
+	}
 	if result.Pending {
 		fmt.Fprintln(&output, "Serving is pending until the tunnel has a hostname under a verified domain")
 	}
@@ -127,7 +130,13 @@ func tunnelCreateCommand() *cobra.Command {
 			}
 			origin = fmt.Sprintf("http://127.0.0.1:%d", port)
 		}
+		allowed, err := viewerAllowList(command)
+		if err != nil {
+			return err
+		}
 		private, _ := command.Flags().GetBool("private")
+		// --allow starts from a private tunnel: until the list is saved, only the owner can open it.
+		private = private || len(allowed) > 0
 		expiry, _ := command.Flags().GetDuration("duration")
 		if command.Flags().Changed("duration") && expiry <= 0 {
 			return errors.New("duration must be greater than zero")
@@ -135,6 +144,9 @@ func tunnelCreateCommand() *cobra.Command {
 		scheme, address, err := splitTunnelOrigin(origin)
 		if err != nil {
 			return err
+		}
+		if len(allowed) > 0 && scheme == "tcp" {
+			return errors.New("--allow is for HTTP tunnels; a private TCP tunnel is opened with pb access by its owner")
 		}
 		mode := "public"
 		if private {
@@ -172,7 +184,7 @@ func tunnelCreateCommand() *cobra.Command {
 		if !jsonOutputRequested(command) {
 			fmt.Fprintln(command.ErrOrStderr(), "Creating tunnel… Ctrl+C to cancel.")
 		}
-		requestDigest, err := tunnelCreateRequestDigest(name, mode, scheme, address, expiry, domains)
+		requestDigest, err := tunnelCreateRequestDigest(name, mode, scheme, address, expiry, domains, allowed)
 		if err != nil {
 			return err
 		}
@@ -236,8 +248,8 @@ func tunnelCreateCommand() *cobra.Command {
 		if err := workflow.RecordTunnel(ctx, out.Tunnel.ID, out.Operation.ID); err != nil {
 			return tunnelCreateJournalError(out.Tunnel.ID, "recording tunnel creation", "pb tunnel show "+out.Tunnel.ID, err)
 		}
-		result := tunnelCreateOutput{Schema: api.TunnelV1Schema, Kind: "tunnel_create", Tunnel: out.Tunnel, Operation: out.Operation, Domains: make([]tunnelCreateDomainOutput, 0, len(domains)), Replayed: out.Replayed, Changed: out.Changed}
-		if len(domains) > 0 || scheme == "tcp" || out.Tunnel.StableEndpoint == "" {
+		result := tunnelCreateOutput{AllowedViewers: allowed, Schema: api.TunnelV1Schema, Kind: "tunnel_create", Tunnel: out.Tunnel, Operation: out.Operation, Domains: make([]tunnelCreateDomainOutput, 0, len(domains)), Replayed: out.Replayed, Changed: out.Changed}
+		if len(domains) > 0 || len(allowed) > 0 || scheme == "tcp" || out.Tunnel.StableEndpoint == "" {
 			routes, listErr := retryTunnelRead(ctx, func() (api.TunnelRoutePage, error) {
 				return client.ListTunnelRoutesV1(ctx, out.Tunnel.ID, "", 1)
 			})
@@ -250,6 +262,11 @@ func tunnelCreateCommand() *cobra.Command {
 			result.Route = &routes.Items[0]
 			if scheme == "tcp" && (!private && (result.Route.Protocol != "tcp" || result.Route.PublicTCPPort == 0) || private && result.Route.Protocol != "tcp_private") {
 				return api.ErrUnsafeTunnelResponse
+			}
+			if len(allowed) > 0 {
+				if err := saveViewerAllowList(ctx, client, "tunnel", out.Tunnel.ID, routes.Items[0].ID, allowed); err != nil {
+					return &TunnelCreateChangedError{TunnelID: out.Tunnel.ID, Stage: tunnelViewerAllowStage, Outcome: "failed", RecoveryCommand: "pb tunnel show " + out.Tunnel.ID, Cause: err}
+				}
 			}
 			journal = workflow.Snapshot()
 			for index, hostname := range domains {
@@ -335,6 +352,8 @@ func tunnelCreateCommand() *cobra.Command {
 	command.Flags().Bool("private", false, "require authenticated private access")
 	command.Flags().Bool("team", false, "require an explicit team grant for browser access")
 	command.MarkFlagsMutuallyExclusive("private", "team")
+	addViewerAllowFlag(command, "HTTP tunnel")
+	command.MarkFlagsMutuallyExclusive(viewerAllowFlag, "team")
 	command.Flags().Duration("duration", 0, "tunnel lifetime (default: the tunnel does not expire)")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
@@ -375,7 +394,10 @@ func tunnelCreatePendingRecovery(result tunnelCreateOutput) string {
 	return "Rerun this same `pb tunnel create` command when the public endpoint is ready."
 }
 
-func tunnelCreateRequestDigest(name, mode, scheme, address string, duration time.Duration, domains []string) (string, error) {
+func tunnelCreateRequestDigest(name, mode, scheme, address string, duration time.Duration, domains, allowed []string) (string, error) {
+	// A create without an allow list keeps the digest it had before the list existed.
+	allow := append([]string(nil), allowed...)
+	sort.Strings(allow)
 	request := struct {
 		Schema        string   `json:"schema"`
 		Name          string   `json:"name"`
@@ -384,7 +406,8 @@ func tunnelCreateRequestDigest(name, mode, scheme, address string, duration time
 		OriginAddress string   `json:"origin_address"`
 		DurationNanos int64    `json:"duration_nanos"`
 		Domains       []string `json:"domains"`
-	}{"paperboat.tunnel-create-request/v1", name, mode, scheme, address, int64(duration), append([]string(nil), domains...)}
+		Allow         []string `json:"allow,omitempty"`
+	}{"paperboat.tunnel-create-request/v1", name, mode, scheme, address, int64(duration), append([]string(nil), domains...), allow}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return "", err

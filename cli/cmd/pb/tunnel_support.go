@@ -287,9 +287,11 @@ type tunnelCreateOutput struct {
 	Route     *api.TunnelRoute           `json:"route,omitempty"`
 	Domains   []tunnelCreateDomainOutput `json:"domains"`
 	Pending   bool                       `json:"pending,omitempty"`
-	Recovery  string                     `json:"recovery,omitempty"`
-	Replayed  bool                       `json:"replayed"`
-	Changed   bool                       `json:"changed"`
+	// AllowedViewers is the saved --allow list of a private HTTP tunnel.
+	AllowedViewers []string `json:"allowed_viewers,omitempty"`
+	Recovery       string   `json:"recovery,omitempty"`
+	Replayed       bool     `json:"replayed"`
+	Changed        bool     `json:"changed"`
 }
 
 func tunnelCommand(use, short string, args cobra.PositionalArgs, run func(*cobra.Command, []string) error) *cobra.Command {

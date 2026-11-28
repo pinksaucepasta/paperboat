@@ -78,6 +78,8 @@ func configureEphemeralLaunchFlags(command *cobra.Command) {
 	command.Flags().Bool("private", false, "limit the preview to this account")
 	command.Flags().Bool("team", false, "require an explicit team grant for browser access")
 	command.MarkFlagsMutuallyExclusive("private", "team")
+	addViewerAllowFlag(command, "preview")
+	command.MarkFlagsMutuallyExclusive(viewerAllowFlag, "team")
 	command.Flags().Duration("ttl", 0, "bounded preview lifetime (maximum 24h)")
 	command.Flags().Bool("background", false, "hand the preview to this computer's background service and return once ready (default lifetime 30m)")
 	command.Flags().StringArray("domain", nil, "attach a verified custom domain (repeatable)")
@@ -127,6 +129,10 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	if ttl > previewMaximumTTL {
 		return fmt.Errorf("%w: ttl must not exceed 24h", ErrPreviewInvalidDuration)
 	}
+	allowed, err := viewerAllowList(command)
+	if err != nil {
+		return err
+	}
 	private, err := command.Flags().GetBool("private")
 	if err != nil {
 		return err
@@ -143,10 +149,10 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runPreviewWithDomains(command, target, private, ttl, background, jsonOutput, domains)
+	return runPreviewWithDomains(command, target, private, ttl, background, jsonOutput, domains, allowed)
 }
 
-func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, private bool, duration time.Duration, background bool, jsonOutput bool, domains []string) (resultErr error) {
+func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, private bool, duration time.Duration, background bool, jsonOutput bool, domains, allowed []string) (resultErr error) {
 	if !jsonOutput {
 		if _, err := fmt.Fprintln(command.ErrOrStderr(), "Preparing preview… Ctrl+C to cancel."); err != nil {
 			return previewFailure("preview output failed", err)
@@ -317,7 +323,8 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 		}
 	}
 	accessMode := "public"
-	if private {
+	// --allow starts from a private preview: until the list is saved, only the owner can open it.
+	if private || len(allowed) > 0 {
 		accessMode = "private"
 	}
 	if team, _ := command.Flags().GetBool("team"); team {
@@ -372,6 +379,23 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			return commandRejection{reason: commandRejectPreviewExpired}
 		}
 		return previewFailure("preview could not be started", err)
+	}
+	if len(allowed) > 0 {
+		if allowErr := savePreviewViewerAllowList(foregroundCtx, client, foreground.Lease.ID, allowed); allowErr != nil {
+			// A preview nobody on the list can open is stopped, so its address is never handed out as shared.
+			cancel()
+			rejection := commandRejection{reason: commandRejectPreviewAllowList, detail: viewerAllowFailureDetail(allowErr)}
+			if waitErr := foreground.Wait(); waitErr != nil {
+				return previewFailure("preview allow list was not saved", rejection, waitErr)
+			}
+			// Returned alone, the refusal keeps its own message: what happened and who could open the preview.
+			return rejection
+		}
+		if _, err := fmt.Fprintln(command.ErrOrStderr(), viewerAllowSentence(allowed)); err != nil {
+			cancel()
+			waitErr := foreground.Wait()
+			return previewFailure("preview output failed", err, waitErr)
+		}
 	}
 	if !background && !jsonOutput && previewDependenciesOf(command).isTerminal(command) {
 		ended := make(chan error, 1)

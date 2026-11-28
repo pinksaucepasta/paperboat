@@ -3,8 +3,40 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
 )
+
+// viewerPolicyAuth admits a browser session, or a pb sign-in that holds the access scope of the policy's resource
+// kind (previews:read, tunnels:write, …).
+func viewerPolicyAuth(users *auth.Service, machines *auth.DeviceService, access string, next http.Handler) http.Handler {
+	scoped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var scope string
+		switch r.PathValue("resource_kind") {
+		case "preview":
+			scope = "previews:" + access
+		case "tunnel":
+			scope = "tunnels:" + access
+		default:
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "The viewer policy is not valid.")
+			return
+		}
+		requireScope(scope, next).ServeHTTP(w, r)
+	})
+	if machines == nil {
+		return requireAuth(users, scoped)
+	}
+	return requireAnyAuth(users, machines, scoped)
+}
+
+// viewerPolicyActor is the signed-in account of a browser session or a pb sign-in. An API token is not one.
+func viewerPolicyActor(r *http.Request) (string, bool) {
+	p, ok := principalFromContext(r.Context())
+	if !ok || p.APIToken != nil || p.User.ID == "" || p.Client == nil && p.Session.ID == "" {
+		return "", false
+	}
+	return p.User.ID, true
+}
 
 func browserViewerPolicyError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
@@ -15,7 +47,7 @@ func browserViewerPolicyError(w http.ResponseWriter, r *http.Request, err error)
 	case err == browseraccess.ErrPolicyOwnerChanged:
 		writeError(w, r, http.StatusConflict, "viewer_policy_owner_changed", "The resource owner changed since this policy was configured. Reload the policy before changing it.")
 	case err == browseraccess.ErrPolicyWidening:
-		writeError(w, r, http.StatusConflict, "native_access_widening_denied", "The viewer policy cannot grant access beyond the tunnel's native private or team access.")
+		writeError(w, r, http.StatusConflict, "native_access_widening_denied", "This access cannot be set: a private preview or tunnel can be limited to its owner or to listed email addresses and domains, and a team one to its owner.")
 	case err == browseraccess.ErrPolicyEdgeTransition:
 		writeError(w, r, http.StatusConflict, "edge_policy_transition_required", "No viewer policy change was saved. Current edge assignments do not safely support this public or restricted transition yet.")
 	case err == browseraccess.ErrNotAuthorized:
@@ -27,12 +59,12 @@ func browserViewerPolicyError(w http.ResponseWriter, r *http.Request, err error)
 
 func (h *BrowserAccessHandlers) ViewerPolicyGet(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
-	p, ok := principalFromContext(r.Context())
-	if !ok || p.Client != nil || p.User.ID == "" || p.Session.ID == "" {
+	actor, ok := viewerPolicyActor(r)
+	if !ok {
 		writeError(w, r, http.StatusUnauthorized, "authentication_required", "Sign in to view this access policy.")
 		return
 	}
-	policy, err := h.Access.GetViewerPolicy(r.Context(), p.User.ID, r.PathValue("resource_kind"), r.PathValue("resource_id"), r.PathValue("route_id"))
+	policy, err := h.Access.GetViewerPolicy(r.Context(), actor, r.PathValue("resource_kind"), r.PathValue("resource_id"), r.PathValue("route_id"))
 	if err != nil {
 		browserViewerPolicyError(w, r, err)
 		return
@@ -42,8 +74,8 @@ func (h *BrowserAccessHandlers) ViewerPolicyGet(w http.ResponseWriter, r *http.R
 
 func (h *BrowserAccessHandlers) ViewerPolicyPut(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
-	p, ok := principalFromContext(r.Context())
-	if !ok || p.Client != nil || p.User.ID == "" || p.Session.ID == "" {
+	actor, ok := viewerPolicyActor(r)
+	if !ok {
 		writeError(w, r, http.StatusUnauthorized, "authentication_required", "Sign in to change this access policy.")
 		return
 	}
@@ -64,7 +96,7 @@ func (h *BrowserAccessHandlers) ViewerPolicyPut(w http.ResponseWriter, r *http.R
 		return
 	}
 	policy, err := h.Access.SetViewerPolicy(r.Context(), browseraccess.SetViewerPolicyRequest{
-		ActorAccountID: p.User.ID, ResourceKind: r.PathValue("resource_kind"),
+		ActorAccountID: actor, ResourceKind: r.PathValue("resource_kind"),
 		ResourceID: r.PathValue("resource_id"), RouteID: r.PathValue("route_id"),
 		Audience: body.Audience, TeamID: body.TeamID, AllowedEmails: body.AllowedEmails,
 		EmailDomain: body.EmailDomain, ExpectedGeneration: body.ExpectedGeneration,
