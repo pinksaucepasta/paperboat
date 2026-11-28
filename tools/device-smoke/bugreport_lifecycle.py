@@ -136,11 +136,8 @@ def access_token():
 
 
 def lookup_reference(reference):
-    if DEVICE:  # no config.json until a setting changes
-        shown = json.loads(run('config', 'show', '--json')[1])
-        server = shown.get('data', shown)['server_url']
-    else:
-        server = json.loads((CONFIG / 'config.json').read_text())['server_url']
+    shown = json.loads(run('config', 'show', '--json')[1])  # a fresh install has no config.json until a setting changes
+    server = shown.get('data', shown)['server_url']
     request = urllib.request.Request(server + '/v1/support/' + reference,
                                      headers={'Authorization': 'Bearer ' + access_token()})
     with urllib.request.urlopen(request, timeout=30) as response:

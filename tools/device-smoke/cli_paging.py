@@ -30,15 +30,27 @@ def data(*args):
     return out.get('data', out)
 
 
+def while_total_holds(read, attempts=6):
+    """(total, read()) for a read made while the account's machine total did not move: other tests of the account
+    pair and revoke machines at any time, and a total read before a pairing is not the one the next command sees."""
+    for _ in range(attempts):
+        before = data('machine', 'list', '--limit', '1')['total']
+        value = read()
+        if data('machine', 'list', '--limit', '1')['total'] == before:
+            return before, value
+    raise RuntimeError('the account\'s machine total changed during each of %d reads' % attempts)
+
+
 def main():
     machines = data('machine', 'list', '--limit', '1')
-    total = machines['total']
-    if len(machines['machines']) != 1 or total < 2:
-        raise RuntimeError('machine list --limit 1 gave %d machines of total %d' % (len(machines['machines']), total))
-    if 'Showing 1 of %d machines' % total not in pb('machine', 'list', '--limit', '1'):
+    if len(machines['machines']) != 1 or machines['total'] < 2:
+        raise RuntimeError('machine list --limit 1 gave %d machines of total %d' % (len(machines['machines']), machines['total']))
+    total, text = while_total_holds(lambda: pb('machine', 'list', '--limit', '1'))
+    if 'Showing 1 of %d machines' % total not in text:
         raise RuntimeError('machine list does not say "Showing 1 of %d machines"' % total)
-    if len(data('machine', 'list', '--all')['machines']) != total:
-        raise RuntimeError('machine list --all did not return all %d machines' % total)
+    total, everything = while_total_holds(lambda: data('machine', 'list', '--all'))
+    if len(everything['machines']) != total:
+        raise RuntimeError('machine list --all returned %d of %d machines' % (len(everything['machines']), total))
     requests = data('inbox', 'requests', '--limit', '1')
     if len(requests['requests']) != 1 or requests['total'] < 2 or 'Showing 1 of %d' % requests['total'] not in pb('inbox', 'requests', '--limit', '1'):
         raise RuntimeError('inbox requests --limit 1 is not one request of the server total')
