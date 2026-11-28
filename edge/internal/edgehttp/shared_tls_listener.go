@@ -230,7 +230,11 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, forwarded bool) {
 			authorizedHTTPS = true
 		} else {
 			if l.unknown != nil {
-				serveNotFoundPage(replay, l.unknown, l.browser, host)
+				if !forwarded && forwarderStarting(hooks) {
+					serveStartingPage(replay, l.unknown)
+				} else {
+					serveNotFoundPage(replay, l.unknown, l.browser, host)
+				}
 			}
 			return
 		}
