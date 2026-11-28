@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  addViewers,
   isLimitedPublicRoute,
   isViewerEntry,
   savedViewers,
@@ -36,14 +35,13 @@ describe("viewer entries", () => {
       "@company.com",
       "a@b@company.com",
       "a b@company.com",
+      "a@company",
+      "a@company..com",
       "Name <a@company.com>",
       "*@company.com/path",
       `${"a".repeat(250)}@x.com`,
     ])
       expect(isViewerEntry(entry)).toBe(false)
-  })
-  test("adds in lower case without repeats", () => {
-    expect(addViewers(["a@x.com"], ["A@X.com", "*@Company.COM"])).toEqual(["a@x.com", "*@company.com"])
   })
   test("names what cannot be saved", () => {
     expect(viewerListProblem(["a@x.com", "*"])).toContain("*")

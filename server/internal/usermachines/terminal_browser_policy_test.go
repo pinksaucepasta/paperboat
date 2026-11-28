@@ -2,6 +2,7 @@ package usermachines
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/viewerallow"
 	"reflect"
 	"testing"
 )
@@ -66,8 +67,8 @@ func TestTerminalBrowserDomainRequiresExactVerifiedEmailDomain(t *testing.T) {
 		{email: "person@notcompany.com", want: false},
 		{email: "@company.com", want: false},
 	} {
-		if got := verifiedEmailHasExactDomain(test.email, "company.com"); got != test.want {
-			t.Errorf("verifiedEmailHasExactDomain(%q) = %v, want %v", test.email, got, test.want)
+		if got := viewerallow.Terminal.Allows([]string{"*@company.com"}, test.email); got != test.want {
+			t.Errorf("Terminal.Allows(*@company.com, %q) = %v, want %v", test.email, got, test.want)
 		}
 	}
 }

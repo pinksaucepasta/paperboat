@@ -1,11 +1,10 @@
 "use client"
 
-import { CaretDownIcon, CheckIcon, CopyIcon, XIcon } from "@phosphor-icons/react"
+import { CaretDownIcon, CheckIcon, CopyIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, workspacesQuery } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { useNow } from "@/lib/use-now"
 import { inviteText, rememberCode, terminalLink, useKnownCode } from "@/lib/terminal/invite"
 import {
@@ -41,9 +40,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { copyText } from "@/lib/clipboard"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { AccessList } from "@/components/access-list"
 
-const emailPattern = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/
-const domainPattern = /^\*@[a-z0-9-]+(\.[a-z0-9-]+)+$/
 type Expiry = 3600 | 28800 | 86400
 const expiryLabels: Record<Expiry, string> = { 3600: "1 hour", 28800: "8 hours", 86400: "24 hours" }
 
@@ -181,63 +179,31 @@ function Share({ session, onDone }: { session: TerminalSession; onDone: () => vo
       )}
 
       {shown.audience !== "team" && (
-        <div className="flex min-w-0 flex-col gap-3">
-          <EmailField
+          <AccessList
+            entries={shown.emails}
             disabled={save.isPending}
-            onAdd={(added) =>
-              setPeople([...shown.emails, ...added.filter((email) => !shown.emails.includes(email))], shown.typists)
+            onChange={(emails) => setPeople(emails, shown.typists.filter((entry) => emails.includes(entry)))}
+            hint={
+              shown.emails.length
+                ? "Only these people can join, after signing in."
+                : "Leave empty to let anyone with the link and code join."
             }
+            rowAction={(email) => (
+              <RoleMenu
+                value={shown.typists.includes(email) ? "interactive" : "viewer"}
+                disabled={email.startsWith("*@") || save.isPending}
+                onChange={(role) => {
+                  const typists =
+                    role === "interactive"
+                      ? [...shown.typists, email]
+                      : shown.typists.filter((entry) => entry !== email)
+                  if (role === "interactive") setConfirm({ who: email, apply: () => setPeople(shown.emails, typists) })
+                  else setPeople(shown.emails, typists)
+                }}
+              />
+            )}
+            whenEmpty={<JoiningInfo session={session} access={access.data} now={now} onConfirm={setConfirm} />}
           />
-          <p className="-mt-1 text-xs text-muted-foreground">
-            {shown.emails.length
-              ? "Only these people can join, after signing in."
-              : "Leave empty to let anyone with the link and code join."}
-          </p>
-
-          {shown.emails.length > 0 ? (
-            <ul className="-mx-2 flex max-h-56 flex-col overflow-y-auto">
-              {shown.emails.map((email) => {
-                const domain = email.startsWith("*@")
-                const types = shown.typists.includes(email)
-                return (
-                  <li key={email} className="flex h-10 min-w-0 items-center gap-3 rounded-md px-2 text-sm">
-                    <span className="min-w-0 flex-1 truncate">{domain ? `Everyone at ${email.slice(2)}` : email}</span>
-                    <RoleMenu
-                      value={types ? "interactive" : "viewer"}
-                      disabled={domain || save.isPending}
-                      onChange={(role) => {
-                        const typists =
-                          role === "interactive"
-                            ? [...shown.typists, email]
-                            : shown.typists.filter((entry) => entry !== email)
-                        if (role === "interactive")
-                          setConfirm({ who: email, apply: () => setPeople(shown.emails, typists) })
-                        else setPeople(shown.emails, typists)
-                      }}
-                    />
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Remove ${email}`}
-                      className="text-muted-foreground"
-                      disabled={save.isPending}
-                      onClick={() =>
-                        setPeople(
-                          shown.emails.filter((entry) => entry !== email),
-                          shown.typists.filter((entry) => entry !== email),
-                        )
-                      }
-                    >
-                      <XIcon />
-                    </Button>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <JoiningInfo session={session} access={access.data} now={now} onConfirm={setConfirm} />
-          )}
-        </div>
       )}
 
       <div className="flex items-center justify-between gap-2 border-t pt-4">
@@ -282,80 +248,6 @@ function Share({ session, onDone }: { session: TerminalSession; onDone: () => vo
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  )
-}
-
-/** Enter, comma, space or Tab adds what's typed (several at once when pasted); the list below shows them. */
-function EmailField({ disabled, onAdd }: { disabled: boolean; onAdd: (emails: string[]) => void }) {
-  const [draft, setDraft] = useState("")
-  const [error, setError] = useState("")
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const commit = (text: string) => {
-    const parts = text
-      .split(/[\s,;]+/)
-      .map((part) => part.trim().toLowerCase())
-      .filter(Boolean)
-    if (!parts.length) {
-      setDraft("")
-      return
-    }
-    const bad = parts.find((part) => !emailPattern.test(part) || (part.startsWith("*@") && !domainPattern.test(part)))
-    if (bad) {
-      setDraft(text.trim())
-      setError(`“${bad}” isn’t an email. Use name@company.com, or *@company.com for a whole domain.`)
-      return
-    }
-    setError("")
-    setDraft("")
-    onAdd(parts)
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div
-        onClick={() => inputRef.current?.focus()}
-        className={cn(
-          "flex h-9 w-full cursor-text items-center rounded-md border border-input bg-transparent px-3 text-sm transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30 dark:bg-input/30",
-          error && "border-destructive",
-        )}
-      >
-        <input
-          ref={inputRef}
-          value={draft}
-          // Read-only, not disabled, while a change saves: the field keeps focus for the next email.
-          readOnly={disabled}
-          onChange={(event) => {
-            const value = event.target.value
-            // A separator typed ends an email.
-            if (/[\s,;]$/.test(value)) commit(value)
-            else {
-              setDraft(value)
-              if (error) setError("")
-            }
-          }}
-          onKeyDown={(event) => {
-            if ((event.key === "Enter" || event.key === "Tab") && draft.trim()) {
-              event.preventDefault()
-              commit(draft)
-            }
-          }}
-          onBlur={() => draft.trim() && commit(draft)}
-          onPaste={(event) => {
-            const text = event.clipboardData.getData("text")
-            if (/[\s,;]/.test(text.trim())) {
-              event.preventDefault()
-              commit(draft + text)
-            }
-          }}
-          placeholder="Add people by email"
-          autoComplete="off"
-          spellCheck={false}
-          className="h-6 min-w-32 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
-        />
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }
