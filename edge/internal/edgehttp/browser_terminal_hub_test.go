@@ -307,7 +307,9 @@ func TestBrowserTerminalPublisherFailureAndRecovery(t *testing.T) {
 	runDone := make(chan error, 1)
 	go func() { runDone <- hub.ServeCarrier(ctx, server) }()
 	open := func() *datacarrier.Stream {
-		stream, err := client.OpenStream(ctx, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: key.RouteID, RequestID: key.TerminalSessionID, Kind: datacarrier.BrowserTerminalOutputStream})
+		// Not ctx: a stream is reset when the context it was opened with ends, and cancel stops only the hub here. A
+		// publisher's reset that outruns the hub's own cancel is a real publisher failure, rightly reported.
+		stream, err := client.OpenStream(t.Context(), connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: key.RouteID, RequestID: key.TerminalSessionID, Kind: datacarrier.BrowserTerminalOutputStream})
 		if err != nil {
 			t.Fatal(err)
 		}
