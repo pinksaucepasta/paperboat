@@ -428,9 +428,13 @@ func applyViewerPolicy(ctx context.Context, tx *db.Tx, a authority, account stri
 	if p.OwnerAccountID != a.owner {
 		return a, ErrNotAuthorized
 	}
-	if a.gated {
+	if a.gated && a.kind == "tunnel" && p.Audience != AudiencePublic {
+		// A saved list or owner-only policy restricts a tunnel route fully (current_tunnel_route_viewer_policy says
+		// private): its grant is a restricted one, not the Free plan's page-load gate.
+		a.gated, a.mode = false, "private"
+	} else if a.gated {
 		// Free plan (applyNavigationGate): a grant is a sign-in for page loads. A "public" policy left from before the
-		// gate means the owner only.
+		// gate means the owner only. A listed preview is fully restricted at the edge by its sign-in mark (P3b).
 		if p.Audience == AudiencePublic {
 			p.Audience = AudienceOwner
 		}
