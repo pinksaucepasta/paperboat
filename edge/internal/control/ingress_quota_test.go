@@ -261,3 +261,38 @@ func TestIngressSnapshotOfMoreThanFourThousandEntriesIsReadWhole(t *testing.T) {
 		t.Fatalf("snapshot cut to %d decisions, %d throttles, %d takedowns of %d", len(snapshot.Decisions), len(snapshot.Throttled), len(snapshot.Blocked), entries)
 	}
 }
+
+// The snapshot marks a public preview whose owner saved a list of viewers (IngressIPRule.SignIn): PreviewSignIn is
+// true for it only, and the mark leaves the IP lists and the Free mark alone.
+func TestIngressAuthorityListsSignInPreviews(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision},
+			"ip_rules": []connectorprotocol.IngressIPRule{
+				{Hostname: "listed.preview.test", SignIn: true},
+				{Hostname: "listed-free.preview.test", SignIn: true, FreeRequests: true, Deny: []string{"203.0.113.0/24"}},
+				{Hostname: "free.preview.test", FreeRequests: true},
+			}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	if _, err := authority.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]bool{"listed.preview.test": true, "listed-free.preview.test": true, "free.preview.test": false, "other.preview.test": false} {
+		if got := authority.PreviewSignIn(host); got != want {
+			t.Errorf("PreviewSignIn(%s) = %v, want %v", host, got, want)
+		}
+	}
+	if !authority.RequestLimited("listed-free.preview.test") || authority.RequestLimited("listed.preview.test") || authority.AddressAllowed("listed-free.preview.test", "203.0.113.4") {
+		t.Error("the sign-in mark changed the Free mark or the IP lists")
+	}
+	var nilAuthority *IngressAuthority
+	if nilAuthority.PreviewSignIn("listed.preview.test") {
+		t.Error("a nil authority marked a host")
+	}
+}

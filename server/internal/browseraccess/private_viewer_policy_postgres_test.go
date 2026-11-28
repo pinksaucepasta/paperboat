@@ -239,11 +239,12 @@ func TestPrivatePreviewAllowListPostgres(t *testing.T) {
 	}
 }
 
-func TestPublicAndTeamPreviewsTakeNoAllowListPostgres(t *testing.T) {
+func TestTeamAndLazyPreviewsTakeNoAllowListPostgres(t *testing.T) {
 	f := newPrivatePolicyFixture(t)
+	// A public preview limited to its owner alone stays a publish-time choice (pb preview --private).
 	public, _ := f.preview("public", "public", "")
-	if _, err := f.set("preview", public, public, AudienceSpecificEmails, 0, "*@company.test"); !errors.Is(err, ErrPolicyEdgeTransition) {
-		t.Fatalf("public preview allow list = %v, want ErrPolicyEdgeTransition", err)
+	if _, err := f.set("preview", public, public, AudienceOwner, 0); !errors.Is(err, ErrPolicyEdgeTransition) {
+		t.Fatalf("public preview limited to its owner = %v, want ErrPolicyEdgeTransition", err)
 	}
 	team, _ := f.preview("team", "team", "")
 	if _, err := f.set("preview", team, team, AudienceSpecificEmails, 0, "*@company.test"); !errors.Is(err, ErrPolicyWidening) {

@@ -34,6 +34,7 @@ type IngressAuthority struct {
 	throttled     map[string]connectorprotocol.IngressThrottle // hostnames whose workspace used its fair-use bandwidth, from the same fetch
 	blocked       map[string]bool                              // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
 	ipRules       map[string]addressRule                       // owner IP allow/deny lists per hostname, from the same fetch
+	signIn        map[string]bool                              // public previews whose owner saved a list of viewers (IngressIPRule.SignIn)
 	freeRequests  map[string]bool                              // hostnames a Free account owns (request rates apply), from the same fetch
 	offline       map[string]bool                              // preview hostnames whose owner machine is asleep, from the same fetch
 	http01        map[string]connectorprotocol.HTTP01Response  // by token, from the same fetch
@@ -385,10 +386,14 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 	}
 	a.ipRules = make(map[string]addressRule, len(snapshot.IPRules))
 	a.freeRequests = make(map[string]bool)
+	a.signIn = make(map[string]bool)
 	for _, r := range snapshot.IPRules {
 		a.ipRules[r.Hostname] = compileAddressRule(r)
 		if r.FreeRequests {
 			a.freeRequests[r.Hostname] = true
+		}
+		if r.SignIn {
+			a.signIn[r.Hostname] = true
 		}
 	}
 	a.http01 = make(map[string]connectorprotocol.HTTP01Response, len(snapshot.HTTP01))
@@ -586,6 +591,17 @@ func (a *IngressAuthority) PreviewHostnames() []string {
 		}
 	}
 	return hosts
+}
+
+// PreviewSignIn reports whether the last server snapshot marks hostname as a public preview whose owner saved a
+// list of viewers: every visitor signs in, and only a browser decision forwards (the server sends no public one).
+func (a *IngressAuthority) PreviewSignIn(hostname string) bool {
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.signIn[hostname]
 }
 
 // RequestLimited reports whether the last server snapshot lists hostname as owned by a Free account, whose requests

@@ -19,7 +19,7 @@ import (
 )
 
 func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
-	for _, mode := range []string{"allowed", "viewer", "host", "path", "target", "publication", "control-loss", "lifetime", "unix", "team", "team-raw", "renewal", "localhost-ipv6"} {
+	for _, mode := range []string{"allowed", "viewer", "host", "path", "target", "publication", "control-loss", "lifetime", "unix", "team", "team-raw", "renewal", "localhost-ipv6", "public-listed", "public-public"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
@@ -97,10 +97,17 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 			if mode == "team" || mode == "team-raw" {
 				lease.AccessMode = "team"
 			}
+			if mode == "public-listed" || mode == "public-public" {
+				// A public preview whose owner saved a list of viewers: its signed-in viewer's decision is restricted.
+				lease.AccessMode = "public"
+			}
 			now := time.Now()
 			d := connectorprotocol.IngressDecision{Binding: connectorprotocol.IngressBinding{EnvironmentID: "env-browser", AccountID: identity.AccountID, TunnelID: identity.TunnelID, Lifecycle: "ephemeral", ResourceGeneration: 1, RouteID: lease.ID, RouteGeneration: 1, TargetID: lease.ID, TargetGeneration: 1, HostID: identity.HostID, InstallationGeneration: 1, Audience: lease.AccessMode, ConnectionMethod: "edge", Protocol: "http", Hostname: "browser.example.test", PathPrefix: "/", OriginScheme: lease.Target.Scheme, OriginAddress: lease.Target.Address, TLSVerification: "not_applicable", PublicationID: lease.ID, PublicationGeneration: 1}, DecisionID: "decision-browser", PolicyGeneration: 1, EdgeNodeID: "edge-browser", EdgeProcessEpoch: "epoch-1234567890123456789012345678", ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation, AssignmentGeneration: 1, PrincipalID: "viewer-browser", GrantID: "grant-browser", GrantGeneration: 1, Action: "view", IssuedAt: now, ExpiresAt: now.Add(10 * time.Second)}
 			if lease.AccessMode == "team" {
 				d.MembershipGeneration = 1
+			}
+			if mode == "public-listed" {
+				d.Binding.Audience = "private"
 			}
 			if mode == "lifetime" {
 				d.ExpiresAt = now.Add(time.Second)
@@ -194,7 +201,7 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 			}
 			_, _ = fmt.Fprintf(stream, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host)
 			response, err := http.ReadResponse(bufio.NewReader(stream), nil)
-			allowed := mode == "allowed" || mode == "lifetime" || mode == "unix" || mode == "team" || mode == "renewal" || mode == "localhost-ipv6"
+			allowed := mode == "allowed" || mode == "lifetime" || mode == "unix" || mode == "team" || mode == "renewal" || mode == "localhost-ipv6" || mode == "public-listed"
 			if !allowed {
 				if err == nil {
 					response.Body.Close()
@@ -209,7 +216,7 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer response.Body.Close()
-			if mode == "allowed" || mode == "unix" || mode == "team" || mode == "renewal" || mode == "localhost-ipv6" {
+			if mode == "allowed" || mode == "unix" || mode == "team" || mode == "renewal" || mode == "localhost-ipv6" || mode == "public-listed" {
 				body, err := io.ReadAll(response.Body)
 				if err != nil || string(body) != "browser-ok" {
 					t.Fatalf("body=%q error=%v", body, err)
