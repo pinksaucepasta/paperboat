@@ -109,6 +109,10 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 			if mode == "public-listed" {
 				d.Binding.Audience = "private"
 			}
+			if mode == "public-public" {
+				// A valid public decision is no browser authority: pb refuses it on the browser path.
+				d.PrincipalID, d.GrantID, d.GrantGeneration = "", "", 0
+			}
 			if mode == "lifetime" {
 				d.ExpiresAt = now.Add(time.Second)
 			}
