@@ -250,6 +250,13 @@ func TestARingOpenedBesideABusyWriterRepairsACrashedTailBeforeAppending(t *testi
 		t.Fatalf("open beside a held lock: %v", err)
 	}
 	defer ring.Close()
+	for name, read := range map[string]func(context.Context, int64) ([]byte, error){"ReadAll": ring.ReadAll, "ReadTail": ring.ReadTail} {
+		ring.unrepaired.Store(true)
+		data, err := read(t.Context(), DefaultMaximumBytes)
+		if err != nil || bytes.Contains(data, []byte("crashed")) || bytes.Count(data, []byte{'\n'}) != 1 {
+			t.Fatalf("%s before any append: %q %v", name, data, err)
+		}
+	}
 	if err := errors.Join(ring.Record(concurrencyEvent(t, "after")), ring.Flush(t.Context())); err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +312,165 @@ func TestAStorageFaultOutlivesATimedOutFlushAndClose(t *testing.T) {
 		}
 	}
 	<-ring.done
+}
+
+// A sibling keeps its segment open while it syncs outside writer.lock. Windows refuses to delete such a file: expiry
+// and the byte budget must leave it for a later append instead of failing this writer as if storage were broken.
+func TestASegmentASiblingStillSyncsDoesNotFailAnotherWritersRemoval(t *testing.T) {
+	for name, tc := range map[string]struct {
+		limit int64
+		size  int
+		age   time.Duration
+	}{
+		"expired":     {limit: DefaultMaximumBytes, size: 1, age: 2 * time.Hour},
+		"over budget": {limit: MaximumRecordBytes, size: MaximumRecordBytes - 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			config := DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid(), Retention: time.Hour, MaximumBytes: tc.limit, SegmentBytes: MaximumRecordBytes}
+			ring, err := NewDiskRing(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ring.Close()
+			held := filepath.Join(config.Directory, fmt.Sprintf("events-%020d-00.ndjson", time.Now().Add(-time.Minute).UnixNano()))
+			if err := createDiagnosticSegment(held, ring.owner); err != nil {
+				t.Fatal(err)
+			}
+			sibling, err := openDiagnosticAppend(held, ring.owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sibling.Close()
+			if _, err := sibling.Write(bytes.Repeat([]byte{'\n'}, tc.size)); err != nil {
+				t.Fatal(err)
+			}
+			modified := time.Now().Add(-tc.age)
+			if err := os.Chtimes(held, modified, modified); err != nil {
+				t.Fatal(err)
+			}
+			if err := errors.Join(ring.Record(concurrencyEvent(t, "beside")), ring.Flush(t.Context())); err != nil {
+				t.Fatalf("append beside an open segment: %v (%+v)", err, ring.Stats())
+			}
+			// Opening runs the same removals.
+			second, err := NewDiskRing(config)
+			if err != nil {
+				t.Fatalf("open beside an open segment: %v", err)
+			}
+			defer second.Close()
+			if err := sibling.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(held, modified, modified); err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			if err := errors.Join(ring.Record(concurrencyEvent(t, "after")), ring.Flush(t.Context())); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(held); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("segment not removed once closed: %v", err)
+			}
+		})
+	}
+}
+
+// A segment a sibling holds open must not stop the eviction of idle ones: the ring stays within its budget.
+func TestAHeldSegmentDoesNotStopEvictionOfIdleOnes(t *testing.T) {
+	config := DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid(), MaximumBytes: 2 * MaximumRecordBytes, SegmentBytes: MaximumRecordBytes}
+	ring, err := NewDiskRing(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ring.Close()
+	for i := range 2 {
+		path := filepath.Join(config.Directory, fmt.Sprintf("events-%020d-00.ndjson", time.Now().Add(time.Duration(i-2)*time.Minute).UnixNano()))
+		if err := createDiagnosticSegment(path, ring.owner); err != nil {
+			t.Fatal(err)
+		}
+		file, err := openDiagnosticAppend(path, ring.owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		if _, err := file.Write(bytes.Repeat([]byte{'\n'}, MaximumRecordBytes-10)); err != nil {
+			t.Fatal(err)
+		}
+		// Only the oldest stays open.
+		if i == 1 {
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := errors.Join(ring.Record(concurrencyEvent(t, "beside")), ring.Flush(t.Context())); err != nil {
+		t.Fatalf("append beside an open segment: %v (%+v)", err, ring.Stats())
+	}
+	if _, err := ring.ReadAll(t.Context(), config.MaximumBytes); err != nil {
+		t.Fatalf("ring over its budget with an idle segment left to evict: %v", err)
+	}
+}
+
+// The failure note is created like a segment, replaces a link instead of writing through it, and never recreates a
+// removed directory.
+func TestFailureNoteIsOwnerOnlyNeverFollowsALinkOrRecreatesTheDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "diagnostics")
+	recorder, err := NewRecorder(DiskConfig{Directory: directory, OwnerUID: os.Geteuid()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	note := filepath.Join(directory, FailureNoteName)
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, note); err != nil && runtime.GOOS != "windows" {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"first\n", "second\n"} {
+		if err := recorder.NoteSaveFailure(text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if kept, err := os.ReadFile(outside); err != nil || string(kept) != "keep" {
+		t.Fatalf("wrote through a link: %q %v", kept, err)
+	}
+	if _, err := verifiedDiagnosticFile(note, recorder.disk.owner); err != nil {
+		t.Fatalf("note is not owner-only: %v", err)
+	}
+	if got, err := os.ReadFile(note); err != nil || string(got) != "second\n" {
+		t.Fatalf("note: %q %v", got, err)
+	}
+	// A reader holding the old note only delays the replacement, and callers do not collide.
+	reader, err := os.Open(note)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := time.AfterFunc(50*time.Millisecond, func() { _ = reader.Close() })
+	defer release.Stop()
+	results := make(chan error, 4)
+	for range cap(results) {
+		go func() { results <- recorder.NoteSaveFailure("second\n") }()
+	}
+	for range cap(results) {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if left, err := filepath.Glob(filepath.Join(directory, "."+FailureNoteName+"*")); err != nil || len(left) != 0 {
+		t.Fatalf("temporary files left: %v %v", left, err)
+	}
+	if err := os.Rename(directory, directory+".offline"); err != nil {
+		t.Fatal(err)
+	}
+	if err := recorder.NoteSaveFailure("third\n"); err == nil {
+		t.Fatal("wrote a note without its directory")
+	}
+	if _, err := os.Lstat(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("directory recreated: %v", err)
+	}
+	if err := NewMemoryRecorder().NoteSaveFailure("memory\n"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestContendedDiskShutdownAndReadAreBounded(t *testing.T) {

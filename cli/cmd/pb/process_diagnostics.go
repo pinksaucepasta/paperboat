@@ -27,7 +27,6 @@ import (
 
 func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorreport.Reporter, stderr io.Writer) (context.Context, func()) {
 	var storageErr error
-	var directory string
 	var recorder *diagnostics.Recorder
 	command, _, findErr := newRootCommand().Find(args)
 	// Every step Paperboat itself re-runs as root through sudo (install, update, man pages, purge, ...) acts for
@@ -46,6 +45,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 		// Windows helper's protected completion status retains failure metadata.
 		recorder = diagnostics.NewMemoryRecorder()
 	} else {
+		var directory string
 		if directory = foregroundDiagnosticsDirectory(command, args); directory == "" {
 			directory, storageErr = processDiagnosticsDirectory(ctx, command)
 		}
@@ -56,7 +56,6 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	}
 	if storageErr != nil {
 		recorder = diagnostics.NewMemoryRecorder()
-		directory = "" // refused storage gets no failure file either
 	}
 	ctx = diagnostics.WithRecorder(ctx, recorder)
 	restoreLogger := configureProcessLogging(args, recorder, supportref.FromContext(ctx))
@@ -99,7 +98,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 		defer stopSave()
 		storageErr := recorder.Flush(saveCtx)
 		closeErr := recorder.CloseContext(saveCtx)
-		reportShutdownSave(stderr, directory, supportref.FromContext(ctx), queueErr, storageErr, closeErr)
+		reportShutdownSave(stderr, recorder, supportref.FromContext(ctx), queueErr, storageErr, closeErr)
 	}
 }
 
@@ -110,7 +109,7 @@ const (
 
 // reportShutdownSave keeps which step failed, and why, in the diagnostics directory. The user hears only of a storage
 // fault: a step that ran out of time waited behind another pb process or a slow disk, and the command succeeded.
-func reportShutdownSave(stderr io.Writer, directory, reference string, queueErr, storageErr, closeErr error) {
+func reportShutdownSave(stderr io.Writer, recorder *diagnostics.Recorder, reference string, queueErr, storageErr, closeErr error) {
 	var failed []error
 	fault := false
 	for _, step := range []struct {
@@ -126,12 +125,8 @@ func reportShutdownSave(stderr io.Writer, directory, reference string, queueErr,
 	if len(failed) == 0 {
 		return
 	}
-	// directory is empty without disk diagnostics. A plain write: a disk too slow to save the ring must not hold the
-	// exit for another sync, and a directory an uninstall removed is not created again.
-	if directory != "" {
-		note := time.Now().UTC().Format(time.RFC3339) + " diagnostics_shutdown " + reference + "\n" + causetext.Text(errors.Join(failed...)) + "\n"
-		_ = os.WriteFile(filepath.Join(directory, "last-diagnostics-failure.txt"), []byte(note), 0o600)
-	}
+	note := time.Now().UTC().Format(time.RFC3339) + " diagnostics_shutdown " + reference + "\n" + causetext.Text(errors.Join(failed...)) + "\n"
+	_ = recorder.NoteSaveFailure(note) // the note is best effort: the storage it describes may be the broken one
 	if fault {
 		fmt.Fprintf(stderr, "pb: Some local diagnostics could not be saved before shutdown. Run `pb doctor` to check diagnostic storage. Support reference: %s.\n", reference)
 	}

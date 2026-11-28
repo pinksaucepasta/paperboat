@@ -84,8 +84,8 @@ type DiskRing struct {
 	persistenceAvailable atomic.Bool
 	workerContext        context.Context
 	cancelWorker         context.CancelFunc
-	// unrepaired marks a ring opened without recovery. Only the writer goroutine touches it once started.
-	unrepaired bool
+	// unrepaired marks a ring opened without recovery. It is cleared under writer.lock.
+	unrepaired atomic.Bool
 }
 
 // SaveDelayed reports an error that only says saving did not finish within its time: another pb held writer.lock, or
@@ -132,7 +132,7 @@ func NewDiskRing(config DiskConfig) (*DiskRing, error) {
 			ring.cancelWorker()
 			return nil, err
 		}
-		ring.unrepaired = true
+		ring.unrepaired.Store(true)
 	}
 	go ring.run()
 	return ring, nil
@@ -352,39 +352,25 @@ func (r *DiskRing) appendLocked(encoded []byte) (appended *os.File, result error
 			appended = nil
 		}
 	}()
+	// Appending after a crashed writer's partial record would join the two into one corrupt line.
+	if err := r.repairSkippedLocked(); err != nil {
+		return nil, err
+	}
 	segments, total, err := r.segments()
 	if err != nil {
 		return nil, err
 	}
 	// Enforce age retention during normal operation, not only at startup.
-	cutoff := r.config.Clock().UTC().Add(-r.config.Retention)
-	kept := segments[:0]
-	for _, segment := range segments {
-		if segment.expired(cutoff) {
-			if err := removeDiagnosticFile(segment.path, r.owner); err != nil {
-				return nil, err
-			}
-			total -= segment.size
-			continue
-		}
-		kept = append(kept, segment)
+	segments, total, err = r.removeExpired(segments, total)
+	if err != nil {
+		return nil, err
 	}
-	segments = kept
-	if r.unrepaired {
-		// Appending after a crashed writer's partial record would join the two into one corrupt line.
-		if err := r.repairTail(segments); err != nil {
-			return nil, err
-		}
-		r.unrepaired = false
+	segments, total, inUse, err := r.evict(segments, total, r.config.MaximumBytes-int64(len(encoded)))
+	if err != nil {
+		return nil, err
 	}
-	for total+int64(len(encoded)) > r.config.MaximumBytes && len(segments) > 0 {
-		if err := removeDiagnosticFile(segments[0].path, r.owner); err != nil {
-			return nil, err
-		}
-		total -= segments[0].size
-		segments = segments[1:]
-	}
-	if int64(len(encoded)) > r.config.MaximumBytes-total {
+	// A segment another process is still syncing may keep the ring over its budget until a later append removes it.
+	if int64(len(encoded)) > r.config.MaximumBytes-(total-inUse) {
 		return nil, errors.New("diagnostic ring capacity exhausted")
 	}
 	path := ""
@@ -508,28 +494,81 @@ func (r *DiskRing) recover() (result error) {
 	if err != nil {
 		return err
 	}
+	segments, total, err = r.removeExpired(segments, total)
+	if err != nil {
+		return err
+	}
+	// Enforce the disk byte budget before reading corrupt records into memory.
+	segments, _, _, err = r.evict(segments, total, r.config.MaximumBytes)
+	if err != nil {
+		return err
+	}
+	return r.repairTail(segments)
+}
+
+// remove deletes one segment. It reports false for a segment another process still has open (Windows refuses the
+// delete while a sibling syncs it outside writer.lock): a later append removes it, and that is no storage fault.
+func (r *DiskRing) remove(path string) (bool, error) {
+	err := removeDiagnosticFile(path, r.owner)
+	if segmentInUse(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (r *DiskRing) removeExpired(segments []segmentInfo, total int64) ([]segmentInfo, int64, error) {
 	cutoff := r.config.Clock().UTC().Add(-r.config.Retention)
 	kept := segments[:0]
 	for _, segment := range segments {
 		if segment.expired(cutoff) {
-			if err := removeDiagnosticFile(segment.path, r.owner); err != nil {
-				return err
+			removed, err := r.remove(segment.path)
+			if err != nil {
+				return nil, 0, err
 			}
-			total -= segment.size
-			continue
+			if removed {
+				total -= segment.size
+				continue
+			}
 		}
 		kept = append(kept, segment)
 	}
-	segments = kept
-	// Enforce the disk byte budget before reading corrupt records into memory.
-	for total > r.config.MaximumBytes && len(segments) > 0 {
-		if err := removeDiagnosticFile(segments[0].path, r.owner); err != nil {
-			return err
+	return kept, total, nil
+}
+
+// evict removes the oldest segments until total fits budget. inUse is the size of those it had to leave.
+func (r *DiskRing) evict(segments []segmentInfo, total, budget int64) (kept []segmentInfo, remaining, inUse int64, err error) {
+	kept = segments[:0]
+	for _, segment := range segments {
+		if total > budget {
+			removed, err := r.remove(segment.path)
+			if err != nil {
+				return nil, 0, 0, err
+			}
+			if removed {
+				total -= segment.size
+				continue
+			}
+			inUse += segment.size
 		}
-		total -= segments[0].size
-		segments = segments[1:]
+		kept = append(kept, segment)
 	}
-	return r.repairTail(segments)
+	return kept, total, inUse, nil
+}
+
+// repairSkippedLocked does the tail repair that a ring opened beside a busy writer skipped. The caller holds writer.lock.
+func (r *DiskRing) repairSkippedLocked() error {
+	if !r.unrepaired.Load() {
+		return nil
+	}
+	segments, _, err := r.segments()
+	if err != nil {
+		return err
+	}
+	if err := r.repairTail(segments); err != nil {
+		return err
+	}
+	r.unrepaired.Store(false)
+	return nil
 }
 
 // repairTail runs under writer.lock. Writes append validated, newline-terminated records to the newest segment under
@@ -558,6 +597,9 @@ func (r *DiskRing) ReadAll(ctx context.Context, maximum int64) (data []byte, res
 		return nil, err
 	}
 	defer func() { result = errors.Join(result, unlock()) }()
+	if err := r.repairSkippedLocked(); err != nil {
+		return nil, err
+	}
 	segments, _, err := r.segments()
 	if err != nil {
 		return nil, err
@@ -594,6 +636,9 @@ func (r *DiskRing) ReadTail(ctx context.Context, maximum int64) (data []byte, re
 		return nil, err
 	}
 	defer func() { result = errors.Join(result, unlock()) }()
+	if err := r.repairSkippedLocked(); err != nil {
+		return nil, err
+	}
 	segments, _, err := r.segments()
 	if err != nil {
 		return nil, err

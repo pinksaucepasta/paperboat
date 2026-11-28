@@ -32,13 +32,28 @@ const alreadyExists windows.Errno = 0x80320009
 // in leases leaves no filter behind (the nft table of server_linux.go and the PF anchor of protection_darwin.go
 // are replaced the same way).
 func Apply(leases []Lease, loopbackCIDR string, protectedValues ...string) error {
+	policy, err := desiredPolicy(leases, loopbackCIDR, protectedValues...)
+	if err != nil {
+		return err
+	}
+	var engine uintptr
+	if err := fwpmEngineOpen0(nil, cRPC_C_AUTHN_WINNT, nil, nil, unsafe.Pointer(&engine)); err != nil {
+		return err
+	}
+	defer fwpmEngineClose0(engine)
+	return runTransaction(engine, policy)
+}
+
+// desiredPolicy validates the ranges and returns the whole policy as one transaction operation, so a test can read
+// back exactly what Apply installs and then abort.
+func desiredPolicy(leases []Lease, loopbackCIDR string, protectedValues ...string) (wfpObjectInstaller, error) {
 	parsedPrefix, parseErr := netip.ParsePrefix(loopbackCIDR)
 	protectedPrefixes := []netip.Prefix{}
 	seenProtected := make(map[netip.Prefix]bool)
 	for _, value := range append([]string{loopbackCIDR}, protectedValues...) {
 		prefix, prefixErr := netip.ParsePrefix(value)
 		if prefixErr != nil || !prefix.Addr().Is4() || prefix.Bits() != 16 || prefix != prefix.Masked() {
-			return errors.New("invalid Paperboat WFP protected loopback range")
+			return nil, errors.New("invalid Paperboat WFP protected loopback range")
 		}
 		if !seenProtected[prefix] {
 			seenProtected[prefix] = true
@@ -46,14 +61,9 @@ func Apply(leases []Lease, loopbackCIDR string, protectedValues ...string) error
 		}
 	}
 	if parseErr != nil || parsedPrefix.String() != "127.100.0.0/16" || !parsedPrefix.Addr().Is4() || parsedPrefix.Bits() != 16 {
-		return errors.New("invalid Paperboat WFP loopback configuration")
+		return nil, errors.New("invalid Paperboat WFP loopback configuration")
 	}
-	var engine uintptr
-	if err := fwpmEngineOpen0(nil, cRPC_C_AUTHN_WINNT, nil, nil, unsafe.Pointer(&engine)); err != nil {
-		return err
-	}
-	defer fwpmEngineClose0(engine)
-	return runTransaction(engine, func(engine uintptr) error {
+	return func(engine uintptr) error {
 		if err := removeSublayerFilters(context.Background(), engine, []windows.GUID{sublayerKey}); err != nil {
 			return fmt.Errorf("retire installed filters: %w", err)
 		}
@@ -137,7 +147,7 @@ func Apply(leases []Lease, loopbackCIDR string, protectedValues ...string) error
 		runtime.KeepAlive(prefix)
 		runtime.KeepAlive(app)
 		return nil
-	})
+	}, nil
 }
 
 func ensureBase(engine uintptr) error {

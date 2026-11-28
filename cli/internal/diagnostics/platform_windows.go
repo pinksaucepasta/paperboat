@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
@@ -105,6 +106,14 @@ func createDiagnosticSegment(path string, owner diagnosticOwner) error {
 	return file.Close()
 }
 
+// createDiagnosticNote returns a new file with the ring's protected ACL, without syncing it.
+func createDiagnosticNote(path string, owner diagnosticOwner) (*os.File, error) {
+	if err := createDiagnosticSegment(path, owner); err != nil {
+		return nil, err
+	}
+	return openDiagnosticAppend(path, owner)
+}
+
 func openDiagnosticAppend(path string, owner diagnosticOwner) (*os.File, error) {
 	before, err := verifiedDiagnosticFile(path, owner)
 	if err != nil {
@@ -145,6 +154,26 @@ func removeDiagnosticFile(path string, owner diagnosticOwner) error {
 	}
 	return os.Remove(path)
 }
+
+// replaceDiagnosticNote retries while a reader of the old note, or another pb process replacing it, holds the
+// destination, which Windows reports as access denied or a sharing violation. The bound is short: pb is exiting.
+func replaceDiagnosticNote(from, to string) error {
+	deadline := time.Now().Add(noteReplaceBudget)
+	for {
+		err := os.Rename(from, to)
+		busy := errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_SHARING_VIOLATION)
+		if err == nil || !busy || time.Now().After(deadline) {
+			return err
+		}
+		//paperboat:allow-source-policy sleep owner=diagnostics reason=bounded-file-replacement-retry
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+const noteReplaceBudget = 500 * time.Millisecond
+
+// segmentInUse reports a delete refused because another process has the file open without FILE_SHARE_DELETE.
+func segmentInUse(err error) bool { return errors.Is(err, windows.ERROR_SHARING_VIOLATION) }
 
 func writeDiagnosticAtomic(path string, value []byte, owner diagnosticOwner) error {
 	if err := ensureDiagnosticDirectory(filepath.Dir(path), owner); err != nil {

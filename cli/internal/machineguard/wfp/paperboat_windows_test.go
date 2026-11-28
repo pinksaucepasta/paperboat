@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -172,9 +173,12 @@ func TestApplyLetsAnyUserConnectToTheGateway(t *testing.T) {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		t.Skip("requires elevated native WFP access")
 	}
+	assertGatewayConnectPolicy(t)
 	prior := sublayerKey
 	if len(installedIn(t, prior)) != 0 {
-		t.Skip("an installed guard's own filters decide the connect")
+		// Real traffic is decided by every sublayer, so beside an installed guard it says nothing about this policy.
+		t.Log("a guard is installed: checked the policy only")
+		return
 	}
 	sublayerKey = guidFor(fmt.Sprintf("paperboat-gateway-test-%d", os.Getpid()))
 	t.Cleanup(func() {
@@ -199,6 +203,91 @@ func TestApplyLetsAnyUserConnectToTheGateway(t *testing.T) {
 	}
 	if !denied("127.100.0.9:80") {
 		t.Fatal("the gateway permit opened another address of the range")
+	}
+}
+
+// assertGatewayConnectPolicy reads back, inside a transaction it aborts, the outbound-connect policy Apply installs
+// with no lease: permits for the gateway's two ports with no user condition, above a block of the whole range, and no
+// other permit. Nothing is ever enforced and an installed guard stays as it was. It uses the product sublayer because
+// filter keys are unique across the filter engine: beside an installed guard, a copy in another sublayer is refused as
+// already existing.
+func assertGatewayConnectPolicy(t *testing.T) {
+	t.Helper()
+	policy, err := desiredPolicy(nil, "127.100.0.0/16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var engine uintptr
+	if err := fwpmEngineOpen0(nil, cRPC_C_AUTHN_WINNT, nil, nil, unsafe.Pointer(&engine)); err != nil {
+		t.Fatal(err)
+	}
+	defer fwpmEngineClose0(engine)
+	before := installedIn(t, sublayerKey)
+	getByKey := windows.NewLazySystemDLL("fwpuclnt.dll").NewProc("FwpmFilterGetByKey0")
+	var permits, blocks []string
+	var lowestPermit, highestBlock uintptr = 255, 0
+	inspected := errors.New("inspected")
+	err = runTransaction(engine, func(engine uintptr) error {
+		if err := policy(engine); err != nil {
+			return err
+		}
+		keys, err := sublayerFilterKeys(t.Context(), engine, []windows.GUID{sublayerKey})
+		if err != nil {
+			return err
+		}
+		for i := range keys {
+			var filter *wtFwpmFilter0
+			if result, _, _ := getByKey.Call(engine, uintptr(unsafe.Pointer(&keys[i])), uintptr(unsafe.Pointer(&filter))); result != 0 {
+				return windows.Errno(result)
+			}
+			if filter.layerKey == cFWPM_LAYER_ALE_AUTH_CONNECT_V4 {
+				var described []string
+				for _, condition := range unsafe.Slice(filter.filterCondition, int(filter.numFilterConditions)) {
+					value := condition.conditionValue.value
+					switch condition.fieldKey {
+					case cFWPM_CONDITION_IP_PROTOCOL:
+						described = append(described, fmt.Sprintf("protocol=%d", uint8(value)))
+					case cFWPM_CONDITION_IP_REMOTE_PORT:
+						described = append(described, fmt.Sprintf("port=%d", uint16(value)))
+					case cFWPM_CONDITION_IP_REMOTE_ADDRESS:
+						if condition.conditionValue._type == cFWP_V4_ADDR_MASK {
+							masked := *(**wtFwpV4AddrAndMask)(unsafe.Pointer(&value))
+							described = append(described, fmt.Sprintf("range=%08x/%08x", masked.addr, masked.mask))
+						} else {
+							described = append(described, fmt.Sprintf("address=%08x", uint32(value)))
+						}
+					default:
+						described = append(described, "other="+condition.fieldKey.String())
+					}
+				}
+				slices.Sort(described)
+				rule := strings.Join(described, " ")
+				if filter.action._type == cFWP_ACTION_PERMIT {
+					permits, lowestPermit = append(permits, rule), min(lowestPermit, filter.weight.value)
+				} else {
+					blocks, highestBlock = append(blocks, rule), max(highestBlock, filter.weight.value)
+				}
+			}
+			fwpmFreeMemory0(unsafe.Pointer(&filter))
+		}
+		return inspected
+	})
+	if !errors.Is(err, inspected) {
+		t.Fatal(err)
+	}
+	slices.Sort(permits)
+	wantPermits := []string{"address=7f640001 port=443 protocol=6", "address=7f640001 port=80 protocol=6"}
+	if !slices.Equal(permits, wantPermits) {
+		t.Fatalf("connect permits = %q, want only the gateway's ports for any user: %q", permits, wantPermits)
+	}
+	if want := []string{"protocol=6 range=7f640000/ffff0000"}; !slices.Equal(blocks, want) {
+		t.Fatalf("connect blocks = %q, want %q", blocks, want)
+	}
+	if lowestPermit <= highestBlock {
+		t.Fatalf("gateway permit weight %d does not outrank the range block %d", lowestPermit, highestBlock)
+	}
+	if after := installedIn(t, sublayerKey); !slices.Equal(after, before) {
+		t.Fatalf("reading the policy changed the installed filters: %d before, %d after", len(before), len(after))
 	}
 }
 

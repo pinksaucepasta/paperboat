@@ -27,11 +27,20 @@ func ensureDiagnosticDirectory(path string, owner diagnosticOwner) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
+	return verifyDiagnosticDirectory(path, owner)
+}
+
+func verifyDiagnosticDirectory(path string, owner diagnosticOwner) error {
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || fileUID(info) != owner.uid {
 		return invalidDiagnostic(err)
 	}
 	return nil
+}
+
+// createDiagnosticNote returns a new owner-only file without syncing it; O_EXCL never opens through a link.
+func createDiagnosticNote(path string, _ diagnosticOwner) (*os.File, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 }
 
 func verifiedDiagnosticFile(path string, owner diagnosticOwner) (os.FileInfo, error) {
@@ -104,6 +113,11 @@ func removeDiagnosticFile(path string, owner diagnosticOwner) error {
 	}
 	return syncDirectory(filepath.Dir(path))
 }
+
+func replaceDiagnosticNote(from, to string) error { return os.Rename(from, to) }
+
+// segmentInUse reports a delete refused because another process has the file open; Unix deletes open files.
+func segmentInUse(error) bool { return false }
 
 func writeDiagnosticAtomic(path string, value []byte, owner diagnosticOwner) error {
 	if err := atomicfile.Write(path, value, atomicfile.Options{Mode: 0o600, OwnerUID: owner.uid, OwnerGID: -1}); err != nil {
