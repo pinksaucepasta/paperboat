@@ -105,9 +105,14 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 		}
 		throttled = s.addTerminalCaps(attached, throttled)
 	}
-	if ipRules, err = ownerIPRules(ctx, s.store, decisions); err != nil {
+	listed, err := listedPublicPreviews(ctx, s.store, nodeID)
+	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+	if ipRules, err = ownerIPRules(ctx, s.store, append(append([]wire.IngressDecision(nil), decisions...), listed...)); err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	ipRules = markSignIn(ipRules, listed)
 	offline, err = offlineOwnerPreviews(ctx, s.store, nodeID)
 	return decisions, throttled, blocked, ipRules, offline, err
 }
@@ -203,6 +208,54 @@ func (s *EdgeService) assignThrottleRates(ctx context.Context, throttled []wire.
 		throttled[i].BytesPerSecond = rate
 	}
 	return nil
+}
+
+// listedPublicPreviews lists, as selectors only (hostname and publication), the active public previews this edge
+// may serve whose owner saved a list of viewers. They have no public decision (ingressprojection.publicPreviewIngressSQL);
+// the edge asks their visitors to sign in (IngressIPRule.SignIn). Nothing here grants authority.
+func listedPublicPreviews(ctx context.Context, store *db.DB, nodeID string) ([]wire.IngressDecision, error) {
+	rows, err := store.Pool().Query(ctx, `SELECT DISTINCT p.id,publication.hostname FROM preview_leases p
+JOIN browser_viewer_policies v ON v.resource_kind='preview' AND v.resource_id=p.id AND v.owner_account_id=p.account_id AND v.audience<>'public'
+JOIN LATERAL (
+ SELECT substring(p.endpoint from 9) hostname WHERE paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
+ UNION ALL
+ SELECT d.hostname FROM preview_domains d WHERE d.preview_id=p.id AND d.account_id=p.account_id
+ AND d.deleted_at IS NULL AND EXISTS(SELECT 1 FROM paperboat.workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified') AND d.conflict_state='clear'
+ AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation
+) publication ON true
+WHERE p.terminal_state='active' AND p.access_mode='public' AND p.lease_deadline>now() AND (p.user_deadline IS NULL OR p.user_deadline>now())
+ AND paperboat.node_preview_eligible($1,p.account_id,p.id)
+ORDER BY p.id,publication.hostname`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []wire.IngressDecision
+	for rows.Next() {
+		var d wire.IngressDecision
+		if err := rows.Scan(&d.Binding.PublicationID, &d.Binding.Hostname); err != nil {
+			return nil, err
+		}
+		d.Binding.Lifecycle = wire.TunnelEphemeral
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// markSignIn sets the sign-in mark on the rule of each listed preview's hostname, adding the rule when it has none.
+func markSignIn(rules []wire.IngressIPRule, listed []wire.IngressDecision) []wire.IngressIPRule {
+	for _, d := range listed {
+		found := false
+		for i := range rules {
+			if rules[i].Hostname == d.Binding.Hostname {
+				rules[i].SignIn, found = true, true
+			}
+		}
+		if !found {
+			rules = append(rules, wire.IngressIPRule{Hostname: d.Binding.Hostname, SignIn: true})
+		}
+	}
+	return rules
 }
 
 // offlineOwnerPreviews lists the hostnames of active foreground previews whose owner machine is offline or

@@ -581,6 +581,13 @@ func newerDataCarrierPreviewRoute(old, next DataCarrierPreviewRoute) bool {
 	return next.AttachmentGeneration > old.AttachmentGeneration || next.Identity.ProcessGeneration > old.Identity.ProcessGeneration || next.Identity.Generation > old.Identity.Generation || next.Revision > old.Revision
 }
 
+// previewSignInDecision reports a signed-in viewer's decision for a public preview whose owner saved a list of
+// viewers: the server issues it restricted ("private") on the public carrier route. A public decision never
+// counts as one.
+func previewSignInDecision(route DataCarrierPreviewRoute, decision connectorprotocol.IngressDecision) bool {
+	return route.Kind == dataCarrierPreviewRouteKind && route.AccessMode == "public" && decision.Binding.Audience == "private"
+}
+
 func normalizePreviewCarrierHost(value string) string {
 	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
 	if parsed, _, err := net.SplitHostPort(host); err == nil {
@@ -681,8 +688,8 @@ func (t *DataCarrierPreviewTransport) roundTripRoute(request *http.Request, host
 	if private && (route.AccessMode != "private" || privateRequest.Validate(time.Time{}) != nil || !privateAccessRouteMatches(privateRequest, previewRouteMatch(route))) {
 		return nil, sent, ErrDataCarrierPreviewTransport
 	}
-	restricted := route.AccessMode == "private" || route.AccessMode == "team"
-	if restricted && !private && (!browser || decision.Binding.Audience != route.AccessMode || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration < route.Revision) {
+	restricted := route.AccessMode == "private" || route.AccessMode == "team" || browser && previewSignInDecision(route, decision)
+	if restricted && !private && (!browser || decision.Binding.Audience != route.AccessMode && !previewSignInDecision(route, decision) || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration < route.Revision) {
 		return nil, sent, ErrDataCarrierPreviewTransport
 	}
 	if !restricted && (browser || private) || browser && private {

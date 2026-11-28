@@ -96,7 +96,10 @@ type Config struct {
 	AddressAllowed func(host, address string) bool
 	// RequestLimited, when set with FreeRequests, reports a host a Free account owns: its requests meet the Free request rates.
 	RequestLimited func(host string) bool
-	FreeRequests   *FreeRequestLimits
+	// PreviewSignIn reports a public preview whose owner saved a list of viewers: the edge serves it as a private
+	// one, to signed-in viewers on their browser decision only.
+	PreviewSignIn func(host string) bool
+	FreeRequests  *FreeRequestLimits
 }
 
 type routeMatchContextKey struct{}
@@ -730,6 +733,15 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Header.Del("X-Paperboat-Private-Carrier")
 	r.Header.Del("X-Paperboat-Private-Connection")
 	browserAuthorized := false
+	if expectedKind == dataCarrierPreviewRouteKind && matched.Rule.AccessMode == "public" && p.config.PreviewSignIn != nil && p.config.PreviewSignIn(host) {
+		// The match is this request's copy: the carrier route stays public, and the transport accepts the browser
+		// decision on it only when the decision is restricted (previewSignInDecision).
+		if p.config.BrowserAccess == nil {
+			writeErrorPage(w, http.StatusNotFound, "")
+			return
+		}
+		matched.Rule.AccessMode = "private"
+	}
 	if (matched.Rule.AccessMode == "private" || matched.Rule.AccessMode == "team") && p.config.BrowserAccess != nil && !privateAuthorized {
 		var finish func()
 		r, finish, browserAuthorized = p.config.BrowserAccess.authorize(w, r, matched)

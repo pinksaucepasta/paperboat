@@ -14,7 +14,9 @@ import (
 )
 
 // Public preview authority comes from the admitted owner publication, not a
-// browser viewer grant. Its accounting binding reuses the same retained ledger
+// browser viewer grant. A public preview whose owner saved a list of viewers
+// (browser_viewer_policies) gets no public decision: the edge serves it only on
+// a signed-in viewer's browser decision (controlplane.listedPublicPreviews). Its accounting binding reuses the same retained ledger
 // as durable public routes and restricted browser ingress.
 const publicPreviewIngressSQL = `
 SELECT m.environment_id,p.account_id,a.tunnel_id,a.route_generation,a.route_id,a.route_generation,a.host_id,m.installation_generation,
@@ -39,7 +41,8 @@ JOIN LATERAL (
  AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation
 ) publication ON true
 WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2
- AND p.access_mode=$4 AND ($5::text='' OR p.id=$5) AND ($6::text='' OR a.route_id=$6) AND ($7::text='' OR publication.hostname=$7) AND ($8::text='' OR a.operation_id=$8) AND ($9::bigint=0 OR a.lease_generation=$9) AND p.terminal_state='active' AND p.lease_deadline>$3 AND (p.user_deadline IS NULL OR p.user_deadline>$3)
+ AND p.access_mode=$4
+ AND ($4::text<>'public' OR NOT EXISTS(SELECT 1 FROM browser_viewer_policies v WHERE v.resource_kind='preview' AND v.resource_id=p.id AND v.owner_account_id=p.account_id AND v.audience<>'public')) AND ($5::text='' OR p.id=$5) AND ($6::text='' OR a.route_id=$6) AND ($7::text='' OR publication.hostname=$7) AND ($8::text='' OR a.operation_id=$8) AND ($9::bigint=0 OR a.lease_generation=$9) AND p.terminal_state='active' AND p.lease_deadline>$3 AND (p.user_deadline IS NULL OR p.user_deadline>$3)
  AND a.lease_generation>0 AND a.lease_generation<=p.generation AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>$3
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
  AND m.public_identity_key=a.machine_identity_public_key AND identity.issued_at<=$3 AND identity.expires_at>$3

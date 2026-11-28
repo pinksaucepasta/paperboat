@@ -85,8 +85,14 @@ func peekHTTPExchange(reader *bufio.Reader) bool {
 
 func (c *DataCarrierPreviewCarrier) forwardBrowser(ctx context.Context, stream *connector.DataCarrierStream, open connectorprotocol.StreamOpen, lease Lease) error {
 	defer stream.Close()
-	if c.browserIngress == nil || c.browserRouteGeneration == 0 || lease.AccessMode == "public" {
+	if c.browserIngress == nil || c.browserRouteGeneration == 0 {
 		return connectorprotocol.ErrIngressDenied
+	}
+	// A public preview whose owner saved a list of viewers is served to signed-in viewers on a restricted
+	// ("private") browser decision; any other preview's decision names its own access mode.
+	audience := lease.AccessMode
+	if audience == "public" {
+		audience = "private"
 	}
 	endpoint, err := url.Parse(lease.Endpoint)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" {
@@ -106,7 +112,7 @@ func (c *DataCarrierPreviewCarrier) forwardBrowser(ctx context.Context, stream *
 	authority := func(ctx context.Context, open connectorprotocol.StreamOpen, claimed connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
 		current, err := c.browserIngress(ctx, open, claimed)
 		b := current.Binding
-		if err != nil || b.Lifecycle != connectorprotocol.TunnelEphemeral || b.AccountID != lease.AccountID || b.HostID != c.identity.HostID || b.ResourceGeneration != c.browserRouteGeneration || b.RouteGeneration != c.browserRouteGeneration || b.PublicationID != lease.ID || b.PublicationGeneration != b.ResourceGeneration || b.TargetID != open.RouteID || b.TargetGeneration != b.ResourceGeneration || b.Hostname != strings.ToLower(endpoint.Hostname()) || b.PathPrefix != "/" || b.Audience != lease.AccessMode || b.OriginScheme != target.Scheme || b.OriginAddress != bound.Address || b.TLSVerification != verification || b.TLSServerName != "" || b.TLSCASHA256 != "" || b.MTLSCredentialReference != "" || b.TLSPin != "" {
+		if err != nil || b.Lifecycle != connectorprotocol.TunnelEphemeral || b.AccountID != lease.AccountID || b.HostID != c.identity.HostID || b.ResourceGeneration != c.browserRouteGeneration || b.RouteGeneration != c.browserRouteGeneration || b.PublicationID != lease.ID || b.PublicationGeneration != b.ResourceGeneration || b.TargetID != open.RouteID || b.TargetGeneration != b.ResourceGeneration || b.Hostname != strings.ToLower(endpoint.Hostname()) || b.PathPrefix != "/" || b.Audience != audience || b.OriginScheme != target.Scheme || b.OriginAddress != bound.Address || b.TLSVerification != verification || b.TLSServerName != "" || b.TLSCASHA256 != "" || b.MTLSCredentialReference != "" || b.TLSPin != "" {
 			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 		}
 		return current, nil

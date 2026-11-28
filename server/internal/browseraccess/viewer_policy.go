@@ -300,7 +300,9 @@ func ensurePolicyEdgeMode(kind, nativeMode, audience string) error {
 		return ErrInvalid
 	}
 	if kind == "preview" && nativeMode == "public" {
-		if audience != AudiencePublic {
+		// A live public preview takes, changes and clears a list in place: while a list is saved the server stops
+		// publishing its public decision and the edge asks every visitor to sign in (publicPreviewSignIn).
+		if !publicPreviewAudience(audience) {
 			return ErrPolicyEdgeTransition
 		}
 		return nil
@@ -316,6 +318,12 @@ func ensurePolicyEdgeMode(kind, nativeMode, audience string) error {
 // carries the exact policy generation and waits for its fenced replacement). A private resource takes its owner, or a
 // list of the people who may sign in; it is never made public or opened to a team. A team resource takes only its
 // owner: nothing intersects a browser selector with its team grants. A public preview is not restricted by a policy.
+// publicPreviewAudience reports whether a public preview may carry this audience: everyone, or a list of the
+// people who may sign in. Its owner alone or a team stays a publish-time choice (pb preview --private/--team).
+func publicPreviewAudience(audience string) bool {
+	return audience == AudiencePublic || audience == AudienceSpecificEmails || audience == AudienceEmailDomain
+}
+
 func audienceWithinNativeMode(nativeMode, audience string) bool {
 	switch nativeMode {
 	case "public":
@@ -413,8 +421,12 @@ func applyViewerPolicy(ctx context.Context, tx *db.Tx, a authority, account stri
 			p.Audience, p.AllowedEmails, p.EmailDomain, p.TeamID = AudienceOwner, nil, "", ""
 		}
 		// Rows written before these rules, or a native mode that changed since, fail closed.
-		if !audienceWithinNativeMode(a.nativeMode, p.Audience) || a.kind == "preview" && a.nativeMode == "public" && p.Audience != AudiencePublic {
+		if !audienceWithinNativeMode(a.nativeMode, p.Audience) || a.kind == "preview" && a.nativeMode == "public" && !publicPreviewAudience(p.Audience) {
 			return a, ErrNotAuthorized
+		}
+		if a.kind == "preview" && a.nativeMode == "public" && p.Audience != AudiencePublic {
+			// A listed public preview is served only to signed-in viewers, as a private one is.
+			a.mode = "private"
 		}
 		if a.kind == "tunnel" {
 			// The audience is enforced here as a browser grant. The edge only needs

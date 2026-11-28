@@ -179,14 +179,8 @@ func TestNoChangePaidPublicPublicationsPostgres(t *testing.T) {
 		if got := f.edgeMode(route); got != "public" {
 			t.Fatalf("%s public tunnel edge mode = %q", plan.name, got)
 		}
-		for _, audience := range []string{AudienceOwner, AudienceSpecificEmails} {
-			var emails []string
-			if audience == AudienceSpecificEmails {
-				emails = []string{"guest@partner.test"}
-			}
-			if _, err := f.set("preview", previewID, previewID, audience, 0, emails...); !errors.Is(err, ErrPolicyEdgeTransition) {
-				t.Fatalf("%s public preview limited to %s = %v, want ErrPolicyEdgeTransition", plan.name, audience, err)
-			}
+		if _, err := f.set("preview", previewID, previewID, AudienceOwner, 0); !errors.Is(err, ErrPolicyEdgeTransition) {
+			t.Fatalf("%s public preview limited to its owner = %v, want ErrPolicyEdgeTransition", plan.name, err)
 		}
 		for generation, step := range []struct {
 			audience, edge string

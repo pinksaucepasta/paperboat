@@ -25,8 +25,19 @@ func TestBrowserPreviewTransportUsesExactPrivateAdmission(t *testing.T) {
 func TestDataCarrierPreviewPublicAccountingAdmission(t *testing.T) {
 	testPreviewMeteredAdmission(t, "public")
 }
+
+// A public preview whose owner saved a list of viewers is forwarded on a signed-in viewer's restricted browser
+// decision over its public carrier route, with no public decision; a missing, wrong or expired one is refused.
+func TestBrowserPreviewTransportServesAListedPublicPreview(t *testing.T) {
+	testPreviewMeteredAdmission(t, "public-listed")
+}
+
 func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
-	publicPreview := accessMode == "public"
+	routeMode := accessMode
+	if accessMode == "public-listed" {
+		routeMode, accessMode = "public", "private"
+	}
+	publicPreview := routeMode == "public" && accessMode == "public"
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	_, decision := browserTestMatch()
@@ -48,7 +59,7 @@ func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
 	if err := decision.Validate(time.Now()); err != nil {
 		t.Fatalf("invalid viewer authority fixture: %v", err)
 	}
-	admission := testPreviewCarrierAdmission(decision, accessMode)
+	admission := testPreviewCarrierAdmission(decision, routeMode)
 	identity := admission.Identity
 
 	expected, e := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch})
@@ -225,5 +236,25 @@ func testPreviewCarrierAdmission(decision connectorprotocol.IngressDecision, acc
 		MachineIdentityThumbprint:            "sha256:" + base64.RawURLEncoding.EncodeToString(thumb[:]),
 		EdgeCarrierServerSPKISHA256:          "sha256:" + strings.Repeat("b", 64),
 		EdgeCarrierServerCertificateChainPEM: "test public certificate", Admitted: true,
+	}
+}
+
+// Only a restricted decision on a public carrier route counts as a listed public preview's: a public decision, or a
+// private or team route, never does.
+func TestPreviewSignInDecisionIsRestrictedOnAPublicRouteOnly(t *testing.T) {
+	for _, tc := range []struct {
+		kind, mode, audience string
+		want                 bool
+	}{
+		{dataCarrierPreviewRouteKind, "public", "private", true},
+		{dataCarrierPreviewRouteKind, "public", "public", false},
+		{dataCarrierPreviewRouteKind, "public", "team", false},
+		{dataCarrierPreviewPrivateRouteKind, "private", "private", false},
+		{dataCarrierPreviewPrivateRouteKind, "team", "private", false},
+	} {
+		d := connectorprotocol.IngressDecision{Binding: connectorprotocol.IngressBinding{Audience: tc.audience}}
+		if got := previewSignInDecision(DataCarrierPreviewRoute{Kind: tc.kind, AccessMode: tc.mode}, d); got != tc.want {
+			t.Errorf("%s/%s with %s decision = %v, want %v", tc.kind, tc.mode, tc.audience, got, tc.want)
+		}
 	}
 }

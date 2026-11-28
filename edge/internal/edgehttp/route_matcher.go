@@ -225,6 +225,16 @@ func (m *PreviewCarrierRouteMatcher) HasAdmittedHTTPSHostname(host string) bool 
 		(value.Kind == runtimewire.RouteKind || value.Kind == dataCarrierPreviewPrivateRouteKind)
 }
 
+// AuthorizeSignInHTTPS grants TLS ownership of a public preview the server marks sign-in only: a live public carrier
+// route must hold the name. Forwarding still needs each viewer's browser decision.
+func (m *PreviewCarrierRouteMatcher) AuthorizeSignInHTTPS(host string) error {
+	admission, _, ok := m.lookup(host, "/")
+	if !ok || admission.Kind != dataCarrierPreviewRouteKind || admission.AccessMode != "public" {
+		return connectorprotocol.ErrIngressDenied
+	}
+	return nil
+}
+
 // AuthorizePublicHTTPS refreshes only an exact live public preview admission.
 // The caller must still inspect the full current ingress snapshot for conflicts.
 func (m *PreviewCarrierRouteMatcher) AuthorizePublicHTTPS(ctx context.Context, host string, authorize func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)) error {

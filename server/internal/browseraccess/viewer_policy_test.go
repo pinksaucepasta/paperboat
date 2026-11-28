@@ -107,7 +107,7 @@ func TestViewerPolicyNeverWidensANativeMode(t *testing.T) {
 		{"tunnel", "private", []string{AudienceOwner, AudienceSpecificEmails, AudienceEmailDomain}, ErrPolicyWidening},
 		{"tunnel", "team", []string{AudienceOwner}, ErrPolicyWidening},
 		{"tunnel", "", nil, ErrPolicyWidening},
-		{"preview", "public", []string{AudiencePublic}, ErrPolicyEdgeTransition},
+		{"preview", "public", []string{AudiencePublic, AudienceSpecificEmails, AudienceEmailDomain}, ErrPolicyEdgeTransition},
 		{"preview", "private", []string{AudienceOwner, AudienceSpecificEmails, AudienceEmailDomain}, ErrPolicyWidening},
 		{"preview", "team", []string{AudienceOwner}, ErrPolicyWidening},
 	} {
