@@ -18,8 +18,9 @@ set -euo pipefail
 
 JUMP=${WINPOOL_JUMP:-$(python3 "$(dirname "$0")/dev_targets.py" pool_jump)}
 [ -n "$JUMP" ] || { echo 'linuxpool: configure pool_jump in the local development targets' >&2; exit 2; }
-MAX=20
-SLOT_RE='([1-9]|1[0-9]|20)' # 1-MAX
+MAX=30
+PRIMARY_MAX=20 # the default runner repository's tunnel key and workflow serve 1-20; 21-30 start only with POOL_GH set
+SLOT_RE='([1-9]|[12][0-9]|30)' # 1-MAX
 CONF=$HOME/.ssh/linuxpool.conf
 KNOWN=$HOME/.ssh/linuxpool_known_hosts
 CLAIMS=$HOME/.ssh/linuxpool-claims # N: who started machine N
@@ -37,16 +38,23 @@ configure() {
     # Every runner is a new machine with a new host key: kept in its own file, forgotten at each start.
     printf 'Host linuxpool-*\n  HostName 127.0.0.1\n  User runner\n  ProxyJump %s\n  IdentityFile ~/.ssh/winpool_controller\n' "$JUMP"
     printf '  IdentitiesOnly yes\n  UserKnownHostsFile %s\n  StrictHostKeyChecking accept-new\n' "$KNOWN"
-    for n in $(seq "$MAX"); do printf 'Host linuxpool-%d\n  Port %d\n' "$n" $((22400 + n)); done
+    for n in $(seq "$PRIMARY_MAX"); do printf 'Host linuxpool-%d\n  Port %d\n' "$n" $((22400 + n)); done
   } > "$CONF"
+  { # 21-MAX in their own file: an older copy of this script rewrites linuxpool.conf with 1-20 only
+    printf 'Host linuxpool-2[1-9] linuxpool-30\n  HostName 127.0.0.1\n  User runner\n  ProxyJump %s\n  IdentityFile ~/.ssh/winpool_controller\n' "$JUMP"
+    printf '  IdentitiesOnly yes\n  UserKnownHostsFile %s\n  StrictHostKeyChecking accept-new\n' "$KNOWN"
+    for n in $(seq $((PRIMARY_MAX + 1)) "$MAX"); do printf 'Host linuxpool-%d\n  Port %d\n' "$n" $((22400 + n)); done
+  } > "${CONF%.conf}-ext.conf"
   touch "$HOME/.ssh/config" && chmod 600 "$HOME/.ssh/config" "$CONF"
   grep -qxF 'Include linuxpool.conf' "$HOME/.ssh/config" || sed -i '1i Include linuxpool.conf' "$HOME/.ssh/config"
+  chmod 600 "${CONF%.conf}-ext.conf"
+  grep -qxF 'Include linuxpool-ext.conf' "$HOME/.ssh/config" || sed -i '1i Include linuxpool-ext.conf' "$HOME/.ssh/config"
 }
 
 up() { # machine numbers whose tunnel port listens on the jump host
   local listening
   listening=$(ssh -o BatchMode=yes -o ConnectTimeout=15 "$JUMP" 'ss -ltnH') || die "cannot reach the jump host $JUMP"
-  grep -oE '127\.0\.0\.1:224(0[1-9]|1[0-9]|20) ' <<<"$listening" | sed -E 's/.*:224([0-9]{2}) /\1/; s/^0//' | sort -n || true
+  grep -oE '127\.0\.0\.1:224(0[1-9]|[12][0-9]|30) ' <<<"$listening" | sed -E 's/.*:224([0-9]{2}) /\1/; s/^0//' | sort -n || true
 }
 
 answers() { ssh -o BatchMode=yes -o ConnectTimeout=15 "linuxpool-$1" true 2>/dev/null </dev/null; }
@@ -62,7 +70,9 @@ start() {
   mkdir -p "$CLAIMS"
   exec 9>"$CLAIMS/lock"; flock 9
   busy=$(up; find "$CLAIMS" -regextype posix-extended -regex ".*/$SLOT_RE" -mmin -15 -printf '%f\n')
-  for n in $(seq "$MAX"); do grep -qx "$n" <<<"$busy" || free+=("$n"); done
+  # another runner repository (POOL_GH) takes the high numbers first and leaves 1-20 to the default one
+  local order; if [ -n "${POOL_GH:-}" ]; then order=$(seq "$MAX" -1 1); else order=$(seq "$PRIMARY_MAX"); fi
+  for n in $order; do grep -qx "$n" <<<"$busy" || free+=("$n"); done
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of $MAX machines are free (linuxpool.sh list)"
   free=("${free[@]:0:count}")
   for n in "${free[@]}"; do ssh-keygen -q -R "[127.0.0.1]:$((22400 + n))" -f "$KNOWN" >/dev/null 2>&1 || true; done

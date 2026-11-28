@@ -158,7 +158,7 @@ class PoolRevokeTest(unittest.TestCase):
         slots = [int(w) for a, w in zip(listing.split(), listing.split()[1:]) if a == '--slot']
         self.assertNotIn(1, slots)
         self.assertNotIn(2, slots)
-        self.assertEqual(slots, list(range(3, 21)))
+        self.assertEqual(slots, list(range(3, 31)))
         self.assertTrue(any(c.endswith('--apply') for c in self.env.calls()))
 
     def test_sweep_with_every_runner_up_does_nothing(self):

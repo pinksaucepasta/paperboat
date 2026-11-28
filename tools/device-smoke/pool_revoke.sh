@@ -53,6 +53,11 @@ pool_revoke() {
 # Runners start in the second account's runner repository when this controller has one (owner/name and token files): its job
 # limit is its own, so the Linux and macOS hosts leave the main account's slots to Windows and CI.
 pool_gh() {
-  local conf=$HOME/.config/paperboat-dev/linuxpool-gh
+  local conf=$HOME/.config/paperboat-dev/${POOL_GH:-linuxpool-gh}
+  if [ -n "${POOL_GH:-}" ]; then # a named runner repository: never fall back to the checkout's own repository
+    [ -s "$conf.repo" ] || { echo "$POOL: no $conf.repo" >&2; return 1; }
+    if [ -s "$conf.token" ]; then GH_REPO=$(cat "$conf.repo") GH_TOKEN=$(cat "$conf.token") gh "$@"; else GH_REPO=$(cat "$conf.repo") gh "$@"; fi
+    return
+  fi
   if [ -s "$conf.repo" ] && [ -s "$conf.token" ]; then GH_REPO=$(cat "$conf.repo") GH_TOKEN=$(cat "$conf.token") gh "$@"; else gh "$@"; fi
 }
