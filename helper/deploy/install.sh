@@ -49,7 +49,9 @@ fi
 # Root helper found like NetBird's installer (release_files/install.sh 25-30): sudo, else doas, unless already root.
 elevate=
 if [ "$(id -u)" -ne 0 ]; then
- if command -v sudo >/dev/null 2>&1; then elevate=sudo; $elevate -v
+ # A passwordless grant needs no prompt: `sudo -v` checks the first matching rule, so on a cloud host
+ # ((ALL:ALL) ALL, then NOPASSWD: ALL) it asks for a password that running a command never needs.
+ if command -v sudo >/dev/null 2>&1; then elevate=sudo; sudo -n true 2>/dev/null || sudo -v
  elif command -v doas >/dev/null 2>&1; then elevate=doas
  else echo 'sudo or doas is required to install the system service.' >&2; exit 1; fi
 fi
