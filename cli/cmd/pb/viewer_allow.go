@@ -24,7 +24,7 @@ var (
 )
 
 func addViewerAllowFlag(command *cobra.Command, noun string) {
-	command.Flags().StringSlice(viewerAllowFlag, nil, "let these people open the private "+noun+" too, after signing in: email addresses or *@domain (comma-separated or repeatable; implies --private)")
+	command.Flags().StringSlice(viewerAllowFlag, nil, "let these people open the private "+noun+" too, after signing in: email addresses or *@domain (comma-separated or repeatable; implies --private; changes apply when the edge next reaches Paperboat, usually within 10 s)")
 }
 
 // viewerAllowList is the checked --allow list, or nil without the flag. It is checked before anything is created, by
