@@ -389,3 +389,7 @@ ac1095ce while both go.mod files pin 2d32e5f0.
 - **Pool runner host keys (2026-11-27):** `linuxpool.sh` trusts pool hosts by `accept-new`
   (`~/.ssh/linuxpool_known_hosts`). Record each runner's host-key fingerprint at start (from the runner's own log) and
   connect with strict checking, so a replaced or foreign VM on a slot is refused (linuxpool-9, 2026-11-27).
+- **Edge drops every name on a late full ingress answer (2026-11-28):** if all decisions in a full answer have already
+  expired when it arrives, `edge/internal/control/ingress.go` accepts it as an empty set and drops every hostname until
+  the next good fetch (an "unchanged" answer that late keeps the current set). Needs a fetch close to the 10 s limit
+  with synced clocks. Fix: treat an all-expired full answer like a failed fetch.
