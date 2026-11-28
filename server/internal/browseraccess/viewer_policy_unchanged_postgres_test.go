@@ -24,6 +24,16 @@ func (f *privatePolicyFixture) paidTeam(name string, members ...string) string {
 	return team
 }
 
+// pro makes the fixture owner a Pro account: its public routes stay fully public (no Free plan page-load gate), so
+// the rules these tests pin are the ones paid accounts keep.
+func (f *privatePolicyFixture) pro() {
+	f.t.Helper()
+	f.t.Cleanup(func() {
+		_, _ = f.store.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.billing_workspaces WHERE id=$1`, "personal:"+f.owner)
+	})
+	f.exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,provider_customer_id,provider_subscription_id,product_code,state,quantity,period_start,period_end) VALUES($1,$2,$3,$4,'pro-month','active',1,$5,$6)`, "personal:"+f.owner, f.owner, "cus_pro_"+f.suffix, "sub_pro_"+f.suffix, f.now.Add(-time.Hour), f.now.Add(time.Hour))
+}
+
 func (f *privatePolicyFixture) bind(team, kind, id string, users ...string) {
 	f.t.Helper()
 	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active) VALUES($1,$2,$3,$4,true) ON CONFLICT DO NOTHING`, team, kind, id, f.owner)
@@ -62,6 +72,7 @@ func (f *privatePolicyFixture) takesNoSignIn(host string, want error) {
 // Policies written by the earlier server read back field for field and admit the same people.
 func TestNoChangeSavedViewerPoliciesReadBackIdenticallyPostgres(t *testing.T) {
 	f := newPrivatePolicyFixture(t)
+	f.pro()
 	team := f.paidTeam("saved", f.other)
 	saved := f.now.Add(-24 * time.Hour)
 	for _, row := range []struct {
@@ -109,6 +120,7 @@ func TestNoChangeSavedViewerPoliciesReadBackIdenticallyPostgres(t *testing.T) {
 // Without a saved policy, public, private and team previews and tunnels admit whom they admitted before.
 func TestNoChangeAccessModesWithoutAnAllowListPostgres(t *testing.T) {
 	f := newPrivatePolicyFixture(t)
+	f.pro()
 	team := f.paidTeam("modes", f.domain, f.other)
 	machineCredential := func(kind, account, host, id, route string) error {
 		_, err := f.svc.IssueMachineCredential(f.ctx, MachineCredentialRequest{AccountID: account, Host: host, ResourceKind: kind, ResourceID: id, RouteID: route, Action: "use", TTL: time.Minute})

@@ -209,6 +209,7 @@ func TestIngressAuthorityListsFreeOwnedHostnames(t *testing.T) {
 				{Hostname: "free.customer.test", FreeRequests: true},
 				{Hostname: "free-listed.customer.test", FreeRequests: true, Deny: []string{"203.0.113.0/24"}},
 				{Hostname: "paid-listed.customer.test", Deny: []string{"203.0.113.0/24"}},
+				{Hostname: "gated.customer.test", FreeRequests: true, NavigationGated: true},
 			}})
 	}))
 	defer server.Close()
@@ -223,6 +224,12 @@ func TestIngressAuthorityListsFreeOwnedHostnames(t *testing.T) {
 	for host, want := range map[string]bool{"free.customer.test": true, "free-listed.customer.test": true, "paid-listed.customer.test": false, "paid.customer.test": false} {
 		if got := authority.RequestLimited(host); got != want {
 			t.Errorf("RequestLimited(%s) = %v, want %v", host, got, want)
+		}
+	}
+	// Only the hostname the server marked navigation-gated (Free plan, public) gates browser page loads.
+	for host, want := range map[string]bool{"gated.customer.test": true, "free.customer.test": false, "paid-listed.customer.test": false, "unlisted.customer.test": false} {
+		if got := authority.NavigationGated(host); got != want {
+			t.Errorf("NavigationGated(%s) = %v, want %v", host, got, want)
 		}
 	}
 	if !authority.AddressAllowed("free.customer.test", "203.0.113.4") || authority.AddressAllowed("free-listed.customer.test", "203.0.113.4") {

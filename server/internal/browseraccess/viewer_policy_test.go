@@ -118,7 +118,7 @@ func TestViewerPolicyNeverWidensANativeMode(t *testing.T) {
 					want = nil
 				}
 			}
-			if err := ensurePolicyEdgeMode(tc.kind, tc.mode, audience); err != want {
+			if err := ensurePolicyEdgeMode(tc.kind, tc.mode, audience, false); err != want {
 				t.Errorf("%s native=%q audience=%q = %v, want %v", tc.kind, tc.mode, audience, err, want)
 			}
 		}

@@ -75,7 +75,9 @@ body{background:#121212;color:#f5f5f5}
 
 const (
 	signInMessage = "Sign in to Paperboat in your browser, then open this address again."
-	retryMessage  = "Wait a moment and try again. If it keeps failing, send the reference below to Paperboat support."
+	// freeSignInMessage answers a browser page load of a Free plan publication that has no sign-in yet.
+	freeSignInMessage = "On the free plan, browser visitors must sign in; APIs and webhooks still pass. Open this address in your browser to sign in. Upgrade to Pro for fully public."
+	retryMessage      = "Wait a moment and try again. If it keeps failing, send the reference below to Paperboat support."
 	// forwardUnavailableMessage is what a visitor reads when no node holding the address could be reached.
 	edgeStartingMessage       = "Paperboat is starting up. Wait a moment and reload the page."
 	forwardUnavailableMessage = "Paperboat could not reach the node serving this address. Wait a moment and reload the page."
