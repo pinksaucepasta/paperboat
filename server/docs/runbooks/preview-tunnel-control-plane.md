@@ -93,7 +93,8 @@ Do not retire first: with one node in the region the region has no edge until th
 ## Public TCP tunnel ports on the edges
 
 Plan limits (`billing.limits.public_tcp`, user decision 2026-11-28): Free 0, Pro 10, Team 10 per paid seat
-pooled; a workspace on its own tunnel edge is not limited. A Free workspace's new public TCP route or tunnel is
+pooled; the limit applies only to tunnels served by Paperboat-managed edges: a workspace whose tunnel edge mode
+is self-hosted-only (the only mode that can place a tunnel on its own edge) is not limited on any plan. A Free workspace's new public TCP route or tunnel is
 refused with 409 `public_tcp_limit_reached` ("Public TCP tunnels need Pro; use private access through pb"); the
 check runs only on create, so public TCP tunnels a Free workspace made before keep serving until stopped, and an
 operator override (`public_tcp`) still raises one workspace's limit.
