@@ -14,8 +14,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"golang.org/x/term"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -54,7 +56,8 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	if !controlPlaneDown {
 		credential, err = d.auth.Credential()
 	}
-	if api.Unreachable(err) {
+	credentialUnreachable := api.Unreachable(err)
+	if credentialUnreachable {
 		// The access token ran out during an outage and its refresh cannot reach Paperboat: the daemon opens this exec
 		// offline, for the host to admit from its own signed scopes (F21-01, no time limit).
 		err = nil
@@ -74,10 +77,21 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	if err != nil {
 		return fail(255, "source_identity_unavailable", false, false, err)
 	}
+	client.SetSourceMachineID(sourceMachineID)
 	if err := requireLocalDaemonService(c.Context, d.cfg); err != nil {
+		// A revoked machine's daemon may be slow or restarting while it turns signed out (F2-05): the server's
+		// refusal is the answer the user needs, not the local service's timeout. One bounded ask, then the local error.
+		// Skipped when the server is already known unreachable: the check would only add a refresh that cannot finish.
+		if !controlPlaneDown && !credentialUnreachable && c.Context.Err() == nil {
+			if refused := execSessionRefused(c.Context, client, requested); refused != nil {
+				return fail(255, "authentication_required", false, false, refused)
+			}
+		}
+		if canceled := c.Context.Err(); canceled != nil {
+			err = errors.Join(err, canceled)
+		}
 		return fail(255, "local_transport_unavailable", false, false, fmt.Errorf("prepare local peer transport: %w", err))
 	}
-	client.SetSourceMachineID(sourceMachineID)
 	machine, warm := warmUserMachine(c.Context, requested, controlPlaneDown)
 	if !warm {
 		machine, err = resolveUserMachine(c.Context, client, requested)
@@ -89,6 +103,8 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			return fail(255, "machine_not_found", false, false, err)
 		case errors.Is(err, resolver.ErrMachineAmbiguous):
 			return fail(255, "machine_ambiguous", false, false, err)
+		case execSessionRefusal(err):
+			return fail(255, "authentication_required", false, false, err)
 		}
 		return fail(255, "machine_resolution_failed", false, false, err)
 	}
@@ -99,6 +115,9 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		if err != nil {
 			if machineOfflineError(err) {
 				return fail(255, "machine_offline", false, false, err)
+			}
+			if execSessionRefusal(err) {
+				return fail(255, "authentication_required", false, false, err)
 			}
 			return fail(255, "machine_resolution_failed", false, false, friendlyCommandError(err))
 		}
@@ -535,6 +554,9 @@ func safeExecError(err error) string {
 	if errors.Is(err, resolver.ErrMachineAmbiguous) {
 		return "More than one machine has that name. Run `pb machine list` and retry with the machine ID."
 	}
+	if execSessionRefusal(err) {
+		return "Your Paperboat session is no longer valid. " + dashboardEnrollmentGuidance + " Then retry."
+	}
 	if remote, ok := err.(*api.APIError); ok && remote.Code == "machine_offline" {
 		return sentence(friendlyAPIError(remote))
 	}
@@ -618,4 +640,47 @@ func cwdRefusal(platform string) error {
 		form = `with a drive letter such as C:\Users\user`
 	}
 	return localArgumentError("--cwd must be an absolute path on the target machine, in its own form, " + form)
+}
+
+// execListMachines is the server's machine list for exec's session check; tests replace it.
+var execListMachines = func(ctx context.Context, client *api.Client, requested string) error {
+	_, err := client.ListUserMachinesFiltered(ctx, url.Values{"q": {requested}})
+	return err
+}
+
+// execSessionRefusedTimeout bounds the server check exec makes after the local service could not be readied.
+var execSessionRefusedTimeout = 10 * time.Second
+
+// execSessionRefused asks the server for the requested machine (one filtered list, no other-workspace lookup) and
+// returns the error only when the server refused this computer's session (401): a revoked machine is told so, never
+// "could not finish the command". It stops with the command (Ctrl-C).
+func execSessionRefused(ctx context.Context, client *api.Client, requested string) error {
+	checkCtx, cancel := context.WithTimeout(ctx, execSessionRefusedTimeout)
+	defer cancel()
+	// The list's credential refresh does not take a context (api.Client asks its Source without one), so the wait,
+	// not the request, carries the bound: exec stops waiting at the cap or on Ctrl-C and goes on to exit.
+	done := make(chan error, 1)
+	list := execListMachines
+	go func() { done <- list(checkCtx, client, requested) }()
+	select {
+	case err := <-done:
+		if err != nil && execSessionRefusal(err) {
+			return err
+		}
+	case <-checkCtx.Done():
+	}
+	return nil
+}
+
+// execSessionRefusal reports a server refusal of this computer's session (401), the case whose recovery is
+// `pb login`. A refused recipe or API token names its own recovery (command_failure_message.go) and is not one.
+func execSessionRefusal(err error) bool {
+	if !errors.Is(err, api.ErrUnauthenticated) {
+		return false
+	}
+	var remote *api.APIError
+	if errors.As(err, &remote) && (strings.HasPrefix(remote.Code, "recipe_") || remote.Code == "api_token_invalid") {
+		return false
+	}
+	return true
 }
