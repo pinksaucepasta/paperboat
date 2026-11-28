@@ -968,7 +968,7 @@ func friendlyAPIError(err error) string {
 		"team_sso_required", "directory_managed", "invitation_domain_not_verified":
 		return api.PublicMessage(apiErr.Code)
 	case "edge_policy_transition_required":
-		return "To limit who can open this preview, publish it again with --allow <emails/domains>."
+		return "A public preview takes a list of emails or domains as it runs; to make it private or team-only, publish it again."
 	case "credits_exhausted":
 		return "credits are exhausted; top up credits in Paperboat, then retry"
 	case "entitlement_lost", "payment_required":
