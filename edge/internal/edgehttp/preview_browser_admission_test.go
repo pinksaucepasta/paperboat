@@ -107,6 +107,12 @@ func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
 			return decision, nil
 		}
 	}
+	if routeMode == "public" && !publicPreview {
+		// A listed public preview has no public decision: the server publishes none.
+		config.PublicAuthority = func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error) {
+			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		}
+	}
 	transport, e := NewDataCarrierPreviewTransport(config)
 	if e != nil {
 		t.Fatal(e)
