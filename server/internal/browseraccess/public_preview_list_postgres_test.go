@@ -21,7 +21,12 @@ func TestLivePublicPreviewTakesChangesAndClearsAListPostgres(t *testing.T) {
 			f.exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,provider_customer_id,provider_subscription_id,product_code,state,quantity,period_start,period_end) VALUES($1,$2,$3,$4,'pro-month','active',1,$5,$6)`, "personal:"+f.owner, f.owner, "cus_pl_"+f.suffix, "sub_pl_"+f.suffix, f.now.Add(-time.Hour), f.now.Add(time.Hour))
 		}
 		id, host := f.preview("pl"+plan.name, "public", plan.team)
-		f.takesNoSignIn(host, ErrAccessDenied)
+		if plan.name == "free" {
+			// P4: on Free (Paperboat edge) browser page loads sign in; with no list only the owner gets a grant.
+			f.admits(host, map[string]bool{f.owner: true, f.listed: false, f.other: false})
+		} else {
+			f.takesNoSignIn(host, ErrAccessDenied)
+		}
 
 		// Set: one address and a domain.
 		policy, err := f.set("preview", id, id, AudienceSpecificEmails, 0, "guest@partner.test")
@@ -50,7 +55,13 @@ func TestLivePublicPreviewTakesChangesAndClearsAListPostgres(t *testing.T) {
 		}
 		f.admits(host, map[string]bool{f.owner: true, f.listed: false, f.domain: true, f.subdomain: false, f.other: false})
 
-		// Clear: back to everyone; no sign-in again.
+		// Clear: back to everyone; no sign-in again. On Free (P4) "everyone" is refused: browser visitors must sign in.
+		if plan.name == "free" {
+			if _, err = f.set("preview", id, id, AudiencePublic, 2); !errors.Is(err, ErrPlanBrowserPublic) {
+				t.Fatalf("free: clear list = %v, want ErrPlanBrowserPublic", err)
+			}
+			continue
+		}
 		if _, err = f.set("preview", id, id, AudiencePublic, 2); err != nil {
 			t.Fatalf("%s: clear list = %v", plan.name, err)
 		}

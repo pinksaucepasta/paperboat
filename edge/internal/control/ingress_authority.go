@@ -36,6 +36,7 @@ type IngressAuthority struct {
 	ipRules       map[string]addressRule                       // owner IP allow/deny lists per hostname, from the same fetch
 	signIn        map[string]bool                              // public previews whose owner saved a list of viewers (IngressIPRule.SignIn)
 	freeRequests  map[string]bool                              // hostnames a Free account owns (request rates apply), from the same fetch
+	navGated      map[string]bool                              // public Free hostnames whose browser page loads need sign-in, from the same fetch
 	offline       map[string]bool                              // preview hostnames whose owner machine is asleep, from the same fetch
 	http01        map[string]connectorprotocol.HTTP01Response  // by token, from the same fetch
 	fetched       time.Time
@@ -387,6 +388,7 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 	a.ipRules = make(map[string]addressRule, len(snapshot.IPRules))
 	a.freeRequests = make(map[string]bool)
 	a.signIn = make(map[string]bool)
+	a.navGated = make(map[string]bool)
 	for _, r := range snapshot.IPRules {
 		a.ipRules[r.Hostname] = compileAddressRule(r)
 		if r.FreeRequests {
@@ -394,6 +396,9 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 		}
 		if r.SignIn {
 			a.signIn[r.Hostname] = true
+		}
+		if r.NavigationGated {
+			a.navGated[r.Hostname] = true
 		}
 	}
 	a.http01 = make(map[string]connectorprotocol.HTTP01Response, len(snapshot.HTTP01))
@@ -613,6 +618,17 @@ func (a *IngressAuthority) RequestLimited(hostname string) bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.freeRequests[hostname]
+}
+
+// NavigationGated reports whether the last server snapshot lists hostname as a public Free publication whose browser
+// page loads need a browser sign-in (owner or the listed emails/domain); its other requests pass as public.
+func (a *IngressAuthority) NavigationGated(hostname string) bool {
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.navGated[hostname]
 }
 
 // OwnerOffline reports whether the last server snapshot lists the preview hostname as active with its owner

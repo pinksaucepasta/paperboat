@@ -27,6 +27,9 @@ const (
 	// SSO and SCIM grant a team the SAML single sign-on or directory sync add-on without a subscription item (amount 1).
 	SSO  Kind = "sso"
 	SCIM Kind = "scim"
+	// PublicBrowser lifts the Free plan's browser sign-in gate (amount 1): browser page loads of the workspace's public
+	// previews and HTTP tunnels no longer need sign-in (SQL workspace_navigation_gated).
+	PublicBrowser Kind = "public_browser"
 )
 
 // GrantKinds are the kinds an operator can grant on a workspace, with whether it applies to personal and team workspaces.
@@ -41,6 +44,7 @@ var GrantKinds = map[Kind]struct{ Personal, Team bool }{
 	ViewersPerTerminal: {true, true},
 	SSO:                {false, true},
 	SCIM:               {false, true},
+	PublicBrowser:      {true, false},
 }
 
 // MaxGrantAmount bounds a grant (bytes or a count), far above any real use and far below int64 overflow.
