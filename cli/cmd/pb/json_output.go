@@ -289,6 +289,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 	case commandRejection:
 		if failure.kind == commandRejected && typed.valid() {
 			result.Code, result.Category, result.Message = "operation_refused", "conflict", typed.Error()
+			if typed.reason == commandRejectPreviewAllowList {
+				result.Code, result.StateChanged, result.Retryable = "preview_allow_list_not_saved", false, true
+				result.Recovery = "Run `pb login` if this computer is not signed in, then retry."
+			}
 			if typed.reason == commandRejectUpdateVerification {
 				result.Code, result.StateChanged, result.Retryable = "update_verification_failed", false, false
 				result.Recovery = "Download a fresh official update bundle and retry. Force cannot bypass verification."
@@ -377,7 +381,9 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		result.OutcomeUncertain = typed.OutcomeUncertain
 		if safeID := safeTunnelCreateTarget(typed.TunnelID); safeID != "" {
 			result.Target = safeID
-			if recovery := safeTunnelCreateRecoveryCommand(safeID, typed.RecoveryCommand); recovery != "" {
+			if typed.Stage == tunnelViewerAllowStage {
+				result.Recovery = "Only the owner can open the tunnel. Run the same command again to retry saving the --allow list, or set it on the tunnel's page in the console."
+			} else if recovery := safeTunnelCreateRecoveryCommand(safeID, typed.RecoveryCommand); recovery != "" {
 				result.Recovery = "Run `" + recovery + "`."
 			} else {
 				result.Recovery = "Run `pb tunnel status " + safeID + "` to inspect the preserved tunnel before retrying."

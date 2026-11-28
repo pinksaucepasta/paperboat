@@ -298,8 +298,8 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnels WHERE id=$1`, privateTunnel)
 	})
-	if _, err = svc.SetViewerPolicy(ctx, SetViewerPolicyRequest{ActorAccountID: owner, ResourceKind: "tunnel", ResourceID: privateTunnel, RouteID: privateRoute, Audience: AudienceSpecificEmails, AllowedEmails: []string{"person@company.test"}, ExpectedGeneration: 0}); !errors.Is(err, ErrPolicyWidening) {
-		t.Fatalf("native-private specific-email policy = %v, want ErrPolicyWidening", err)
+	if _, err = svc.SetViewerPolicy(ctx, SetViewerPolicyRequest{ActorAccountID: owner, ResourceKind: "tunnel", ResourceID: privateTunnel, RouteID: privateRoute, Audience: AudiencePublic, ExpectedGeneration: 0}); !errors.Is(err, ErrPolicyWidening) {
+		t.Fatalf("native-private public policy = %v, want ErrPolicyWidening", err)
 	}
 	nativeTeamTunnel := "tun_vp_native_team_" + suffix
 	nativeTeamRoute := "rte_vp_native_team_" + suffix

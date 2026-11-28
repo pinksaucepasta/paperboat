@@ -978,7 +978,7 @@ func TestPreviewReadinessProgressFailureClosesCarrierAndKeepsCauses(t *testing.T
 	command.SetContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps))
 	command.SetOut(io.Discard)
 	command.SetErr(&previewDomainFailWriter{err: progressErr})
-	err := runPreviewWithDomains(command, preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, false, time.Minute, false, false, nil)
+	err := runPreviewWithDomains(command, preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, false, time.Minute, false, false, nil, nil)
 	if !errors.Is(err, progressErr) || !errors.Is(err, closeErr) {
 		t.Fatalf("progress failure = %v, want writer and carrier-close causes", err)
 	}

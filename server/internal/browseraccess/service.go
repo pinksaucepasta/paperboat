@@ -517,6 +517,10 @@ func (s *Service) IssueMachineCredential(ctx context.Context, in MachineCredenti
 		if e != nil {
 			return e
 		}
+		// A viewer policy narrows machine credentials too, or a Team member it leaves out would pass with one.
+		if e = requireWithinViewerPolicy(ctx, tx, a, in.AccountID); e != nil {
+			return e
+		}
 		out.ExpiresAt = minTime(out.ExpiresAt, a.sessionCap)
 		var active int
 		if e = tx.QueryRow(ctx, `SELECT count(*) FROM browser_machine_credentials WHERE account_id=$1 AND revoked_at IS NULL AND expires_at>$2`, in.AccountID, now).Scan(&active); e != nil {
@@ -566,6 +570,9 @@ func (s *Service) authorizeMachine(ctx context.Context, key any, host, kind, id,
 		}
 		a, e := resolveBound(ctx, tx, account, host, kind, id, route, now)
 		if e != nil {
+			return e
+		}
+		if e = requireWithinViewerPolicy(ctx, tx, a, account); e != nil {
 			return e
 		}
 		if (kind != "preview" && a.sessionGeneration() != gen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || !sameTeamAuthority(a, team, tg, mg, bg, gg) {

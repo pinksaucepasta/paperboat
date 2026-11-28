@@ -4161,12 +4161,12 @@ export interface paths {
         };
         /**
          * Get the browser viewer policy for one exact route
-         * @description Owner or authorized resource manager only. A missing policy reports configured=false and leaves the existing native access mode in effect. Email and domain audiences require the viewer's current verified WorkOS email. This setting governs browser viewing only and does not grant native machine access. Tunnel policies report the current edge serving_state; previews report not_applicable.
+         * @description Owner or authorized resource manager only. A missing policy reports configured=false and leaves the existing native access mode in effect. Email and domain audiences require the viewer's current verified WorkOS email. This setting governs browser viewing only and does not grant native machine access. A pb sign-in needs the previews:read or tunnels:read scope of the resource kind. Tunnel policies report the current edge serving_state; previews report not_applicable.
          */
         get: operations["browser_access_viewer_policy_get"];
         /**
          * Replace the browser viewer policy for one exact route
-         * @description Owner or authorized resource manager only; browser session and CSRF required. Replaces the full route policy using expected_generation (zero for the first write). Every non-owner viewer must satisfy this exact audience policy; owners retain access. Team access is limited to current direct members of the selected team. Specific emails and domains require a verified current WorkOS email; domains match exactly after @. Policy changes revoke existing browser sessions. Native-public HTTP tunnel transitions may return 202 while edge serving_state is fencing or pending; reload until ready. A 409 edge_policy_transition_required means an unsupported edge transition was not saved.
+         * @description Owner or authorized resource manager only, with a browser session and CSRF, or a pb sign-in holding the previews:write or tunnels:write scope of the resource kind; API tokens are refused. Replaces the full route policy using expected_generation (zero for the first write). Every non-owner viewer must satisfy this exact audience policy; owners retain access. A private preview or tunnel takes only owner, specific_emails or email_domain: it is never made public or opened to a team here, and when a team owns it or its machine, a listed viewer must also have that team's access to it. A team preview or tunnel takes only owner. The policy governs browser viewing: private access from a machine (pb access) and machine credentials gain nothing from it. Team access on a public tunnel is limited to current direct members of the selected team. Specific emails and domains require a verified current WorkOS email; domains match exactly after @. Policy changes revoke existing browser sessions. Native-public HTTP tunnel transitions may return 202 while edge serving_state is fencing or pending; reload until ready. A 409 edge_policy_transition_required means an unsupported edge transition was not saved; 409 native_access_widening_denied means the audience is not allowed for this native access mode.
          */
         put: operations["browser_access_viewer_policy_put"];
         post?: never;
@@ -10257,7 +10257,7 @@ export interface components {
             audience?: "owner" | "team" | "specific_emails" | "email_domain" | "public";
             /** @description The selected team for the team audience. */
             team_id?: string;
-            /** @description Exact email addresses for specific_emails. The signed-in account must have a verified current WorkOS email. */
+            /** @description The allow list of specific_emails. Each entry is an exact email address, or *@domain for every address at exactly that domain (its subdomains do not match; the domain has at least two labels; a bare * is refused). The signed-in account must have a verified current WorkOS email. */
             allowed_emails?: string[];
             /**
              * Format: hostname
@@ -10281,6 +10281,7 @@ export interface components {
             /** @enum {string} */
             audience: "owner" | "team" | "specific_emails" | "email_domain" | "public";
             team_id?: string;
+            /** @description Required for specific_emails. Each entry is an exact email address, or *@domain for every address at exactly that domain (its subdomains do not match; the domain has at least two labels; a bare * is refused). */
             allowed_emails?: string[];
             /** Format: hostname */
             email_domain?: string;

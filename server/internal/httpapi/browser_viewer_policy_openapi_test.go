@@ -36,7 +36,7 @@ func TestOpenAPIFreezesBrowserViewerPolicy(t *testing.T) {
 	assertExactResponseStatuses(t, get, "browser viewer policy GET", "200", "400", "401", "404", "503")
 	assertExactResponseStatuses(t, put, "browser viewer policy PUT", "200", "202", "400", "401", "404", "409", "503")
 	if !hasSecurityPair(get, "cookieSession", "") || !hasSecurityPair(put, "cookieSession", "csrfHeader") {
-		t.Fatal("viewer policy operations must use a browser session; PUT must also require CSRF")
+		t.Fatal("viewer policy operations must take a browser session (PUT with CSRF) or a pb sign-in")
 	}
 
 	schemas := objectValue(t, doc.Components["schemas"], "components.schemas")
@@ -59,9 +59,13 @@ func TestOpenAPIFreezesBrowserViewerPolicy(t *testing.T) {
 	}
 }
 
+// hasSecurityPair reports a browser-session requirement of exactly these schemes, beside the pb sign-in's bearer.
 func hasSecurityPair(operation map[string]any, first, second string) bool {
 	security, ok := operation["security"].([]any)
-	if !ok || len(security) != 1 {
+	if !ok || len(security) != 2 {
+		return false
+	}
+	if bearer, ok := security[1].(map[string]any); !ok || len(bearer) != 1 || bearer["bearerAccess"] == nil {
 		return false
 	}
 	entry, ok := security[0].(map[string]any)
