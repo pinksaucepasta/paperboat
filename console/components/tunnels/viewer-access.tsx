@@ -174,10 +174,10 @@ function ViewerForm({
           onChange={setDraft}
           hint={
             open
-              ? "Anyone with the address can open it now. Add people to limit it to you and them."
+              ? "Anyone with the address can open it now. Add people to limit it to you and them. Changes apply when the edge next reaches Paperboat, usually within 10 s."
               : teamOwned && !publicResource
-                ? "They sign in with a verified email, and also need the team’s access. You can always open it."
-                : "They sign in with a verified email. Leave empty so only you can open it."
+                ? "They sign in with a verified email, and also need the team’s access. You can always open it. Changes apply when the edge next reaches Paperboat, usually within 10 s."
+                : "They sign in with a verified email. Leave empty so only you can open it. Changes apply when the edge next reaches Paperboat, usually within 10 s."
           }
         />
         {problem && <FieldError>{problem}</FieldError>}
