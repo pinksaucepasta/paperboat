@@ -618,7 +618,11 @@ func operatorStatus(opts Options) http.Handler {
 		if opts.Config.ReleaseDirectory != "" {
 			dimensions["release_metadata"] = releaseMetadataHealth(opts.Config.ReleaseDirectory, time.Now())
 		}
-		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"observed_at": time.Now().UTC(), "build": map[string]string{"version": buildinfo.Version, "commit": buildinfo.Commit}, "readiness": readiness, "dimensions": dimensions, "providers": map[string]any{"workos_configured": opts.Config.Secrets.WorkOSClientID != "" && opts.Config.Secrets.WorkOSAPIKey != "", "stripe_configured": opts.Config.Secrets.StripeAPIKey != "", "github_configured": opts.Config.Secrets.GitHubClientID != "", "live_availability": "not_probed"}, "configuration": map[string]any{"host_offline_after_seconds": opts.Config.UserMachines.OfflineAfter.Seconds(), "request_timeout_seconds": opts.Config.HTTP.RequestTimeout.Seconds(), "billing_policy": "/v1/admin/config/billing", "deployment_settings": "managed_by_deployment"}}})
+		mailMode := "normal"
+		if opts.Config.Mail.RecordOnly {
+			mailMode = "record_only"
+		}
+		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"observed_at": time.Now().UTC(), "build": map[string]string{"version": buildinfo.Version, "commit": buildinfo.Commit}, "readiness": readiness, "dimensions": dimensions, "providers": map[string]any{"workos_configured": opts.Config.Secrets.WorkOSClientID != "" && opts.Config.Secrets.WorkOSAPIKey != "", "stripe_configured": opts.Config.Secrets.StripeAPIKey != "", "github_configured": opts.Config.Secrets.GitHubClientID != "", "live_availability": "not_probed"}, "configuration": map[string]any{"host_offline_after_seconds": opts.Config.UserMachines.OfflineAfter.Seconds(), "request_timeout_seconds": opts.Config.HTTP.RequestTimeout.Seconds(), "billing_policy": "/v1/admin/config/billing", "deployment_settings": "managed_by_deployment", "mail_mode": mailMode}}})
 	})
 }
 
