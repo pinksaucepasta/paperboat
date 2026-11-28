@@ -3,8 +3,8 @@
 -- emails/domain the viewer policy lists); every other request (APIs, webhooks, WebSockets, subresources) still passes.
 -- workspace_navigation_gated is the one plan test: a personal workspace without a paid Pro period, no running
 -- public_browser operator grant, not riding only its own edges, and the publication not placed on a self-hosted edge (selfhost_placements). Team workspaces are never gated.
--- The tunnel viewer-policy view keeps a gated route public at the edge (the edge gates only navigations), whatever
--- non-public audience its policy names.
+-- A saved list or owner-only policy keeps a route fully restricted (sign-in for all traffic) on every plan; only a
+-- gated route with no list (or a stale "public" policy) stays public at the edge with page loads gated.
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE paperboat.billing_workspace_grants DROP CONSTRAINT billing_workspace_grants_kind_check;
 ALTER TABLE paperboat.billing_workspace_grants ADD CONSTRAINT billing_workspace_grants_kind_check
@@ -30,7 +30,6 @@ CREATE OR REPLACE VIEW paperboat.current_tunnel_route_viewer_policy AS
       WHEN r.protocol = 'http' AND p.audience IS NOT NULL THEN
         CASE
           WHEN t.access_mode = 'public' AND p.audience = 'public' THEN 'public'
-          WHEN t.access_mode = 'public' AND paperboat.workspace_navigation_gated('tunnel', t.id, t.account_id, t.owner_team_id) THEN 'public'
           ELSE 'private'
         END
       ELSE t.access_mode

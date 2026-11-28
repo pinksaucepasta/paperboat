@@ -116,9 +116,21 @@ func TestFreePlanNavigationGatePostgres(t *testing.T) {
 	if e != nil || !p.BrowserSignInRequired {
 		t.Fatalf("free email allowlist: %+v %v", p, e)
 	}
-	// The edge keeps serving it as public; only page loads are gated (by the snapshot's navigation mark).
-	if m := effective(free); m != "public" {
-		t.Fatalf("free route with an allowlist: edge mode %q, want public", m)
+	// A listed route is fully restricted (sign-in for every request: XHR, API, WebSocket, curl), never page-load only.
+	// Before the stack-review fix the view said "public" here and anonymous non-page requests reached it.
+	if m := effective(free); m != "private" {
+		t.Fatalf("free route with an allowlist: edge mode %q, want private", m)
+	}
+	var listedGrant authority
+	if e := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		a, err := resolveResource(ctx, tx, free.host, "tunnel", free.tunnel, free.route, now)
+		if err != nil {
+			return err
+		}
+		listedGrant, err = applyViewerPolicy(ctx, tx, a, free.owner)
+		return err
+	}); e != nil || listedGrant.gated || listedGrant.mode != "private" {
+		t.Fatalf("free listed route grant: gated=%v mode=%q err=%v, want a restricted (not page-load) grant", listedGrant.gated, listedGrant.mode, e)
 	}
 
 	pro := mk("pro", true)

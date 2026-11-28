@@ -408,14 +408,14 @@ func TestFreeAccountSetsAllowListsPostgres(t *testing.T) {
 	for _, host := range []string{previewHost, privateHost} {
 		f.admits(host, map[string]bool{f.owner: true, f.listed: true, f.domain: true, f.other: false})
 	}
-	// A free public tunnel takes a list too, but the edge keeps it public (only page loads sign in) and it cannot be
+	// A free public tunnel takes a list too: fully restricted at the edge (every request signs in), and it cannot be
 	// set back to "public": on the free plan browser visitors must sign in.
 	public, publicRoute, publicHost := f.tunnel("freepublic", "public")
 	if _, err := f.set("tunnel", public, publicRoute, AudienceSpecificEmails, 0, "guest@partner.test", "*@company.test"); err != nil {
 		t.Fatalf("allow list on a free public tunnel = %v", err)
 	}
-	if mode := f.edgeMode(publicRoute); mode != "public" {
-		t.Fatalf("edge mode of a listed free public tunnel = %q, want public (page loads gated)", mode)
+	if mode := f.edgeMode(publicRoute); mode != "private" {
+		t.Fatalf("edge mode of a listed free public tunnel = %q, want private (all traffic signs in)", mode)
 	}
 	f.admits(publicHost, map[string]bool{f.owner: true, f.listed: true, f.domain: true, f.other: false})
 	if _, err := f.set("tunnel", public, publicRoute, AudiencePublic, 1); !errors.Is(err, ErrPlanBrowserPublic) {
