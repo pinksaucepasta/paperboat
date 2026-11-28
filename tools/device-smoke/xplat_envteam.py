@@ -3,7 +3,8 @@
 
   XPLAT_PREFIX=... XPLAT_TEAM=<team> XPLAT_MEMBER_CT=<container of the member's Linux machine> xplat_envteam.py [--devices L,M,W]
 
-(member container elsewhere: XPLAT_MEMBER_HOST, _USER, _UID, _DOCKER, _NAME.) Needs the fleet (owner account, controller L, devices L/M/W), a paid team the owner owns with the member's account as an active
+(member container elsewhere: XPLAT_MEMBER_HOST, _USER, _UID, _DOCKER, _NAME. XPLAT_MEMBER_WIN_SSH and XPLAT_MEMBER_WIN_NAME add
+the member's Windows machine, so the grant is also checked from a member whose own device is not Linux.) Needs the fleet (owner account, controller L, devices L/M/W), a paid team the owner owns with the member's account as an active
 member (final_fixtures.py), the member's Linux container signed in and paired under the member account (own ENV vault; its password
 in XPLAT_MEMBER_VAULT_PW, the owner's in XPLAT_VAULT_PW; both read inside, never printed). Values are random and never printed.
   deliver    every owner device is shared into the team; the owner's team value reaches a team launch on each target when the actor
@@ -78,14 +79,16 @@ def until(actor, target, want, seconds=150):
         time.sleep(6)
 
 
-def setup(owner, member, devices, member_account):
+def setup(owner, members, devices, member_account):
+    member = members['L']
     ids = machine_ids(owner)
     IDS.update(ids)
     owner_account = json.loads(owner.pb('auth', 'status', '--json').text)['account']['id']
     pw = fleet.Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.mac-vm/xplat2-vault.pw')).read_bytes().strip()
     for dev, secret in [(d, pw) for d in devices.values()]:
         assert dev.pb('env', 'unlock', '--password-stdin', input=secret + b'\n', timeout=120).rc == 0, '%s unlock' % dev.name
-    assert member.pb('env', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, 'member unlock'
+    for other in members.values():
+        assert other.pb('env', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, '%s member unlock' % other.name
     for dev in devices.values():
         done = owner.pb('team', 'machine', 'share', TEAM, ids[dev.alias], '--generation', generation(owner), '--json', timeout=180)
         assert done.rc == 0 or 'already' in (done.text + done.errtext).lower(), 'share %s: %s' % (dev.name, (done.text + done.errtext)[-200:])
@@ -109,7 +112,8 @@ def setup(owner, member, devices, member_account):
     assert done.rc == 0, 'env team grant: ' + (done.text + done.errtext)[-200:]
     done = member.pb('env', 'grants', 'sync', '--json', timeout=180)
     assert done.rc == 0, 'member sync: ' + (done.text + done.errtext)[-200:]
-    assert member.pb('env', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, 'member re-unlock'
+    for other in members.values():
+        assert other.pb('env', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, '%s member re-unlock' % other.name
     for dev in devices.values():  # changing a team scope leaves every host pending until an unlocked vault re-seals it
         assert dev.pb('env', 'unlock', '--password-stdin', input=pw + b'\n', timeout=120).rc == 0, '%s re-unlock' % dev.name
 
@@ -123,7 +127,7 @@ def t_deliver_owner(actor, target):
 def t_deliver_member(member, target):
     rc, seen, message = until(member, target, {NAME: VALUE})
     assert seen == {NAME: VALUE}, 'member on %s: rc=%s saw %s %s' % (target.name, rc, sorted(seen), message)
-    return 'the team value reaches %s for the granted member (Linux machine of another account)' % target.name
+    return 'the team value reaches %s for the granted member on %s (a machine of another account, OS %s)' % (target.name, member.name, member.os)
 
 
 def t_revoke(owner, member, target, member_account):
@@ -164,19 +168,22 @@ def main():
         for k, v in saved.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
     member_account = json.loads(member.pb('auth', 'status', '--json').text)['account']['id']
-    cleanup = []
+    members = {'L': member}
+    if os.environ.get('XPLAT_MEMBER_WIN_SSH'):
+        members['W'] = fleet.Windows(os.environ['XPLAT_MEMBER_WIN_NAME'], target=os.environ['XPLAT_MEMBER_WIN_SSH'])
     try:
-        setup(owner, member, devices, member_account)
-        cleanup.append('machines')
+        setup(owner, members, devices, member_account)
         for (a_key, actor), (b_key, target) in permutations(devices.items(), 2):
             check('team-deliver', '%s>%s' % (a_key, b_key), lambda: t_deliver_owner(actor, target))
-        for key, target in devices.items():
-            check('team-deliver', 'member>%s' % key, lambda: t_deliver_member(member, target))
+        for user_key, user in members.items():
+            for key, target in devices.items():
+                check('team-deliver', '%s>%s' % ('member' if user_key == 'L' else 'member-' + user_key, key), lambda: t_deliver_member(user, target))
         done = owner.pb('env', 'team', 'revoke', TEAM, '--remove', member_account, '--confirm', 'ROTATE ENV TEAM ' + TEAM, '--json', timeout=180)
         assert done.rc == 0, 'revoke: ' + (done.text + done.errtext)[-250:]
-        member.pb('env', 'grants', 'sync', '--json', timeout=180)
-        for key, target in devices.items():
-            check('team-revoke', key, lambda: t_revoke(owner, member, target, member_account))
+        for user_key, user in members.items():
+            user.pb('env', 'grants', 'sync', '--json', timeout=180)
+            for key, target in devices.items():
+                check('team-revoke', key if user_key == 'L' else '%s:member-%s' % (key, user_key), lambda: t_revoke(owner, user, target, member_account))
     finally:
         ids = machine_ids(owner)
         for dev in devices.values():

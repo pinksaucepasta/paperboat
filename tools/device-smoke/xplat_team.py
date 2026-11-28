@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """X-21: team sharing across OSes. A machine of OS A (account OWNER, shared into a team) used by a member (account MEMBER)
-from results_dir import results_dir
 from a machine of OS B, for every ordered pair A>B.
 
   xplat_team.py [--pairs L>M,M>L,...] [--only visible,exec,terminal,files,private,end]
@@ -8,11 +7,15 @@ from a machine of OS B, for every ordered pair A>B.
 Two fleets of the same shape, one per account (each: L = Docker container on XPLAT_L_HOST, M = macpool runner, W = winpool runner):
   owner:  XPLAT_L_CT, XPLAT_MAC_SSH, SMOKE_WINDOWS_SSH, names `<XPLAT_PREFIX>-l|-m|-w`; its L machine's pb is signed in as OWNER
   member: XPE_MEMBER_L_CT, XPE_MEMBER_MAC_SSH, XPE_MEMBER_WIN_SSH, names `<XPE_MEMBER_PREFIX>l|m|w` (xpe-bl) (paired to MEMBER)
-  XPE_TEAM            a paid team OWNER owns with MEMBER as an active member (final_fixtures.py)
+  XPE_OWNER_HAS_MAC=1 the Mac (XPLAT_MAC_SSH, name `<XPLAT_PREFIX>-m`) is OWNER's and the member has none (xos_team.py's layout)
+  XPE_TEAM            a paid team OWNER owns with MEMBER as an active member (xos_team.py, or final_fixtures.py)
   XPE_OWNER_CTL_CT    Docker container of a Linux pb signed in as OWNER with its token in a file (the team setting `allow_private_access`)
+A pair uses OWNER's machine of OS A and the member's device of OS B when both exist (the other way round first for the OS
+letters in XPE_OTHER_OWNS), so one account may lack an OS. The member's machines are held for approval when the team asks for it.
 Results: results/xplat-team-<stamp>.json with `X-21:<step>:A>B`. Nothing secret is printed; every grant, setting and share made is undone.
 """
 from dev_targets import get_setting
+from results_dir import results_dir
 import json
 import os
 import subprocess
@@ -36,20 +39,25 @@ OWNER_PREFIX, MEMBER_PREFIX = os.environ.get('XPLAT_PREFIX', 'xpe'), os.environ.
 
 
 def fleets():
-    """Account A (the team owner: xpe-l, xpe-w) and account F (the shared fleet's account: test-l, -m, -w)."""
+    """Account A (the team owner) and account F (the member), each {OS letter: device}."""
     own = {'L': fleet.linux(OWNER_PREFIX + '-l'), 'W': fleet.windows(OWNER_PREFIX + '-w')}
+    owner_mac = os.environ.get('XPE_OWNER_HAS_MAC') == '1'
+    if owner_mac:
+        own['M'] = fleet.mac(OWNER_PREFIX + '-m')
     saved = fleet.L_CT, os.environ.get('XPLAT_MAC_SSH'), os.environ.get('SMOKE_WINDOWS_SSH')
     try:
         fleet.L_CT = os.environ['XPE_MEMBER_L_CT']
-        if os.environ.get('XPE_MEMBER_MAC_SSH'):
-            os.environ['XPLAT_MAC_SSH'] = os.environ['XPE_MEMBER_MAC_SSH']
-        else:  # the real macmini Mac
-            os.environ.pop('XPLAT_MAC_SSH', None)
-        other = {'L': fleet.linux(MEMBER_PREFIX + 'l'), 'M': fleet.mac(MEMBER_PREFIX + 'm')}
+        other = {'L': fleet.linux(MEMBER_PREFIX + 'l', ct=fleet.L_CT)}
+        if not owner_mac:
+            if os.environ.get('XPE_MEMBER_MAC_SSH'):
+                os.environ['XPLAT_MAC_SSH'] = os.environ['XPE_MEMBER_MAC_SSH']
+            else:  # the real macmini Mac
+                os.environ.pop('XPLAT_MAC_SSH', None)
+            other['M'] = fleet.mac(MEMBER_PREFIX + 'm')
         try:  # the other account's Windows device is only needed by pairs that use it
             other['W'] = fleet.Windows(MEMBER_PREFIX + 'w', target=os.environ['XPE_MEMBER_WIN_SSH'])
         except Exception:  # noqa: BLE001
-            other['W'] = None
+            pass
     finally:
         fleet.L_CT = saved[0]
         if saved[1] is None:
@@ -57,6 +65,18 @@ def fleets():
         else:
             os.environ['XPLAT_MAC_SSH'] = saved[1]
     return own, other
+
+
+def devices_of(pair, own, other):
+    """(the shared machine of OS A, the member's device of OS B, the pb of the machine's account, a pb of the member's account)."""
+    a, b = pair.split('>')
+    layouts = [(own, other), (other, own)]
+    if a in os.environ.get('XPE_OTHER_OWNS', 'M'):  # OS letters whose machine is preferably the other account's
+        layouts.reverse()
+    for holder, user in layouts:
+        if a in holder and b in user:
+            return holder[a], user[b], holder['L'], user['L']
+    raise SystemExit('no account has a %s machine while the other has a %s device' % (a, b))
 
 
 @contextmanager
@@ -99,6 +119,10 @@ class Team:
         assert done.rc == 0, 'machine owner pb %s: %s' % (' '.join(args[:3]), (done.text + done.errtext)[-300:])
         return json.loads(done.text)
 
+    def approves_machines(self):
+        """The team holds a member's new machine until an owner or admin accepts it (pb team machine approval <team> on)."""
+        return bool(fleet.json_pb(self.admin, 'team', 'get', self.id).get('approve_new_machines'))
+
     def member_account(self):
         """The member's account: whoever the member fleet's signed-in pb is (the team has other members)."""
         return fleet.json_pb(self.probe, 'auth', 'status')['account']['id']
@@ -108,7 +132,9 @@ class Team:
         if not shared:
             self.owner_pb('team', 'machine', 'share', self.id, machine_id, '--generation', self.generation())
             if self.owner is not self.admin:  # a member's machine waits for the team owner (machine admission)
-                self.admin_pb('team', 'machine', 'approve', self.id, machine_id, '--generation', self.generation())
+                requests = self.admin.pb('team', 'machine', 'requests', self.id, '--json', timeout=120)
+                if requests.rc == 0 and machine_id in requests.text:
+                    self.admin_pb('team', 'machine', 'approve', self.id, machine_id, '--generation', self.generation())
         self.admin_pb('team', 'machine', 'grant', self.id, machine_id, '--member', self.member_account(), '--capability', caps,
                       '--generation', self.generation())
 
@@ -136,6 +162,28 @@ def py(dev):
 
 
 # --- steps ------------------------------------------------------------------------------------------------------------
+def t_admission(team, o, m, oid):
+    """A member's machine of OS A, enrolled and shared by the member, waits for the team owner: it is listed as a request, the user on
+    OS B neither sees nor can be granted it, and approving it admits it."""
+    team.owner_pb('team', 'machine', 'share', team.id, oid, '--generation', team.generation())
+    approved = False
+    try:
+        requests = team.admin.pb('team', 'machine', 'requests', team.id, '--json', timeout=120)
+        assert requests.rc == 0 and oid in requests.text, 'the shared machine is not waiting for the owner: %s' % (requests.text + requests.errtext)[-300:]
+        listed = m.pb('--workspace', team.id, 'machine', 'list', '--all', '--json', timeout=120)
+        assert listed.rc != 0 or not any(x['alias'] == o.name for x in json.loads(listed.text)['machines']), 'a machine that waits for approval is already listed to the user'
+        refused = m.pb('--workspace', team.id, 'exec', o.name, '--', 'hostname', timeout=120)
+        assert refused.rc != 0, 'exec ran on a machine that still waits for approval'
+        team.admin_pb('team', 'machine', 'approve', team.id, oid, '--generation', team.generation())
+        approved = True
+        requests = team.admin.pb('team', 'machine', 'requests', team.id, '--json', timeout=120)
+        assert requests.rc == 0 and oid not in requests.text, 'the approved machine is still listed as waiting'
+        return 'a %s machine shared by its owner waited for the team owner (not listed, exec refused) until approved (user OS %s)' % (o.os, m.os)
+    finally:
+        if not approved:
+            team.owner.pb('team', 'machine', 'unshare', team.id, oid, '--generation', team.generation(), '--json')
+
+
 def permissions(team, o, m):
     got = [x for x in fleet.json_pb(m, '--workspace', team.id, 'machine', 'list', '--all')['machines'] if x['alias'] == o.name]
     assert got, 'the shared machine is not in the member\'s team list'
@@ -404,8 +452,17 @@ def t_manage(team, o, m, oid):
         stop_origin()
 
 
-def readd_members():
-    """final_fixtures.py puts the throwaway accounts back as active members after a removal step (the test-fixtures endpoint)."""
+def readd_members(team, removed_pb):
+    """Puts the account a removal step removed back: final_fixtures.py (XPE_ACCOUNT_FILES, the test-fixtures endpoint), else the
+    product's own path: the team owner invites its address and its pb accepts. The address is never printed."""
+    if not os.environ.get('XPE_ACCOUNT_FILES'):
+        email = fleet.json_pb(removed_pb, 'auth', 'status')['account']['email']
+        done = team.admin.pb('team', 'invite', team.id, email, '--generation', team.generation(), '--json', timeout=180)
+        assert done.rc == 0, 'could not invite the member again: ' + (done.text + done.errtext).replace(email, '<member>')[-250:]
+        value = json.loads(done.text.strip().splitlines()[-1])
+        done = removed_pb.pb('team', 'accept', value.get('data', value)['invitation_id'], '--json', timeout=180)
+        assert done.rc == 0, 'the member could not accept again: ' + (done.text + done.errtext)[-250:]
+        return
     emails = [json.load(open(path))['email'] for path in os.environ['XPE_ACCOUNT_FILES'].split(',')]
     args = [sys.executable, str(HERE / 'final_fixtures.py'), '--email', emails[0]]
     for email in emails[1:]:
@@ -437,6 +494,7 @@ def t_removal(team, o, m, oid):
     owner_id = fleet.json_pb(team.admin, 'auth', 'status')['account']['id']
     member_id = team.member_account()
     removed = member_id if member_id != owner_id else fleet.json_pb(team.owner, 'auth', 'status')['account']['id']
+    removed_pb = team.probe if removed == member_id else team.owner
     term = open_member_terminal(team, o, m)
     try:
         team.admin_pb('team', 'remove', team.id, removed, '--generation', team.generation())
@@ -449,7 +507,7 @@ def t_removal(team, o, m, oid):
         return 'removing %s ended the open terminal in %ds and hid the machine (member OS %s, machine OS %s)' % ('the member' if removed == member_id else 'the machine owner', took, m.os, o.os)
     finally:
         term.close()
-        readd_members()
+        readd_members(team, removed_pb)
         team.share(oid)
 
 
@@ -515,15 +573,16 @@ def main():
     setter = fleet.linux('xpe-ctl')
     fleet.L_CT = saved
     for pair in pairs:
-        a, b = pair.split('>')
-        # a machine of OS L or W is the team owner's (account A) and the member is account F; the Mac's is F's, used from A's devices
-        if a in os.environ.get('XPE_OTHER_OWNS', 'M'):  # OS letters whose machine is the other account's (default: the fleet Mac)
-            o, m, owner_account, probe = other[a], own[b], other['L'], own['L']
-        else:
-            o, m, owner_account, probe = own[a], other[b], own['L'], other['L']
+        o, m, owner_account, probe = devices_of(pair, own, other)
         team = Team(own['L'], setter, owner_account, probe)
-        oid = machine_id(o)
-        team.share(oid)
+        try:
+            oid = machine_id(o)
+            if owner_account is not team.admin and team.approves_machines():
+                check('admission', pair, lambda: t_admission(team, o, m, oid))
+            team.share(oid)
+        except Exception as error:  # noqa: BLE001 - the other pairs still run
+            check('share', pair, lambda error=error: (_ for _ in ()).throw(error))
+            continue
         try:
             for name, step in STEPS:
                 if only and name not in only:

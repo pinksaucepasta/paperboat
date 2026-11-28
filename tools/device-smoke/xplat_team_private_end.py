@@ -2,7 +2,8 @@
 """X-19: held private TCP flows end on grant revoke and team setting off.
 
 Pairs use holder OS > shared target OS. XPLAT_L_HOST supplies two isolated
-Linux containers rx19d-a/rx19d-b in distinct accounts. XPLAT_MAC_SSH is the
+Linux containers rx19d-a/rx19d-b (or XPE_A_NAME/XPE_B_NAME) in distinct accounts;
+XPE_M_NAME and XPE_W_NAME name the Mac and Windows machines (xos_team.py sets all). XPLAT_MAC_SSH is the
 account-A Mac; XPE_MEMBER_WIN_SSH is the account-B Windows runner; XPE_BUILD is the
 build id every pb must report. XPE_TEAM
 names a throwaway paid team owned by A with B as a member. Direct SSH starts
@@ -272,10 +273,11 @@ def main():
     parser.add_argument('--pairs', default='L>M,M>L,L>W,W>L,M>W,W>M')
     args = parser.parse_args()
     # Two accounts, each Linux controller stays outside the team transport.
-    a = fleet.linux('rx19d-a', ct='rx19d-a')
-    b = fleet.linux('rx19d-b', ct='rx19d-b')
-    m = fleet.mac('rx19d-m')
-    w = fleet.Windows('rx19d-w', target=os.environ['XPE_MEMBER_WIN_SSH'])
+    a_name, b_name = os.environ.get('XPE_A_NAME', 'rx19d-a'), os.environ.get('XPE_B_NAME', 'rx19d-b')
+    a = fleet.linux(a_name, ct=a_name)
+    b = fleet.linux(b_name, ct=b_name)
+    m = fleet.mac(os.environ.get('XPE_M_NAME', 'rx19d-m'))
+    w = fleet.Windows(os.environ.get('XPE_W_NAME', 'rx19d-w'), target=os.environ['XPE_MEMBER_WIN_SSH'])
     combinations = {'L>M': (b,m), 'M>L': (m,b), 'L>W': (a,w),
                     'W>L': (w,a), 'M>W': (m,w), 'W>M': (w,m)}
     results, versions = {}, {}
@@ -297,7 +299,7 @@ def main():
             team = xplat_team.Team(a,a,target_ctl,client)
             results[pair] = {}
             try:
-                matches = [x for x in fleet.json_pb(target_ctl,'machine','list')['machines']
+                matches = [x for x in fleet.json_pb(target_ctl,'machine','list','--all')['machines']
                            if x['alias'] == target.alias and x['online']]
                 assert len(matches) == 1, 'target not online: ' + target.alias
                 run_pair(team,target,client,matches[0]['id'],results[pair],target,save)
@@ -308,6 +310,10 @@ def main():
         out.write_text(json.dumps({'check':'X-19-team-private-end',
             'direction':'holder>shared target', 'versions':versions,'results':results},indent=2))
         print(out,flush=True)
+    bad = [pair for pair, r in results.items() if r.get('status') == 'FAIL'
+           or any(r.get(step, {}).get('status') != 'PASS' for step in ('grant_revoke', 'setting_off'))]
+    print('FAIL X-19 team private end: ' + ', '.join(bad) if bad or not results else 'PASS X-19 team private end', flush=True)
+    sys.exit(1 if bad or not results else 0)
 
 
 if __name__ == '__main__': main()
