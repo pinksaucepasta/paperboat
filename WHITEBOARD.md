@@ -16,6 +16,12 @@ WorkOSVerificationError{Reason:"email_not_verified"} has HTTPStatus 0, so the ca
 ### Recovery path when a user's WorkOS identity changes (L36)
 Sign-in refuses a new WorkOS subject whose canonical address already has an account (F13-07, no alias merge). If WorkOS ever gives a real user a new subject for the same address (user deleted and recreated), they get email_already_registered with no way back in. Rare; after launch add a support-driven re-link (verified exact-address match, audited).
 
+### Billing: late usage report before the post-payment step (B2 follow-up, 28 Nov)
+After a payment ends a lapsed grace, the webhook opens the paid usage window in a separate best-effort step. A usage report dated before the payment that arrives before that step (or after it failed) splits the Free row at the report's time, so some lapsed Free hours count as paid. Fix: split at the later of the report time and the payment time (store the payment moment on the workspace).
+
+### Billing: Stripe moves period_start during a lapse (B2 follow-up, 28 Nov)
+If Stripe starts a new period while the workspace is still unpaid, the Free row is split at the new period start, not at the payment, and late reports between the two use the paid allowance. Fix: when the workspace was past_due/unpaid with its grace expired, the webhook splits at the payment time instead of period_start.
+
 ### Drop control_tunnel_nodes.capacity_limit
 Until the commit that lists columns explicitly, the generated `RETURNING *` / `SELECT *` queries (edge register, heartbeat, stale list) read `control_tunnel_nodes.capacity_limit`, so dropping it under such a server fails every edge heartbeat. Only one deploy after that commit ships: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_tunnel_nodes DROP COLUMN capacity_limit;` (forward-only Down, `-- contract-after:` the newest migration in that shipped deploy), then `make generate`.
 

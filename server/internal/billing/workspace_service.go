@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"hash/fnv"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -550,7 +552,7 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 	if err != nil {
 		return false, err
 	}
-	processed, openPaidWindow := false, ""
+	processed, openPaidWindow, openPaidInvoice := false, "", ""
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var workspaceID string
 		if err := tx.QueryRow(ctx, `SELECT id FROM billing_workspaces WHERE provider_customer_id=$1 OR provider_subscription_id=$2 FOR UPDATE`, initial.CustomerID, subscriptionID).Scan(&workspaceID); err != nil {
@@ -672,6 +674,9 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 		}
 		if current.Status == "active" || current.Status == "trialing" {
 			openPaidWindow = workspaceID
+			if event != nil && event.Data.Object.Object == "invoice" {
+				openPaidInvoice = event.Data.Object.ID
+			}
 		}
 		if team.Valid {
 			if err = syncAddonTx(ctx, tx, workspaceID, current, newSubscription); err != nil {
@@ -707,10 +712,13 @@ func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known 
 	// may already say active), in its own transaction after the subscription state committed: usage-row trouble
 	// never blocks a paid webhook, and the next bandwidth check of the workspace retries it.
 	if err == nil && processed && openPaidWindow != "" {
-		_ = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if checkErr := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			_, checkErr := s.CheckWorkspaceBandwidthTx(ctx, tx, openPaidWindow, time.Now())
 			return checkErr
-		})
+		}); checkErr != nil {
+			slog.WarnContext(ctx, "billing: paid allowance window not opened after the payment; the next bandwidth check retries it",
+				"workspace_id", openPaidWindow, "subscription_id", subscriptionID, "invoice_id", openPaidInvoice, "error_type", fmt.Sprintf("%T", checkErr), "error", checkErr.Error())
+		}
 	}
 	return processed, err
 }

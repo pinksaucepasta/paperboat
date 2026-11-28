@@ -243,3 +243,62 @@ func checkGraceBoundary(t *testing.T, store *db.DB, service *billing.WorkspaceSe
 		}
 	}
 }
+
+// B3: a delayed payment method (SEPA or ACH debit) reports its failure days after the invoice was finalized. The customer
+// still gets a real grace from the moment the failure is first seen, and a later retry does not extend it (B1).
+func TestDelayedFailureStillGetsGrace(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	user, code := "usr_delayed_"+suffix, "delayed_plan_"+suffix
+	workspace := "personal:" + user
+	insertUser(t, store, user, user+"@example.test")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		exec(`DELETE FROM paperboat.stripe_events WHERE id LIKE $1`, "evt_delayed_%"+suffix)
+		exec(`DELETE FROM paperboat.billing_workspace_usage_periods WHERE workspace_id=$1`, workspace)
+		exec(`DELETE FROM paperboat.billing_workspaces WHERE id=$1`, workspace)
+		exec(`DELETE FROM paperboat.billing_products WHERE code=$1`, code)
+		exec(`DELETE FROM paperboat.users WHERE id=$1`, user)
+	})
+	exec(`INSERT INTO paperboat.billing_products(id,code,provider,provider_product_id,provider_price_id,catalog_type,catalog_ref,active) VALUES($1,$1,'stripe',$1,$1,'personal_subscription','{"allowance_bytes":100}',true)`, code)
+	now := time.Now().UTC().Truncate(time.Second)
+	start := now.Add(-10 * 24 * time.Hour) // finalized ten days ago; the debit failure is reported only now
+	end := start.AddDate(0, 1, 0)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,provider_customer_id,provider_subscription_id,state,product_code,period_start,period_end) VALUES($1,$2,$3,$4,'active',$5,$6,$7)`, workspace, user, "cus_"+suffix, "sub_"+suffix, code, start, end)
+	stripe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "sub_" + suffix, "customer": "cus_" + suffix, "status": "past_due", "latest_invoice": map[string]any{"id": "in_" + suffix, "billing_reason": "subscription_cycle", "status": "open", "attempted": true, "amount_remaining": 800, "status_transitions": map[string]any{"finalized_at": start.Unix()}}, "items": map[string]any{"data": []any{map[string]any{"id": "si_" + suffix, "quantity": 1, "current_period_start": start.Unix(), "current_period_end": end.Unix(), "price": map[string]any{"id": code}}}}})
+	}))
+	defer stripe.Close()
+	service := billing.NewWorkspaceService(store, billing.HTTPStripeClient{BaseURL: stripe.URL, APIKey: "sk_test_fixture", Client: stripe.Client()}, "")
+	apply := func(label string, attempt int) time.Time {
+		t.Helper()
+		raw := fmt.Sprintf(`{"id":%q,"type":"invoice.payment_failed","created":%d,"data":{"object":{"id":%q,"object":"invoice","billing_reason":"subscription_cycle","attempt_count":%d,"parent":{"type":"subscription_details","subscription_details":{"subscription":%q}}}}}`, "evt_delayed_"+label+suffix, time.Now().Unix(), "in_"+suffix, attempt, "sub_"+suffix)
+		event, err := billing.ParseStripeWebhook([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if processed, err := service.HandleWebhook(ctx, event); err != nil || !processed {
+			t.Fatal("webhook not reconciled", err)
+		}
+		var deadline time.Time
+		if err := store.SQL().QueryRowContext(ctx, `SELECT renewal_grace_until FROM paperboat.billing_workspaces WHERE id=$1`, workspace).Scan(&deadline); err != nil {
+			t.Fatal(err)
+		}
+		return deadline
+	}
+	deadline := apply("first", 1)
+	if deadline.Before(now.Add(3*24*time.Hour - time.Minute)) {
+		t.Fatalf("a failure reported ten days after finalization left grace until %v (now %v)", deadline, now)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if again := apply("manual", 1); !again.Equal(deadline) {
+		t.Fatalf("a retry moved the delayed-failure grace from %v to %v", deadline, again)
+	}
+}
