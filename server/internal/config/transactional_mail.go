@@ -21,7 +21,13 @@ type TransactionalMail struct {
 	// AbuseMailbox is where abuse reports and takedown replies go: named in takedown mail, served to
 	// clients (the marketing abuse page) in /v1/client-configuration. Empty means none is published.
 	AbuseMailbox string `json:"abuse_mailbox"`
+	// RecordOnly is for test deployments: mail is queued as usual but never handed to the provider.
+	// The dispatcher marks each row 'recorded' and keeps its payload. It wins over a configured key.
+	RecordOnly bool `json:"record_only"`
 }
+
+// Enabled reports whether mail producers queue mail: a provider key is configured, or mail is only recorded.
+func (m TransactionalMail) Enabled(key string) bool { return key != "" || m.RecordOnly }
 
 func (m TransactionalMail) Validate(key string) error {
 	if m.InvitationLifetimeSeconds < 60 || m.InvitationLifetimeSeconds > int64(90*24*time.Hour/time.Second) {
@@ -35,13 +41,17 @@ func (m TransactionalMail) Validate(key string) error {
 			return errors.New("mail.abuse_mailbox must be one bare email address")
 		}
 	}
-	if key == "" {
+	if !m.Enabled(key) {
 		return nil
 	}
 	if _, err := mail.ParseAddress(m.From); err != nil {
 		return errors.New("mail.from must be a verified sender address")
 	}
-	for _, raw := range []string{m.Endpoint, m.ConsoleOrigin} {
+	links := []string{m.ConsoleOrigin}
+	if !m.RecordOnly { // recording never calls the endpoint
+		links = append(links, m.Endpoint)
+	}
+	for _, raw := range links {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.ForceQuery || u.RawQuery != "" || u.Fragment != "" {
 			return errors.New("mail endpoint and console_origin must be HTTPS URLs without credentials, queries or fragments")

@@ -221,6 +221,13 @@ func TestInvitationMailPostgresHTTP(t *testing.T) {
 	if summary.DeliveryState != "sent" || summary.LastSentAt == nil {
 		t.Fatal("provider acceptance was not recorded")
 	}
+	// A record-only deployment's terminal state reads as accepted through the API.
+	exec(`UPDATE paperboat.transactional_mail_outbox SET state='recorded' WHERE invitation_id=$1`, second.InvitationID)
+	call("recipient", "GET", "/v1/team-invitations/"+second.InvitationID, nil, 200, &summary)
+	if summary.DeliveryState != "sent" || summary.LastSentAt == nil {
+		t.Fatalf("recorded mail reads as %q", summary.DeliveryState)
+	}
+	exec(`UPDATE paperboat.transactional_mail_outbox SET state='sent' WHERE invitation_id=$1`, second.InvitationID)
 	sentAt := *summary.LastSentAt
 	if e := worker.Dispatch(ctx); e != nil {
 		t.Fatal(e)

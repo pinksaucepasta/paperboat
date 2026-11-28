@@ -32,3 +32,32 @@ func TestTransactionalMailConfiguration(t *testing.T) {
 		t.Fatal("token-bearing link accepted")
 	}
 }
+
+func TestMailRecordOnlyConfiguration(t *testing.T) {
+	overlay := func(env map[string]string) (Config, error) {
+		cfg := Default()
+		err := overlayEnv(&cfg, func(k string) (string, bool) { v, ok := env[k]; return v, ok }, nil)
+		return cfg, err
+	}
+	for _, value := range []string{"", "false"} {
+		cfg, err := overlay(map[string]string{"PAPERBOAT_MAIL_RECORD_ONLY": value})
+		if err != nil || cfg.Mail.RecordOnly || cfg.Mail.Enabled("") || !cfg.Mail.Enabled("key") || cfg.Mail.Validate("") != nil {
+			t.Fatalf("record-only %q: err=%v mail=%+v", value, err, cfg.Mail)
+		}
+	}
+	if _, err := overlay(map[string]string{"PAPERBOAT_MAIL_RECORD_ONLY": "yes please"}); err == nil {
+		t.Fatal("non-boolean record-only accepted")
+	}
+	cfg, err := overlay(map[string]string{"PAPERBOAT_MAIL_RECORD_ONLY": "true"})
+	if err != nil || !cfg.Mail.RecordOnly || !cfg.Mail.Enabled("") {
+		t.Fatalf("record-only did not enable producers: err=%v", err)
+	}
+	// Producers compose real messages, so the sender and links are required; the endpoint is never called.
+	if cfg.Mail.Validate("") == nil {
+		t.Fatal("record-only accepted without a sender and console origin")
+	}
+	cfg.Mail.From, cfg.Mail.ConsoleOrigin = "Paperboat <sender@example.test>", "https://console.example.test"
+	if err := cfg.Mail.Validate(""); err != nil {
+		t.Fatal(err)
+	}
+}

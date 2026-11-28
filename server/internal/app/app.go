@@ -702,21 +702,25 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, err
 	}
+	mailEnabled := opts.Config.Mail.Enabled(opts.Config.Secrets.ResendAPIKey)
+	if opts.Config.Mail.RecordOnly {
+		opts.Logger.Warn("mail record-only is on: transactional mail is queued and marked recorded, none is sent")
+	}
 	teamService := teams.NewService(store)
-	teamService.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	teamService.ConfigureMail(opts.Config.Mail, mailEnabled)
 	teamService.ConfigurePolicy(opts.Config.WorkspacePolicy)
-	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, mailEnabled)
 	workspaceBilling.SetThrottleRates(opts.Config.Billing.FairUse)
 	operatorActions := operatoractions.NewService(store)
-	operatorActions.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	operatorActions.ConfigureMail(opts.Config.Mail, mailEnabled)
 	abuseReports := abusereports.New(store)
-	abuseReports.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	abuseReports.ConfigureMail(opts.Config.Mail, mailEnabled)
 	customerNotices := customernotices.New(store)
-	customerNotices.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	customerNotices.ConfigureMail(opts.Config.Mail, mailEnabled)
 	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	planlimits.ConfigureSDKRates(opts.Config.RateLimits)
 	userMachineService.ConfigureRuntimeQuota(workspaceBilling)
-	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
+	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey, RecordOnly: opts.Config.Mail.RecordOnly}
 
 	operatorService := operator.NewService(store)
 	if err := operatorService.SetHostStaleAfter(opts.Config.UserMachines.OfflineAfter); err != nil {
@@ -766,7 +770,7 @@ func New(opts Options) (*App, error) {
 		priceReader = reader
 	}
 	activityLog := activity.New(store, opts.Config.Business)
-	auditStreams := auditstream.New(store, activityLog, opts.Config.Business, opts.Config.Secrets.EncryptionKey, opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	auditStreams := auditstream.New(store, activityLog, opts.Config.Business, opts.Config.Secrets.EncryptionKey, opts.Config.Mail, mailEnabled)
 	// Team SSO and directory sync (PLAN F19); without a WorkOS API key the status still reads.
 	var workOSOrganizations teamidentity.WorkOS
 	if opts.Config.Secrets.WorkOSAPIKey != "" {

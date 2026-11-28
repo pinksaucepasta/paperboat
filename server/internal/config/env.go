@@ -40,6 +40,13 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_MAIL_CONSOLE_ORIGIN", &c.Mail.ConsoleOrigin)
 	setString("PAPERBOAT_MAIL_SITE_URL", &c.Mail.SiteURL)
 	setString("PAPERBOAT_MAIL_ABUSE_MAILBOX", &c.Mail.AbuseMailbox)
+	if v, ok := lookup("PAPERBOAT_MAIL_RECORD_ONLY"); ok && strings.TrimSpace(v) != "" {
+		parsed, err := strconv.ParseBool(v)
+		if err != nil {
+			return errors.New("PAPERBOAT_MAIL_RECORD_ONLY must be boolean")
+		}
+		c.Mail.RecordOnly = parsed
+	}
 	if v, ok := lookup("PAPERBOAT_INVITATION_LIFETIME_SECONDS"); ok {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {

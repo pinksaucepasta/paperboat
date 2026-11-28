@@ -34,6 +34,9 @@ type Message struct {
 type Service struct {
 	DB            *db.DB
 	Endpoint, Key string
+	// RecordOnly (config mail.record_only) never calls the provider: Dispatch ends each queued
+	// mail in the terminal state 'recorded' and keeps its payload for test runs to read.
+	RecordOnly bool
 }
 
 // EnqueueTx stores immutable provider bytes and a stable provider idempotency key
@@ -72,7 +75,7 @@ func EnqueueOnceTx(ctx context.Context, tx *db.Tx, id string, message Message) (
 func (s *Service) Dispatch(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if s.Key == "" {
+	if s.Key == "" && !s.RecordOnly {
 		return nil
 	}
 	var id string
@@ -82,6 +85,9 @@ func (s *Service) Dispatch(ctx context.Context) error {
 	_, err := s.DB.SQL().ExecContext(ctx, `UPDATE transactional_mail_outbox o SET state='cancelled' WHERE state='queued' AND invitation_id IS NOT NULL AND EXISTS(SELECT 1 FROM team_invitations i JOIN teams t USING(team_id) WHERE i.invitation_id=o.invitation_id AND (i.accepted_at IS NOT NULL OR i.cancelled_at IS NOT NULL OR i.expires_at<=now() OR t.deleted_at IS NOT NULL OR t.suspended OR i.latest_mail_id IS DISTINCT FROM o.mail_id))`)
 	if err != nil {
 		return err
+	}
+	if s.RecordOnly {
+		return s.record(ctx)
 	}
 	// Resend retains keys for 24h. Never retry ambiguous sends beyond 23h.
 	_, err = s.DB.SQL().ExecContext(ctx, `UPDATE transactional_mail_outbox SET state='failed' WHERE state='queued' AND (attempts>=$1 OR first_attempt_at<now()-$2*interval '1 second') AND (lease_until IS NULL OR lease_until<now())`, maxAttempts, int64(retryHorizon/time.Second))
@@ -109,6 +115,15 @@ func (s *Service) Dispatch(ctx context.Context) error {
 		}
 		_, err = s.DB.SQL().ExecContext(ctx, `UPDATE transactional_mail_outbox SET state=$2,lease_until=NULL,next_attempt_at=now()+$3*interval '1 second' WHERE mail_id=$1`, id, state, int64(delay/time.Second))
 	}
+	return err
+}
+
+// record ends at most one due item without a provider call. accepted_at is set as for a sent mail,
+// so invitation history and its pruning treat the two alike; provider_id stays NULL and the payload
+// stays whole. No attempt is made, so nothing is retried or fails, and a live lease is left alone:
+// another instance may still be sending that mail.
+func (s *Service) record(ctx context.Context) error {
+	_, err := s.DB.SQL().ExecContext(ctx, `UPDATE transactional_mail_outbox SET state='recorded',accepted_at=now(),lease_until=NULL WHERE mail_id=(SELECT mail_id FROM transactional_mail_outbox WHERE state='queued' AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_attempt_at,mail_id FOR UPDATE SKIP LOCKED LIMIT 1)`)
 	return err
 }
 

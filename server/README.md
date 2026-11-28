@@ -253,6 +253,21 @@ that origin plus `/team`; signing in must preserve that destination. Endpoint an
 queries or fragments. The deployment mounts key files from its existing secrets
 volume; never put the key in source or a command line.
 
+`PAPERBOAT_MAIL_RECORD_ONLY=true` (config `mail.record_only`, default off) is for
+test deployments; never set it where people expect mail, and give every instance
+sharing a database the same value, or some mail is sent and some only recorded.
+Producers queue mail as
+usual, with or without a provider key, so the sender and console origin stay
+required (the endpoint does not). The worker calls no provider: it ends each due
+row in state `recorded`, sets `accepted_at`, and keeps the whole `payload`
+(recipient, subject, HTML, text) in `paperboat.transactional_mail_outbox` for test
+runs to read. It wins over a configured key and also takes mail that was already
+queued, which is then never sent, even after the flag is turned off. `recorded` is
+terminal: it is never retried or listed as failed, invitation `delivery_state`
+reads `sent`, and retention deletes the row on the same schedule as a sent one
+(payload included; sent rows only lose their payload earlier). The operator
+overview counts it as its own state. The server logs a warning at startup.
+
 `POST /v1/teams/{team_id}/invitations/{invitation_id}/resend` accepts
 `{"operation_id":"<unique operation>"}`. Retry uncertain HTTP outcomes with the
 same operation ID. It refreshes the existing invitation, never adds a reservation

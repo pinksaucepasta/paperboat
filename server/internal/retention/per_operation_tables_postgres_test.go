@@ -57,7 +57,7 @@ FROM (VALUES('_old',now()-interval '2 hours'),('_live',now()+interval '1 minute'
 	exec(`INSERT INTO paperboat.control_operations(id,operation_key,operation_type,request_hash,state,completed_at)
 SELECT $1||k,$1||k,'t',sha256(convert_to(k,'UTF8')),st,c FROM (VALUES('_old','succeeded',now()-interval '8 days'),('_live','succeeded',now()),('_running','running',NULL::timestamptz)) v(k,st,c)`, user)
 	exec(`INSERT INTO paperboat.transactional_mail_outbox(mail_id,payload,state,created_at)
-SELECT $1||k,'{}'::jsonb,st,c FROM (VALUES('_old','sent',now()-interval '8 days'),('_live','sent',now()),('_queued','queued',now()-interval '8 days')) v(k,st,c)`, user)
+SELECT $1||k,'{}'::jsonb,st,c FROM (VALUES('_old','sent',now()-interval '8 days'),('_live','sent',now()),('_queued','queued',now()-interval '8 days'),('_rec_old','recorded',now()-interval '8 days'),('_rec_live','recorded',now())) v(k,st,c)`, user)
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at)
 VALUES($1||'_cli',$1,'pb','laptop','cli','linux',ARRAY['machines:connect'],'active',now(),now())`, user)
 	exec(`INSERT INTO paperboat.managed_ssh_client_keys(fingerprint,user_id,cli_client_session_id,algorithm,public_key,state,created_at,revoked_at,revocation_reason)
@@ -156,7 +156,7 @@ FROM generate_series(1,5) g`, user)
 	for name, test := range map[string]struct{ query, want string }{
 		"browser_machine_credentials": {`SELECT string_agg(replace(credential_id,$1,''),',' ORDER BY credential_id) FROM paperboat.browser_machine_credentials WHERE account_id=$1`, "_live"},
 		"control_operations":          {`SELECT string_agg(replace(id,$1,''),',' ORDER BY id) FROM paperboat.control_operations WHERE id LIKE $1||'%'`, "_live,_running"},
-		"transactional_mail_outbox":   {`SELECT string_agg(replace(mail_id,$1,''),',' ORDER BY mail_id) FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1||'%'`, "_live,_queued"},
+		"transactional_mail_outbox":   {`SELECT string_agg(replace(mail_id,$1,''),',' ORDER BY mail_id) FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1||'%'`, "_live,_queued,_rec_live"},
 		"certificate_holders":         {`SELECT string_agg(replace(cli_client_session_id,$1,''),',') FROM paperboat.managed_ssh_certificate_holders WHERE user_id=$1`, "_live"},
 		"managed_ssh_client_keys":     {`SELECT count(*)::text FROM paperboat.managed_ssh_client_keys WHERE user_id=$1`, "2"},
 		"peer_endpoint_certificates":  {`SELECT string_agg(replace(endpoint_id,$1,''),',' ORDER BY endpoint_id) FROM paperboat.peer_endpoint_certificates WHERE user_id=$1`, "_live,_named"},
