@@ -20,6 +20,24 @@ type Forwarder interface {
 	Forward(ctx context.Context, conn net.Conn, key string) error
 }
 
+// startingForwarder is a Forwarder that knows when its peer and holder state has first loaded (forward.Mesh).
+type startingForwarder interface {
+	Starting() bool
+	AwaitSeeded(ctx context.Context) bool
+}
+
+// startupSeedWait bounds how long a visitor waits on a fresh node's first holder load before a retryable answer.
+const startupSeedWait = 2 * time.Second
+
+// forwarderStarting reports whether hooks forward but have not loaded who holds which name yet.
+func forwarderStarting(hooks *ForwardHooks) bool {
+	if hooks == nil || hooks.Forwarder == nil {
+		return false
+	}
+	s, ok := hooks.Forwarder.(startingForwarder)
+	return ok && s.Starting()
+}
+
 // MeshAcceptor takes an inbound node link (forward.Mesh). It owns the connection once it returns nil.
 type MeshAcceptor interface{ Accept(conn net.Conn) error }
 
@@ -58,8 +76,20 @@ func (l *SharedTLSListener) Inject(conn net.Conn, visitor net.Addr) error {
 // forwardVisitor passes the visitor to the node that holds host. It reports whether it took ownership of the
 // connection; false (no forwarding, no holder) leaves the visitor to the local paths.
 func (l *SharedTLSListener) forwardVisitor(hooks *ForwardHooks, conn, replay net.Conn, host string) bool {
-	if hooks == nil || hooks.Forwarder == nil || len(hooks.Forwarder.Holders(host)) == 0 {
+	if hooks == nil || hooks.Forwarder == nil {
 		return false
+	}
+	if len(hooks.Forwarder.Holders(host)) == 0 {
+		// A fresh node may not know the holder yet: wait briefly for its first load, then look again.
+		if !forwarderStarting(hooks) {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(l.ctx, startupSeedWait)
+		hooks.Forwarder.(startingForwarder).AwaitSeeded(ctx)
+		cancel()
+		if len(hooks.Forwarder.Holders(host)) == 0 {
+			return false
+		}
 	}
 	// Not a listener worker: run waits for its workers when the listener closes, and a forwarded visitor must outlive a
 	// drain (the mesh ends it, not the listener).
@@ -270,4 +300,12 @@ func (p *PublicTCPListeners) shared() *SharedTLSListener {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.sharedTLS
+}
+
+// serveStartingPage answers a name a starting node cannot place yet: retryable, never a definitive not-found.
+func serveStartingPage(conn net.Conn, config *tls.Config) {
+	serveBrandedPage(conn, config, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		writeRefusal(w, r, http.StatusServiceUnavailable, "edge_starting", "Starting", edgeStartingMessage, 2*time.Second)
+	})
 }

@@ -116,6 +116,10 @@ type Mesh struct {
 
 	seedMu   sync.Mutex
 	seededAt time.Time
+	// seeded closes once the peer and holder state has loaded (see Starting); createdAt bounds that wait.
+	seeded    chan struct{}
+	seedOnce  sync.Once
+	createdAt time.Time
 
 	reportMu sync.Mutex
 	reported map[string]bool
@@ -159,7 +163,7 @@ func New(cfg Config) (*Mesh, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	m := &Mesh{cfg: cfg, dir: NewDirectory(2*cfg.SeedInterval, cfg.Now), handshakes: make(chan struct{}, maxPendingHandshakes), peersReady: make(chan struct{}), links: map[string]*link{}, pending: map[*pendingHandshake]struct{}{}, loops: map[string]*dialLoop{}, reported: map[string]bool{}}
+	m := &Mesh{cfg: cfg, dir: NewDirectory(2*cfg.SeedInterval, cfg.Now), handshakes: make(chan struct{}, maxPendingHandshakes), peersReady: make(chan struct{}), seeded: make(chan struct{}), createdAt: cfg.Now(), links: map[string]*link{}, pending: map[*pendingHandshake]struct{}{}, loops: map[string]*dialLoop{}, reported: map[string]bool{}}
 	empty, _ := nodemesh.NewPeerSet(nil)
 	m.peers.Store(&empty)
 	return m, nil

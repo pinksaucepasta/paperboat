@@ -41,6 +41,11 @@ func (m *Mesh) seedLoop(ctx context.Context) {
 // forceSeedGap, and reads at most maxForcedSeedPages pages.
 func (m *Mesh) refreshSeed(ctx context.Context, forced bool) {
 	if m.peerSet().Len() == 0 {
+		select {
+		case <-m.peersReady: // the directory answered with no peers: nobody else can hold a name
+			m.markSeeded()
+		default:
+		}
 		return
 	}
 	pages := maxSeedPages
@@ -56,7 +61,7 @@ func (m *Mesh) refreshSeed(ctx context.Context, forced bool) {
 	if forced && time.Since(m.seededAt) < forceSeedGap {
 		return
 	}
-	page, err := "", error(nil)
+	page, err, complete := "", error(nil), false
 	for range pages {
 		var resp nodemesh.HoldersResponse
 		rctx, cancel := context.WithTimeout(ctx, 2*m.cfg.DialTimeout+m.cfg.OpenTimeout)
@@ -73,10 +78,41 @@ func (m *Mesh) refreshSeed(ctx context.Context, forced bool) {
 		}
 		m.dir.ApplySeed(valid)
 		if resp.Next == "" {
+			complete = true
 			break
 		}
 		page = resp.Next
 	}
 	m.seededAt = time.Now()
+	if complete {
+		m.markSeeded()
+	}
 	m.report(StageLookup, "holder seed", err)
+}
+
+// startupWait bounds how long a fresh node treats unheld names as "not loaded yet" rather than unknown, when the
+// peer directory or holder snapshot keeps failing.
+const startupWait = 30 * time.Second
+
+func (m *Mesh) markSeeded() { m.seedOnce.Do(func() { close(m.seeded) }) }
+
+// Starting reports whether the node has not yet loaded its peers and a full holder snapshot and is still within
+// startupWait of its creation: a name no holder is known for may then be held elsewhere, so it is not unknown yet.
+func (m *Mesh) Starting() bool {
+	select {
+	case <-m.seeded:
+		return false
+	default:
+	}
+	return m.cfg.Now().Sub(m.createdAt) < startupWait
+}
+
+// AwaitSeeded waits until the first load finished (true) or ctx ends (false).
+func (m *Mesh) AwaitSeeded(ctx context.Context) bool {
+	select {
+	case <-m.seeded:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

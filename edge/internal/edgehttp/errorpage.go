@@ -77,6 +77,7 @@ const (
 	signInMessage = "Sign in to Paperboat in your browser, then open this address again."
 	retryMessage  = "Wait a moment and try again. If it keeps failing, send the reference below to Paperboat support."
 	// forwardUnavailableMessage is what a visitor reads when no node holding the address could be reached.
+	edgeStartingMessage       = "Paperboat is starting up. Wait a moment and reload the page."
 	forwardUnavailableMessage = "Paperboat could not reach the node serving this address. Wait a moment and reload the page."
 	notFoundMessage           = "This address does not exist, or your account cannot open it. Check the link or ask its owner to share it with you."
 	badRequestMessage         = "Paperboat could not understand this request. Open the address again from its original link."
