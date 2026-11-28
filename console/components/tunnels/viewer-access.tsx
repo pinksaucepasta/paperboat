@@ -11,7 +11,14 @@ import {
   type ViewerPolicy,
   type ViewerTarget,
 } from "@/lib/tunnels"
-import { addViewers, isLimitedPublicRoute, savedViewers, viewerListProblem, viewerMutation } from "@/lib/viewer-access"
+import {
+  addViewers,
+  isLimitedPublicRoute,
+  savedViewers,
+  viewerListProblem,
+  viewerMutation,
+  viewerSaveMessage,
+} from "@/lib/viewer-access"
 import { ErrorMessage } from "@/components/error-reference"
 import { LoadError } from "@/components/load-error"
 import { Section } from "@/components/section"
@@ -180,7 +187,7 @@ function ViewerForm({
         {problem && <FieldError>{problem}</FieldError>}
         {save.isError && (
           <FieldError>
-            <ErrorMessage error={save.error} />
+            <ErrorMessage error={save.error} message={viewerSaveMessage(save.error) ?? undefined} />
           </FieldError>
         )}
       </div>

@@ -5,6 +5,7 @@ import {
   isViewerEntry,
   savedViewers,
   viewerListProblem,
+  viewerSaveMessage,
   viewerMutation,
   type ViewerPolicyView,
 } from "./viewer-access"
@@ -68,5 +69,15 @@ describe("viewer policy", () => {
     expect(isLimitedPublicRoute(policy({ ...open, audience: "public" }))).toBe(false)
     expect(isLimitedPublicRoute(policy({ ...open, configured: false }))).toBe(false)
     expect(isLimitedPublicRoute(policy({ audience: "owner" }))).toBe(false)
+  })
+})
+
+describe("viewer save failures", () => {
+  test("says how to limit a live public preview instead of the server sentence", () => {
+    expect(viewerSaveMessage({ code: "edge_policy_transition_required" })).toBe(
+      "To limit who can open this preview, publish it again with --allow <emails/domains>.",
+    )
+    expect(viewerSaveMessage({ code: "viewer_policy_conflict" })).toBeNull()
+    expect(viewerSaveMessage(new Error("boom"))).toBeNull()
   })
 })
