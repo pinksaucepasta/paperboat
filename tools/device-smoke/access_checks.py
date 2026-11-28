@@ -12,6 +12,7 @@ machine containers on SMOKE_FIXTURE_HOST, runs the existing check script against
   tunnel-ip-rules      F8-13, C280: ip_rules_rows.py --kind tunnel; address A is this controller, B is SMOKE_OBSERVER_SSH.
   preview-ip-rules     F7-09, C281: ip_rules_rows.py --kind preview.
   tunnel-route-rules   F8-16: route_rules_rows.py.
+  policy-capabilities  F18-02: terminal, browser terminal, managed SSH, files, preview/tunnel manage, inspect, replay, one action at a time.
   tunnel-origin        F8-09, F8-10, F8-11, F8-12: tunnel_origin_rows.py on the machine (headers, keep-alive, quiet WebSocket, TLS modes
                        with a pinned origin, gRPC, failure pages).
   tunnel-origin-proxies  F8-09: origin_tunnel_matrix.py, Caddy, Traefik, nginx and Apache forcing HTTPS behind real tunnels.
@@ -245,11 +246,194 @@ def team_env(m, prefix, team):
         raise RuntimeError('team ENV scope: ' + (done.stdout + done.stderr)[-250:])
 
 
+# one pty session through `pb connect`: types a command whose output differs from its text, and prints OPEN when it comes back
+TERMINAL_PROBE = r"""
+import os, pty, select, sys, time
+pb, team, machine, name = sys.argv[1:5]
+child, fd = pty.fork()
+if child == 0:
+    os.execv(pb, [pb, '--workspace', team, 'connect', machine, 'new', '--name', name])
+seen, sent, end = bytearray(), False, time.time() + 60
+while time.time() < end and b'CAPTERM_2' not in seen:
+    if select.select([fd], [], [], .5)[0]:
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            break
+        if not data:
+            break
+        seen.extend(data)
+    if not sent and b'$' in seen:
+        os.write(fd, b'echo CAPTERM_$((1+1))\r')
+        sent = True
+if b'CAPTERM_2' in seen:
+    os.write(fd, b'exit\r')
+    time.sleep(1)
+    print('OPEN')
+    sys.exit(0)
+print(bytes(seen[-400:]).decode('utf-8', 'replace'))
+sys.exit(1)
+"""
+
+REFUSAL = r'not found|no machine|no terminal|no tunnel|no preview|permission|not allowed|denied|not authorized|not_authorized|forbidden|access|policy'
+
+
+def refused_by_paperboat(code, output):
+    """A refusal Paperboat words itself; a crash, a timeout or a dead origin is not one."""
+    return code not in (0, 124) and 'Traceback' not in output and re.search(REFUSAL, output, re.I) is not None
+
+
+def policy_capabilities(m):
+    """F18-02, one capability at a time: a team member whose only rule on a shared machine is exec is refused each other capability;
+    adding that one action allows it; removing it refuses it again. Browser terminals are checked where the console makes them: the
+    terminal-session API with the member's browser session."""
+    _, owner_state = m.account('capown')
+    member_email, member_state = m.account('capmem')
+    name, machine_id, owner = m.machine('cpowner', state=owner_state)
+    member_name, _, member = m.machine('cpmember', state=member_state)
+    docker_exec(fx.HOST, name, 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server >/dev/null && systemctl enable --now ssh >/dev/null 2>&1 && systemctl is-active ssh', timeout=600)
+    for machine, prefix in ((name, owner), (member_name, member)):
+        fx.stage(prefix)
+        fx.ready(prefix, machine)
+    team = fx.paid_team(m, owner, None)
+    invitation = json.loads(m.at(owner, '%s team invite %s %s --generation %s --json' % (PB, team, shlex.quote(member_email), fx.team_generation(m, owner, team))).stdout.strip().splitlines()[-1])
+    m.at(member, '%s team accept %s --json' % (PB, invitation.get('data', invitation)['invitation_id']), timeout=150)
+    m.callback(lambda: m.at(member, '%s team leave %s --generation %s --json' % (PB, team, fx.team_generation(m, member, team)), check=False, timeout=150))
+    steps = []
+
+    def step(label, ok, detail=''):
+        detail = re.sub(r'pbat_[A-Za-z0-9_-]+', 'pbat_<redacted>', ' '.join(str(detail).split()))
+        steps.append('%s %s%s' % ('PASS' if ok else 'FAIL', label, '' if ok else ': ' + detail[:300]))
+
+    def pb(prefix, args, timeout=150, stdin=None):
+        done = m.at(prefix, '%s %s' % (PB, args), check=False, timeout=timeout, stdin=stdin)
+        return done.returncode, done.stdout + done.stderr
+
+    def parsed(output):
+        value = json.loads(output[output.index('{'):])
+        return value.get('data', value)
+
+    code, out = pb(owner, 'team machine share %s %s --generation %s --json' % (team, machine_id, fx.team_generation(m, owner, team)))
+    if code:
+        raise RuntimeError('share: ' + out[-300:])
+    m.callback(lambda: m.at(owner, '%s team machine unshare %s %s --generation %s --json' % (PB, team, machine_id, fx.team_generation(m, owner, team)), check=False, timeout=150))
+
+    def allow(*actions):
+        document = {'rules': [{'src': ['user:' + member_email], 'dst': ['machine:' + name], 'allow': ['exec', *actions]}]}
+        code, out = pb(owner, 'policy set - --workspace %s --yes --message smoke-cap' % team, stdin=json.dumps(document) + '\n')
+        if code:
+            raise RuntimeError('policy set %s: %s' % (actions, out[:300]))
+
+    m.at(owner, '(nohup python3 -m http.server 9317 --bind 127.0.0.1 >/dev/null 2>&1 &); sleep 1')
+    code, out = pb(owner, '--workspace %s tunnel create cap-%s --port 9317 --team --wait --timeout 150s --json' % (team, m.run_id[-4:]), timeout=200)
+    if code:
+        raise RuntimeError('team tunnel: ' + out[-300:])
+    tunnel = parsed(out)['tunnel']['id']
+    code, out = pb(owner, '--workspace %s preview 9317 --team --background --ttl 45m --json' % team, timeout=200)
+    if code:
+        raise RuntimeError('team preview: ' + out[-300:])
+    value = parsed(out)
+    preview = value.get('id') or (value.get('preview') or {}).get('id')
+    code, out = pb(owner, '--workspace %s tunnel inspect %s --enable' % (team, tunnel))
+    step('the owner turns capture on for the team tunnel', code == 0, out)
+    m.at(member, 'umask 077; cat > cap_terminal.py', stdin=TERMINAL_PROBE)
+    m.at(member, 'echo capability > cap.txt')
+    number = [0]
+
+    def terminal():
+        number[0] += 1
+        done = m.at(member, 'timeout 80 python3 cap_terminal.py %s %s %s cap-%s-%d' % (PB, team, name, m.run_id[-4:], number[0]), check=False, timeout=120)
+        return done.returncode, done.stdout + done.stderr
+
+    def browser_terminal():
+        number[0] += 1
+        env = dict(m.env, WORKSPACE=team, STATE=member_state)
+        done = fx.run(['node', str(fx.HERE / 'console_api.mjs'), 'POST', '/v1/machines/%s/terminal-sessions' % machine_id,
+                       json.dumps({'name': 'web-%s-%d' % (m.run_id[-4:], number[0])})], env=env, timeout=180)
+        reply = json.loads(done.stdout.strip().splitlines()[-1])
+        return (0 if reply['status'] in (200, 201, 202) else reply['status']), 'HTTP %s %s' % (reply['status'], json.dumps(reply['body'])[:300])
+
+    def ssh():
+        code, out = pb(member, '--workspace %s ssh %s -- echo CAPSSH' % (team, name), timeout=120)
+        return (0 if code == 0 and 'CAPSSH' in out else code or 1), out
+
+    def files():
+        done = m.at(member, 'timeout 45 %s --workspace %s send cap.txt --to %s' % (PB, team, name), check=False, timeout=90)
+        out = done.stdout + done.stderr
+        # with the right, the send is delivered or waits for the owner to decide
+        waiting = done.returncode == 124 or re.search(r'approv|waiting for', out, re.I)
+        return (0 if done.returncode == 0 or waiting else done.returncode), out
+
+    def listed(kind, ident):
+        code, out = pb(member, '--workspace %s %s list --json' % (team, kind))
+        return code == 0 and ident in out, out
+
+    def tunnel_manage():
+        code, out = pb(member, '--workspace %s tunnel pause %s --json' % (team, tunnel))
+        if code == 0:
+            back, more = pb(member, '--workspace %s tunnel resume %s --json' % (team, tunnel))
+            return back, out + more
+        return code, out
+
+    def inspect():
+        return pb(member, '--workspace %s tunnel inspect %s --json' % (team, tunnel), timeout=60)
+
+    def replay():  # the inspector credential for the replay action: turning capture on asks for it
+        return pb(member, '--workspace %s tunnel inspect %s --enable' % (team, tunnel), timeout=60)
+
+    probes = [('terminal', 'a terminal', terminal, []), ('terminal', 'a browser terminal', browser_terminal, []),
+              ('managed_ssh', 'managed SSH', ssh, []), ('files', 'sending a file', files, []),
+              ('tunnel_manage', 'pausing the team tunnel', tunnel_manage, []), ('inspect', 'reading the inspector', inspect, []),
+              ('replay', 'the inspector\'s replay right', replay, [])]
+
+    def until(want, call, seconds=90):
+        deadline = time.monotonic() + seconds
+        while True:
+            try:
+                code, out = call()
+            except (RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+                code, out = 125, 'probe error %s: %s' % (type(error).__name__, error)
+            good = code == 0 if want else refused_by_paperboat(code, out)
+            if good or time.monotonic() > deadline:
+                return good, 'exit %s %s' % (code, ' '.join(out.split())[:260])
+            time.sleep(8)
+
+    try:
+        for action, label, probe, _ in probes:
+            allow()
+            ok, detail = until(False, probe)
+            step('F18-02 without %s the member is refused %s' % (action, label), ok, detail)
+            allow(action)
+            ok, detail = until(True, probe, 150)
+            step('F18-02 with %s the member gets %s' % (action, label), ok, detail)
+            allow()
+            ok, detail = until(False, probe, 150)
+            step('F18-02 once %s is removed %s is refused again' % (action, label), ok, detail)
+        allow()
+        seen, out = listed('preview', preview)
+        code, out2 = pb(member, '--workspace %s preview stop %s --json' % (team, preview))
+        step('F18-02 without preview_manage the member neither sees nor stops the team preview', not seen and refused_by_paperboat(code, out2), 'listed=%s stop exit %s %s' % (seen, code, out2[:200]))
+        allow('preview_manage')
+        ok, detail = until(True, lambda: (0 if listed('preview', preview)[0] else 1, listed('preview', preview)[1]), 150)
+        step('F18-02 with preview_manage the member sees the team preview', ok, detail)
+        code, out = pb(member, '--workspace %s preview stop %s --json' % (team, preview))
+        step('F18-02 with preview_manage the member stops the team preview', code == 0, out)
+    finally:
+        pb(owner, '--workspace %s preview delete %s --json' % (team, preview))
+        code, out = pb(owner, '--workspace %s tunnel delete %s --json' % (team, tunnel))
+        try:
+            pb(owner, '--workspace %s tunnel delete %s --confirm %s --json' % (team, tunnel, parsed(out)['confirmation_token']))
+        except (ValueError, KeyError):
+            step('the team tunnel is deleted', False, out)
+    return line_verdict('policy-capabilities', 0, '\n'.join(steps),
+                        'terminal, browser terminal, managed SSH, files, preview and tunnel management, inspect and replay each follow their own policy action', 24)
+
+
 def policy_team(m):
     _, owner_state = m.account('polown')
     member_email, member_state = m.account('polmem')
     name, machine_id, prefix = m.machine('powner', state=owner_state)
-    member_name, _, member_prefix = m.machine('pmember', state=member_state)
+    member_name, member_machine_id, member_prefix = m.machine('pmember', state=member_state)
     for machine, command in ((name, prefix), (member_name, member_prefix)):
         fx.stage(command)
         fx.ready(command, machine)
@@ -268,10 +452,75 @@ def policy_team(m):
     steps = []
     try:
         policy_enforce(m, team, name, machine_id, prefix, member_prefix, member_email, steps)
+        member_rights(m, team, name, prefix, member_name, member_machine_id, member_prefix, member_state, member_email, steps)
     except (RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
         steps.append('FAIL the group and tag steps stopped: %s: %s' % (type(error).__name__, str(error)[:300]))
     return line_verdict('policy-team', code, '\n'.join(setup + [text] + steps),
                         'team enforcement, explain, review, audit, member rights, ENV rules, groups, tags, ports and session end', 30)
+
+
+def member_rights(m, team, name, owner, member_name, member_machine_id, member, member_state, member_email, steps):
+    """What policy_enforce leaves out: F18-08, a member does edit the rules of a machine they shared themselves; F18-06, a member's API
+    token loses what the member loses. The token signs in on a third machine of the member, so no other sign-in is replaced."""
+    def step(label, ok, detail=''):
+        detail = re.sub(r'pbat_[A-Za-z0-9_-]+', 'pbat_<redacted>', ' '.join(str(detail).split()))
+        steps.append('%s %s%s' % ('PASS' if ok else 'FAIL', label, '' if ok else ': ' + detail[-300:]))
+
+    def pb(prefix, args, timeout=150, stdin=None):
+        done = m.at(prefix, '%s %s' % (PB, args), check=False, timeout=timeout, stdin=stdin)
+        return done.returncode, done.stdout + done.stderr
+
+    def save(prefix, document, message):
+        return pb(prefix, 'policy set - --workspace %s --yes --message %s' % (team, message), stdin=json.dumps(document, indent=2) + '\n')
+
+    def saved(prefix, document, message):
+        code, out = save(prefix, document, message)
+        if code:
+            raise RuntimeError('policy set %s: %s' % (message, out[:300]))
+
+    start = json.loads(pb(owner, 'policy get --workspace %s --json' % team)[1].strip())
+    start = start.get('data', start)['version']
+    grant = {'rules': [{'src': ['user:' + member_email], 'dst': ['machine:' + name], 'allow': ['exec']}]}
+    token_machine, _, token_prefix = m.machine('ptok', state=member_state)
+    fx.stage(token_prefix)
+    fx.ready(token_prefix, token_machine)
+    try:
+        saved(owner, grant, 'smoke-member-rights')
+        code, out = pb(member, 'team machine share %s %s --generation %s --json' % (team, member_machine_id, fx.team_generation(m, member, team)))
+        if code:
+            raise RuntimeError('member share: ' + out[-300:])
+        try:
+            own = {'rules': grant['rules'] + [{'src': ['role:member'], 'dst': ['machine:' + member_name], 'allow': ['exec']}]}
+            code, out = save(member, own, 'smoke-own-machine')
+            step('F18-08 a member adds a rule for the machine they shared', code == 0, out[:300])
+            code, out = pb(member, 'policy get --workspace %s' % team)
+            step('F18-08 the saved policy holds the member\'s rule', code == 0 and 'machine:' + member_name in out, out[:300])
+        finally:
+            saved(owner, grant, 'smoke-own-machine-removed')
+            pb(member, 'team machine unshare %s %s --generation %s --json' % (team, member_machine_id, fx.team_generation(m, member, team)))
+        code, out = pb(member, 'api-token create f18-lose --workspace %s --expires 1d --json' % team)
+        found = re.search(r'pbat_[A-Za-z0-9_-]+', out)
+        step('F18-06 the member creates an API token of the team workspace', code == 0 and found is not None, out)
+        if not found:
+            return
+        code, out = pb(token_prefix, 'login --api-token -', stdin=found.group(0) + '\n')
+        step('F18-06 another machine signs in with the member\'s token', code == 0, out)
+
+        def with_token(want, seconds=120):
+            deadline = time.monotonic() + seconds
+            while True:
+                code, out = pb(token_prefix, 'exec --workspace %s %s -- echo f18-token' % (team, name), timeout=90)
+                if (code == 0) is want or time.monotonic() > deadline:
+                    return (code == 0) is want, out
+                time.sleep(5)
+        ok, out = with_token(True)
+        step('F18-06 the token may do what its creator may: exec on the granted machine', ok, out)
+        saved(owner, {'rules': []}, 'smoke-creator-loses')
+        ok, out = with_token(False)
+        step('F18-06 once the creator loses the access, the token loses it too', ok, out)
+    finally:
+        code, out = pb(owner, 'policy restore %s --workspace %s --yes --message smoke-member-rights-cleanup' % (start, team))
+        step('restore the policy after the member steps', code == 0, out)
 
 
 def port_refused(port, output):
@@ -315,7 +564,8 @@ def policy_enforce(m, team, name, machine_id, owner, member, member_email, steps
     if code:
         raise RuntimeError('share: ' + out[-300:])
     m.callback(lambda: m.at(owner, '%s team machine unshare %s %s --generation %s --json' % (PB, team, machine_id, generation()), check=False, timeout=150))
-    document = {'groups': {'group:ops': ['user:' + member_email]}, 'tags': {'tag:smoke-ops': ['machine:' + name]},
+    document = {'allow_private_access': True,  # off by default in a team: no rule gives private_access without it
+                'groups': {'group:ops': ['user:' + member_email]}, 'tags': {'tag:smoke-ops': ['machine:' + name]},
                 'rules': [{'src': ['group:ops'], 'dst': ['tag:smoke-ops'], 'allow': ['exec']},  # ports go only on a rule for private_access alone
                           {'src': ['group:ops'], 'dst': ['tag:smoke-ops'], 'allow': ['private_access'], 'ports': ['8765']}]}
     try:
@@ -369,7 +619,7 @@ def policy_enforce(m, team, name, machine_id, owner, member, member_email, steps
         running = not m.at(owner, "pgrep -f 'sleep 240' >/dev/null", check=False).returncode
         step('F18-02 a long exec of the member is running', running, outcome)
         removed = time.monotonic()
-        save({'groups': document['groups'], 'tags': document['tags'], 'rules': []}, 'smoke-remove')
+        save({'allow_private_access': True, 'groups': document['groups'], 'tags': document['tags'], 'rules': []}, 'smoke-remove')
         thread.join(150)
         within = not thread.is_alive()
         thread.join(150)  # past the command's own end, to tell "ended late" from "never ended"
@@ -502,6 +752,6 @@ def tunnel_origin_proxies(m):
     return (code == 0), '%s log %s' % ('every origin proxy cell passed' if code == 0 else ' '.join(text.split())[-300:], log)
 
 
-CHECKS = {'policy-cli': policy_cli, 'policy-token': policy_token, 'machine-tags': machine_tags, 'policy-team': policy_team,
+CHECKS = {'policy-capabilities': policy_capabilities, 'policy-cli': policy_cli, 'policy-token': policy_token, 'machine-tags': machine_tags, 'policy-team': policy_team,
           'tunnel-ip-rules': tunnel_ip_rules, 'preview-ip-rules': preview_ip_rules, 'tunnel-route-rules': tunnel_route_rules,
           'tunnel-create': tunnel_create, 'tunnel-origin': tunnel_origin, 'tunnel-origin-proxies': tunnel_origin_proxies}

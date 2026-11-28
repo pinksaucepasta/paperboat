@@ -53,11 +53,12 @@ NEEDS = {
     'billing-team-lifecycle': ['console_tools'],
     'billing-declined-card': ['console_tools'],
     'billing-team-yearly': ['console_tools'],
+    'billing-usage-categories': ['console_tools', 'fixture_host'],
     'billing-sandbox-purchase': ['console_tools', 'operator_api', 'stripe_sandbox_key'],
     'billing-renewal-failure': ['console_tools', 'workspace_db', 'stripe_sandbox_key'],
     'billing-topup': ['console_tools', 'fixture_host', 'workspace_db'],
     # access_checks.py: throwaway accounts and containers
-    **{check: ['console_tools', 'fixture_host'] for check in ('policy-cli', 'policy-token', 'machine-tags', 'policy-team', 'tunnel-route-rules',
+    **{check: ['console_tools', 'fixture_host'] for check in ('policy-capabilities', 'policy-cli', 'policy-token','machine-tags', 'policy-team', 'tunnel-route-rules',
                                                               'tunnel-create', 'tunnel-origin', 'tunnel-origin-proxies')},
     'tunnel-ip-rules': ['console_tools', 'fixture_host', 'observer_host'],
     'preview-ip-rules': ['console_tools', 'fixture_host', 'observer_host'],

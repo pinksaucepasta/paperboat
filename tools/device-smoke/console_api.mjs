@@ -5,6 +5,8 @@ const [method, path, body] = process.argv.slice(2)
 const origin = process.env.ORIGIN
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM })
 const context = await browser.newContext({ storageState: process.env.STATE })
+// WORKSPACE selects a team for the call, as the console's workspace switcher does
+if (process.env.WORKSPACE) await context.addCookies([{ name: "pb-workspace", value: process.env.WORKSPACE, url: origin }])
 const reply = await context.request.fetch(`${origin}/api${path}`, {
   method,
   headers: { origin, "content-type": "application/json", "idempotency-key": crypto.randomUUID() },

@@ -126,6 +126,20 @@ class Fence(unittest.TestCase):
 
 
 class RenewalEvidence(unittest.TestCase):
+    def test_the_grace_lapse_is_fenced_to_one_past_due_throwaway_workspace(self):
+        sql = workspace_usage.lapse_script('user_00000000-0000-0000-0000-000000000000')
+        for fence in ("^final-[0-9a-f]{10}@", "interval '6 hours'", 'w.team_id IS NULL', "w.state = 'past_due'", 'count(*) FROM chosen) <> 1',
+                      'WHERE w.id = c.id', 'ON_ERROR_STOP 1', 'COMMIT;'):
+            self.assertIn(fence, sql)
+        self.assertEqual(sql.count('UPDATE paperboat.'), 1)
+        for bad in ("user_x'; DROP TABLE users; --", '', 'user_0000'):
+            with self.assertRaises(ValueError):
+                workspace_usage.lapse_script(bad)
+
+    def test_the_first_renewal_of_each_interval(self):
+        self.assertEqual(b.renewal_date('2026-11-27T21:48:21Z', '2026-12-27T21:48:21Z', 'year').isoformat(), '2027-11-27T21:48:21+00:00')
+        self.assertEqual(b.renewal_date('2026-11-27T21:48:21Z', '2026-12-27T21:48:21Z', 'month').isoformat(), '2026-12-27T21:48:21+00:00')
+
     def test_only_the_charges_count_not_the_zero_trial_invoice(self):
         history = ('3 paid:  Nov 27, 2026 $8.00 Paid Paperboat Pro Nov 27, 2026 $0.00 Paid Trial period for Paperboat Pro '
                    'Nov 27, 2026 $8.00 Paid Paperboat Pro')  # the portal's own text on release A

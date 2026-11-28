@@ -144,7 +144,22 @@ def retry(call, customer, invoice_id):
     invoice_of(call, customer, invoice_id)
     attempted_at = int(time.time())
     status, decline = pay(call, invoice_id)
-    return dict(view(call, invoice_id, sub['id']), payment_status=status, decline_code=decline, attempted_at=attempted_at)
+    return dict(view(call, invoice_id, sub['id']), payment_status=status, decline_code=decline, attempted_at=attempted_at,
+                webhook_delivered=delivered(call, invoice_id, attempted_at))
+
+
+def delivered(call, invoice_id, since, seconds=180):
+    """Whether Stripe says every webhook endpoint has taken the payment_failed event of the attempt made at `since`. A check that asserts
+    nothing changed must not read before that."""
+    deadline = time.time() + seconds
+    while True:
+        events = call('GET', '/v1/events', {'type': 'invoice.payment_failed', 'created[gte]': int(since) - 5, 'limit': 50})[1]['data']
+        mine = [e for e in events if e['data']['object'].get('id') == invoice_id]
+        if mine and not any(e.get('pending_webhooks') for e in mine):
+            return True
+        if time.time() > deadline:
+            return False  # another endpoint of the sandbox may stay pending: by now the server's had its time too
+        time.sleep(5)
 
 
 def recover(call, customer, invoice_id):
@@ -168,13 +183,16 @@ def refund(call, customer, cents):
 
 
 def cleanup(call, customer, methods):
-    detached = []
+    detached, failed = [], []
     for method in methods:
-        found = call('GET', '/v1/payment_methods/' + method)[1] if re.fullmatch(r'pm_[A-Za-z0-9]+', method) else {}
-        if found.get('customer') == customer['id']:
-            call('POST', '/v1/payment_methods/%s/detach' % method)
-            detached.append(method)
-    return {'detached': len(detached)}
+        try:  # one method Stripe refuses must not leave the others attached
+            found = call('GET', '/v1/payment_methods/' + method)[1] if re.fullmatch(r'pm_[A-Za-z0-9]+', method) else {}
+            if found.get('customer') == customer['id']:
+                call('POST', '/v1/payment_methods/%s/detach' % method)
+                detached.append(method)
+        except Refused as error:
+            failed.append(mask(error))
+    return {'detached': len(detached), 'failed': failed}
 
 
 def main(argv):

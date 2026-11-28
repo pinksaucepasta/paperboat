@@ -402,7 +402,7 @@ async function main(argv) {
     await page.waitForTimeout(5000) // the rows arrive together; a late one would otherwise be missed
     const history = historyOf(await page.locator("body").innerText())
     const paid = paidRows(history)
-    add("invoices", paid > 0, `${paid} paid: ${history.replace(/\s+/g, " ").slice(0, 180)}`)
+    add("invoices", paid > 0, `${paid} paid: ${history.replace(/\s+/g, " ").slice(0, 800)}`)
     steps.at(-1).paid = paid
   }
 

@@ -18,6 +18,7 @@ TEST-MODE pages with the test card, and deletes the account at the end (which ca
   billing-topup             F13-04T: Free refused, quantity limits, 200 GB bought on the console and credited once; F13-06A: the
                             allowance period; F13-03T: with the plan allowance used up, relayed traffic is taken from the top-up.
   billing-team-yearly       F13-04: a team switched to yearly billing and back in Stripe's portal.
+  billing-usage-categories  F13-02: usage_categories.py on two containers (UDP blocked), plus a tunnel download counted as edge bytes.
   plus-alias-signup         F13-07: plus_alias_signup.mjs.
   billing-team-lifecycle    F13-04, the transitions that need no clock: a team bought on the console's Checkout (upgrade), a seat added mid-cycle
                             (charged at once, one more paid invoice, billing date unchanged) and removed (nothing charged, date unchanged), the
@@ -33,12 +34,14 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shlex
 import subprocess
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import fixture_checks as fx
@@ -344,6 +347,14 @@ def billing_team_lifecycle(m):
     return steps.result('billing-team-lifecycle', 'team bought on console Checkout, seat added (invoiced at once) and removed on a fixed billing date, cancelled and kept')
 
 
+def renewal_date(period_start, period_end, interval):
+    """When the first renewal falls: the purchase's own end per month, a year after it began per year."""
+    if interval == 'month':
+        return when(period_end)
+    began = when(period_start)
+    return began.replace(year=began.year + 1, day=28 if (began.month, began.day) == (2, 29) else began.day)
+
+
 def billing_team_yearly(m):
     """F13-04, F13-04C: a team's seats billed yearly and monthly again, through Stripe's portal."""
     steps = Steps()
@@ -371,10 +382,71 @@ def billing_team_yearly(m):
                   and seen.get('allowance_bytes') == bought['allowance_bytes'],
                   'state=%s interval=%s seats=%s allowance=%s (%s at purchase)' % (seen.get('state'), (seen.get('product') or {}).get('interval'),
                                                                                  seen.get('seats_bought'), seen.get('allowance_bytes'), bought['allowance_bytes']))
-        steps.add('F13-04', 'billed per %s, the renewal keeps its time of day' % interval,
-                  bool(seen.get('period_end')) and when(seen['period_end']).time() == when(bought['period_end']).time(),
-                  'renews %s, bought to %s' % (seen.get('period_end'), bought['period_end']))
+        want = renewal_date(bought['period_start'], bought['period_end'], interval)
+        steps.add('F13-04', 'billed per %s, it renews one %s after the purchase, to the second' % (interval, interval),
+                  bool(seen.get('period_end')) and when(seen['period_end']) == want, 'renews %s, want %s' % (seen.get('period_end'), want.isoformat()))
+        window = ('allowance_period_start', 'allowance_period_end')
+        steps.add('F13-04', 'billed per %s, the monthly bandwidth window is the same one' % interval,
+                  all(bought.get(k) and seen.get(k) == bought[k] for k in window), '%s, at purchase %s' % ([seen.get(k) for k in window], [bought.get(k) for k in window]))
     return steps.result('billing-team-yearly', 'a two-seat team switched to yearly and back in the portal, seats and allowance unchanged')
+
+
+EDGE_BYTES = 4 * 1024 * 1024
+
+
+def edge_bytes(usage):
+    return sum(p['upload_bytes'] + p['download_bytes'] for p in usage['totals']['by_path'] if p['mode'] == 'edge')
+
+
+def usage_since(m, state, start):
+    end = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 60))
+    return api(m, state, '/v1/usage?' + urllib.parse.urlencode({'start': start, 'end': end, 'limit': '200', 'workspace': 'personal'}))
+
+
+def billing_usage_categories(m):
+    """F13-02: every kind of pb traffic is recorded by path, and billing moves by exactly the charged paths. usage_categories.py runs on
+    one throwaway container with its UDP blocked (so every flow takes the hosted relay) and drives exec, ssh, scp, rsync, sftp, send,
+    a terminal and private access to the other; then a download through a public tunnel has to appear as edge bytes."""
+    from access_checks import docker_exec
+    import ct_env
+    steps = Steps()
+    _, state = m.account('ucat')
+    sender, _, prefix = m.machine('usnd', state=state)
+    peer, _, peer_prefix = m.machine('urcv', state=state)
+    for name, packages in ((sender, 'rsync'), (peer, 'rsync openssh-server')):
+        docker_exec(fx.HOST, name, 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq %s >/dev/null' % packages, timeout=600)
+    # the checker blocks UDP itself, and unblocks it again
+    docker_exec(fx.HOST, sender, 'echo "%s ALL=(root) NOPASSWD: /usr/sbin/iptables, /usr/sbin/ip6tables" > /etc/sudoers.d/pb-usage && chmod 440 /etc/sudoers.d/pb-usage' % ct_env.CT_USER)
+    docker_exec(fx.HOST, peer, 'systemctl enable --now ssh >/dev/null 2>&1 && systemctl is-active ssh')  # installing does not start it here
+    fx.stage(prefix)
+    fx.ready(prefix, peer)
+    m.at(peer_prefix, 'mkdir -p blob && head -c %d /dev/urandom > blob/blob.bin && cd blob && (nohup python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &) && sleep 1' % (2 * 1024 * 1024))
+    code, text = fx.on_machine(prefix, 'usage_categories.py', [peer, '--private-port', '8765'], 3000)
+    found = fx.last_json(text)
+    steps.add('F13-02', 'relayed terminal, exec, SSH/SCP/SFTP/rsync, file transfer and private access are each recorded, and billing grows by exactly the charged paths',
+              code == 0 and found.get('status') == 'PASS', json.dumps(found) if found else ' '.join(text.split())[-400:])
+    start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 3600))
+    before = edge_bytes(usage_since(m, state, start))
+    m.at(prefix, 'head -c %d /dev/urandom > edge.bin; (nohup python3 -m http.server 9317 --bind 127.0.0.1 >/dev/null 2>&1 &); sleep 1' % EDGE_BYTES)
+    created = m.at(prefix, '%s tunnel create ucat-%s --port 9317 --wait --timeout 120s --json' % (fx.PB, m.run_id[-4:]), check=False, timeout=200)
+    address = re.search(r'https://[a-z0-9.-]+', created.stdout)
+    served = 0
+    if address:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(address.group(0) + '/edge.bin', headers={'User-Agent': 'smoke-check'}), timeout=120) as response:
+                served = len(response.read())
+        except OSError as error:
+            served = -1
+            created.stdout += str(error)
+    steps.add('F13-02', 'the file is downloaded through a public tunnel', served == EDGE_BYTES, '%s bytes; %s' % (served, created.stdout[:300]))
+    deadline, grown = time.monotonic() + 480, 0
+    while served == EDGE_BYTES and time.monotonic() < deadline:  # recorders report in batches of up to five minutes
+        grown = edge_bytes(usage_since(m, state, start)) - before
+        if grown >= EDGE_BYTES:
+            break
+        time.sleep(20)
+    steps.add('F13-02', 'the tunnel download is recorded as edge bytes of the workspace', grown >= EDGE_BYTES, 'edge bytes grew by %d for %d served' % (grown, EDGE_BYTES))
+    return steps.result('billing-usage-categories', 'every traffic category recorded by path, billing grows by the charged paths only, tunnel downloads counted as edge bytes')
 
 
 TERMS_VERSION = '2026-11-19'  # server/internal/legalconsent: the wording a purchase request accepts
@@ -401,7 +473,7 @@ def billing_declined_card(m):
 def stripe_sandbox(action, email, *args, timeout=900):
     """stripe_sandbox.py on the host that holds the sandbox key (SMOKE_STRIPE_SANDBOX_HOST reads SMOKE_STRIPE_SANDBOX_KEY_FILE there)."""
     command = 'python3 -I - ' + ' '.join(map(shlex.quote, (fx.ENV['SMOKE_STRIPE_SANDBOX_KEY_FILE'], action, email) + args))
-    done = fx.run(['ssh', '-o', 'BatchMode=yes', fx.ENV['SMOKE_STRIPE_SANDBOX_HOST'], command], stdin=(fx.HERE / 'stripe_sandbox.py').read_text(), timeout=timeout, check=False)
+    done = fx.run(['ssh', '-o', 'BatchMode=yes', '--', fx.ENV['SMOKE_STRIPE_SANDBOX_HOST'], command], stdin=(fx.HERE / 'stripe_sandbox.py').read_text(), timeout=timeout, check=False)
     out = fx.last_json(done.stdout)
     if done.returncode or not out or 'error' in out:
         raise RuntimeError('stripe sandbox %s: %s' % (action, out.get('error') or done.stderr.strip()[-200:]))
@@ -475,7 +547,7 @@ def billing_renewal_failure(m):
     browser(m, steps, 'F13-04G', state, 'billing_console.mjs', 'payment-state', 'grace')
     time.sleep(120)  # so that a deadline restarted by the retry is unmistakably two minutes later
     again = stripe_sandbox('retry', email, failed['invoice'])
-    time.sleep(45)  # its webhook reaches the server
+    time.sleep(30)  # Stripe has delivered its webhook (or had three minutes for it); the server's work on it is done after this
     after_retry = api(m, state, '/v1/billing/workspaces/personal')
     steps.add('F13-04G', 'a failed retry does not extend the grace', again['payment_status'] == 402 and bool(grace) and after_retry.get('renewal_grace_until') == grace,
               retry_detail(failed, again, grace, after_retry.get('renewal_grace_until')))
@@ -640,4 +712,4 @@ def billing_topup(m):
     return steps.result('billing-topup', 'Free refused, 200 GB bought once on Checkout, quantity limits, allowance period, and relayed traffic past the plan is taken from the top-up')
 
 
-CHECKS = {'billing-renewal-failure': billing_renewal_failure, 'billing-team-yearly': billing_team_yearly, 'billing-sandbox-purchase': billing_sandbox_purchase, 'billing-declined-card': billing_declined_card, 'billing-topup': billing_topup, 'billing-team-lifecycle': billing_team_lifecycle, 'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}
+CHECKS = {'billing-renewal-failure': billing_renewal_failure, 'billing-team-yearly': billing_team_yearly, 'billing-usage-categories': billing_usage_categories, 'billing-sandbox-purchase': billing_sandbox_purchase, 'billing-declined-card': billing_declined_card, 'billing-topup': billing_topup, 'billing-team-lifecycle': billing_team_lifecycle, 'billing-console': billing_console, 'bandwidth-throttle-send': bandwidth_throttle_send, 'plus-alias-signup': plus_alias_signup}

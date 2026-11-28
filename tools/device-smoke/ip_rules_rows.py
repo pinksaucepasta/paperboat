@@ -304,7 +304,8 @@ def main():
             def wait_for(observer, want, label, seconds=None):
                 # every edge address must give `want` STABLE times in a row within the bound (each edge applies a rule on its own refresh)
                 ips = sorted({entry[4][0] for entry in socket.getaddrinfo(host, port, socket.AF_INET)})
-                stable_at, last = stable_on_each(ips, lambda ip: (raw_answer(observer, host, port, mode, ip), None), want, seconds or args.wait, interval=0)
+                # paced: a source that opens TLS connections as fast as it can is limited by the edge's flood protection (F8-14)
+                stable_at, last = stable_on_each(ips, lambda ip: (raw_answer(observer, host, port, mode, ip), None), want, seconds or args.wait, interval=0.5)
                 if len(stable_at) < len(ips):
                     raise Failure('%s: wanted %s on every edge within %ds, got %s' % (label, want, seconds or args.wait, {ip: last[ip][0] for ip in last}))
                 per_edge.append({'step': '%s %s' % (mode, label), 'seconds_to_stable_per_edge': stable_at})

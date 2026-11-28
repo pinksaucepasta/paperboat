@@ -61,6 +61,7 @@ portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 tes
 | `plus-alias-signup` | F13-07 | sign-ups with plus addresses of an existing account are refused by name; a plus address with no base account signs up; the base address signing up afterwards must not land in that account |
 | `billing-renewal-failure` | F13-04, F13-04G | a declined renewal: past due, paid features for seven days (a retry adds nothing), only Free once the stored deadline has passed (moved by `workspace_usage.py lapse`), console messages, recovery by a good card |
 | `billing-team-yearly` | F13-04 (Team seats yearly) | a two-seat team bought on Checkout, switched to yearly and back in the portal: seats, allowance and renewal time of day unchanged |
+| `billing-usage-categories` | F13-02 | `usage_categories.py` on one container with UDP blocked drives every pb traffic kind to a second one; each is recorded and billing grows by the charged paths only; a download through a public tunnel appears as edge bytes |
 | `billing-sandbox-purchase` | F13-05 (test mode) | verified catalog; unsigned, forged and stale webhooks refused; one $8 test-card purchase, one paid $8.00 invoice in the portal, the charge refunded; cancel keeps the plan to the paid date |
 | `billing-declined-card` | F13-04 (failed payment at purchase), F13-05 (sandbox purchase) | a declined test card leaves the workspace Free and says why; the good card on the same Checkout recovers |
 | `billing-topup` | F13-04T, F13-03T, F13-06A | Free refused (409), quantity limits, 200 GB bought on the console and credited once; with the plan allowance used up, relayed traffic is taken from the top-up |
@@ -68,7 +69,7 @@ portal session AND the "Sandbox" badge, `stripe_pay.mjs`), and only the 4242 tes
 ### Access policy, API tokens, tunnel and preview rules (`access_checks.py`)
 
 Each check makes its own throwaway account(s) and containers on `SMOKE_FIXTURE_HOST`: `policy-cli` (F18-01, F18-10, C244-C253, C289, C290),
-`policy-token` (F18-06), `machine-tags` (F18-11, C262), `policy-team` (F18-02, F18-04, F18-05, F18-07, F18-08; a team paid in Stripe's
+`policy-capabilities` (F18-02: each machine capability follows its own action), `policy-token` (F18-06), `machine-tags` (F18-11, C262), `policy-team` (F18-02, F18-04, F18-05, F18-07, F18-08; a team paid in Stripe's
 sandbox), `tunnel-create` (C279), `tunnel-route-rules` (F8-16), `tunnel-ip-rules` (F8-13, C280), `preview-ip-rules` (F7-09, C281),
 `tunnel-origin` (F8-09..F8-12), `tunnel-origin-proxies` (F8-09). The two IP rule checks need `SMOKE_OBSERVER_SSH`, a second host with curl
 and python3 whose public address differs from the controller's.
