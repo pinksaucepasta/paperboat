@@ -448,8 +448,13 @@ func applyViewerPolicy(ctx context.Context, tx *db.Tx, a authority, account stri
 		if a.nativeMode != "public" && !audienceWithinNativeMode(a.nativeMode, p.Audience) {
 			p.Audience, p.AllowedEmails, p.EmailDomain, p.TeamID = AudienceOwner, nil, "", ""
 		}
+		// An owner-only or team policy saved on a public preview while the Free plan gated it (any sign-in audience is
+		// allowed there) outlives an upgrade: it admits the owner alone, as a private preview, until changed.
+		if a.kind == "preview" && a.nativeMode == "public" && !publicPreviewAudience(p.Audience) && (p.Audience == AudienceOwner || p.Audience == AudienceTeam) {
+			p.Audience, p.AllowedEmails, p.EmailDomain, p.TeamID = AudienceOwner, nil, "", ""
+		}
 		// Rows written before these rules, or a native mode that changed since, fail closed.
-		if !audienceWithinNativeMode(a.nativeMode, p.Audience) || a.kind == "preview" && a.nativeMode == "public" && !publicPreviewAudience(p.Audience) {
+		if !audienceWithinNativeMode(a.nativeMode, p.Audience) || a.kind == "preview" && a.nativeMode == "public" && !publicPreviewAudience(p.Audience) && p.Audience != AudienceOwner {
 			return a, ErrNotAuthorized
 		}
 		if a.kind == "preview" && a.nativeMode == "public" && p.Audience != AudiencePublic {

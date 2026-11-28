@@ -234,3 +234,20 @@ func TestFreePlanNavigationGatePostgres(t *testing.T) {
 		t.Fatalf("upgraded stale public policy: gated=%v mode=%q edge=%q, want public again", g, mode, effective(stale))
 	}
 }
+
+// A free public preview's owner-only policy (allowed while the Free plan gates it) survives an upgrade to Pro: the
+// owner still gets in and nobody else does, instead of a preview dead for everyone (stack review 2).
+func TestFreePreviewOwnerPolicySurvivesUpgradePostgres(t *testing.T) {
+	f := newPrivatePolicyFixture(t)
+	id, host := f.preview("upgrade", "public", "")
+	if _, err := f.set("preview", id, id, AudienceOwner, 0); err != nil {
+		t.Fatalf("free public preview owner-only = %v", err)
+	}
+	f.admits(host, map[string]bool{f.owner: true, f.listed: false, f.other: false})
+	f.pro()
+	f.admits(host, map[string]bool{f.owner: true, f.listed: false, f.other: false})
+	// and the owner can open it to everyone again
+	if _, err := f.set("preview", id, id, AudiencePublic, 1); err != nil {
+		t.Fatalf("upgraded preview back to public = %v", err)
+	}
+}
