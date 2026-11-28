@@ -92,6 +92,12 @@ Do not retire first: with one node in the region the region has no edge until th
 
 ## Public TCP tunnel ports on the edges
 
+Plan limits (`billing.limits.public_tcp`, user decision 2026-11-28): Free 0, Pro 10, Team 10 per paid seat
+pooled; a workspace on its own tunnel edge is not limited. A Free workspace's new public TCP route or tunnel is
+refused with 409 `public_tcp_limit_reached` ("Public TCP tunnels need Pro; use private access through pb"); the
+check runs only on create, so public TCP tunnels a Free workspace made before keep serving until stopped, and an
+operator override (`public_tcp`) still raises one workspace's limit.
+
 Raw TCP tunnels get a port from 10000-59999 (`shared/edgeports`, the one value the server allocator, the edge
 listener, pbh and `pbh doctor` all use) and the edge listens only on ports owned by a live public TCP tunnel; it
 refuses and reports any port outside the range. The host needs three things, and `pbh install` (and every `pbh serve`

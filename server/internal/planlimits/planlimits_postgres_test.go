@@ -243,7 +243,7 @@ func TestPublicationAndBrowserTerminalLimitsPostgres(t *testing.T) {
 	refused(t, check(t, store, personal, Publications), Free, 2)
 }
 
-// Public raw-TCP tunnels (user decision 2026-10-27): Free 1, Pro 10 per account, a team 10 per paid seat
+// Public raw-TCP tunnels (user decisions 2026-10-27, 2026-11-28): Free 0, Pro 10 per account, a team 10 per paid seat
 // pooled; only live ones count and a workspace on a self-hosted edge is not limited.
 func TestPublicTCPLimitsPostgres(t *testing.T) {
 	store := testStore(t)
@@ -296,28 +296,29 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 		return id
 	}
 	personal := Scope{Account: user}
-	if err := check(t, store, personal, PublicTCP); err != nil {
-		t.Fatalf("the first public TCP tunnel on Free: %v", err)
-	}
-	first := tunnelTCP("")
-	refused(t, check(t, store, personal, PublicTCP), Free, 1)
+	// Free includes none (user decision 2026-11-28): the first one is refused with limit 0.
+	refused(t, check(t, store, personal, PublicTCP), Free, 0)
 	var refusal *LimitError
 	if !errors.As(check(t, store, personal, PublicTCP), &refusal) || refusal.Code() != "public_tcp_limit_reached" || refusal.BillingURL == "" {
 		t.Fatalf("refusal %+v", refusal)
 	}
-	// Only live ones count: an offline machine, a deleted tunnel and a deleted route serve nothing.
-	exec(`UPDATE paperboat.user_machines SET online=false WHERE id=$1`, machine)
-	if err := check(t, store, personal, PublicTCP); err != nil {
-		t.Fatalf("a tunnel of an offline machine counted: %v", err)
+	// One made before the decision keeps existing (it is counted as used) and new ones stay refused.
+	first := tunnelTCP("")
+	if u := func() Usage {
+		var out map[Kind]Usage
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) { out, err = UsageTx(ctx, tx, personal); return }); err != nil {
+			t.Fatal(err)
+		}
+		return out[PublicTCP]
+	}(); u.Used != 1 || u.Limit == nil || *u.Limit != 0 {
+		t.Fatalf("Free usage with a pre-existing tunnel %+v, want 1 of 0", u)
 	}
-	exec(`UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine)
+	refused(t, check(t, store, personal, PublicTCP), Free, 0)
+	// Only live ones count on Pro below: delete the pre-existing one.
 	exec(`UPDATE paperboat.tunnel_routes SET desired_state='deleted',deleted_at=now() WHERE tunnel_id=$1`, first)
-	if err := check(t, store, personal, PublicTCP); err != nil {
-		t.Fatalf("a deleted route counted: %v", err)
-	}
 	// Self-hosted edge: unlimited, not counted.
 	tunnelTCP("")
-	refused(t, check(t, store, personal, PublicTCP), Free, 1)
+	refused(t, check(t, store, personal, PublicTCP), Free, 0)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(capability,mode,scope_kind,scope_id,installation_ids) VALUES('tunnel','self-hosted-only','account',$1,'{}')`, user)
 	if err := check(t, store, personal, PublicTCP); err != nil {
 		t.Fatalf("a self-hosted workspace was limited: %v", err)
@@ -333,6 +334,12 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 	}
 	tunnelTCP("")
 	refused(t, check(t, store, personal, PublicTCP), Pro, 10)
+	// Only live ones count: a tunnel of an offline machine serves nothing.
+	exec(`UPDATE paperboat.user_machines SET online=false WHERE id=$1`, machine)
+	if err := check(t, store, personal, PublicTCP); err != nil {
+		t.Fatalf("a tunnel of an offline machine counted: %v", err)
+	}
+	exec(`UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine)
 	usage := func(scope Scope) Usage {
 		t.Helper()
 		var out map[Kind]Usage
