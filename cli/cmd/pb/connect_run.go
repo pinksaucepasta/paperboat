@@ -967,6 +967,8 @@ func friendlyAPIError(err error) string {
 	case "policy_version_conflict", "policy_changes_unconfirmed", "invalid_policy", "policy_edit_forbidden", "policy_explain_forbidden", "api_token_name_taken", "invalid_api_token_scope", "api_token_invalid", "outside_token_scope", "outside_recipe_reach",
 		"team_sso_required", "directory_managed", "invitation_domain_not_verified":
 		return api.PublicMessage(apiErr.Code)
+	case "edge_policy_transition_required":
+		return "To limit who can open this preview, publish it again with --allow <emails/domains>."
 	case "credits_exhausted":
 		return "credits are exhausted; top up credits in Paperboat, then retry"
 	case "entitlement_lost", "payment_required":
