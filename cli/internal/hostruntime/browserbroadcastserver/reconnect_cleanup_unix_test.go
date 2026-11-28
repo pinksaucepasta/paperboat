@@ -43,7 +43,7 @@ func TestPublisherReconnectSurvivesPreviousAttachmentCleanup(t *testing.T) {
 	failed := &causePublisher{failure: context.Canceled, closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return failed, nil })
 	attachTestViewer(t, manager, id, generation, "browser_first")
-	if _, err := registry.Join(context.Background(), id, generation, "browser_first"); err != nil {
+	if _, err := registry.Join(context.Background(), id, generation, "browser_first", ""); err != nil {
 		t.Fatal(err)
 	}
 	writeTestViewer(t, manager, id, generation, "browser_first", 1)
@@ -55,7 +55,7 @@ func TestPublisherReconnectSurvivesPreviousAttachmentCleanup(t *testing.T) {
 	healthy := &signalPublisher{writes: make(chan struct{}, 4), closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return healthy, nil })
 	attachTestViewer(t, manager, id, generation, "browser_reconnected")
-	if _, err := registry.Join(context.Background(), id, generation, "browser_reconnected"); err != nil {
+	if _, err := registry.Join(context.Background(), id, generation, "browser_reconnected", ""); err != nil {
 		t.Fatalf("previous attachment cleanup prevented reconnect: %v", err)
 	}
 	release()

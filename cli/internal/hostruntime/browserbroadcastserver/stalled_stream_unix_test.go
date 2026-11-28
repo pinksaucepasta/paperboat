@@ -60,7 +60,7 @@ func TestAStalledPublisherStreamDoesNotBlockLeave(t *testing.T) {
 		if _, err := manager.AttachLiveParticipantAtGeneration(created.ID, session.Participant{AttachmentID: id, AccountID: "account_" + id, ClientID: id, Role: role, ConnectedAt: time.Now(), Browser: true}, created.Generation); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.Join(context.Background(), created.ID, created.Generation, id); err != nil {
+		if _, err := r.Join(context.Background(), created.ID, created.Generation, id, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

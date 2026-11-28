@@ -246,7 +246,7 @@ func (d *Dispatcher) prepareTerminalCheckpoint(ctx context.Context, authorizatio
 			return ErrCapabilityUnavailable
 		}
 		var err error
-		if updates, err = d.config.BrowserOutput.Join(ctx, request.SessionID, generation, response.AttachmentID); err != nil {
+		if updates, err = d.config.BrowserOutput.Join(ctx, request.SessionID, generation, response.AttachmentID, authorization.BrowserCarrier); err != nil {
 			return err
 		}
 		defer func() {

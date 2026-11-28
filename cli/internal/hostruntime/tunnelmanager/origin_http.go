@@ -32,6 +32,8 @@ type OriginHTTPTransport struct {
 	// machine's own runtime listener, where the control plane sends an operation id and reads a file
 	// name; a user's origin never sees or sets those headers.
 	KeepControlPlaneHeaders bool
+	// Stamp is set on every forwarded request after sanitizing, replacing anything the client sent.
+	Stamp http.Header
 
 	mu         sync.Mutex
 	transports map[string]originRoundTripper
@@ -81,6 +83,9 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 	}
 	webSocketUpgrade := validWebSocketUpgrade(out)
 	sanitizeOriginRequestHeaders(out.Header, webSocketUpgrade, t.KeepControlPlaneHeaders)
+	for name, values := range t.Stamp {
+		out.Header[name] = append([]string(nil), values...)
+	}
 	response, err := transport.RoundTrip(out)
 	if err != nil {
 		return nil, errors.Join(ErrOriginUnavailable, err)
@@ -213,7 +218,7 @@ func (t *OriginHTTPTransport) newGeneration() *OriginHTTPTransport {
 	if t == nil {
 		return nil
 	}
-	return &OriginHTTPTransport{Dialer: t.Dialer, TLS: t.TLS, Observe: t.Observe, KeepControlPlaneHeaders: t.KeepControlPlaneHeaders, transports: make(map[string]originRoundTripper)}
+	return &OriginHTTPTransport{Dialer: t.Dialer, TLS: t.TLS, Observe: t.Observe, KeepControlPlaneHeaders: t.KeepControlPlaneHeaders, Stamp: t.Stamp, transports: make(map[string]originRoundTripper)}
 }
 
 func (t *OriginHTTPTransport) CloseIdleConnections() {
