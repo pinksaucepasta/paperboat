@@ -66,5 +66,9 @@ func readSnapshotFromDaemon(ctx context.Context, timeout time.Duration) (localap
 	if err != nil {
 		return localapi.Snapshot{}, err
 	}
-	return client.Snapshot(ctx)
+	// The client's timeout bounds only the dial: a daemon that accepts and never answers (stopped, or stalled while
+	// a revoked machine turns signed out, F2-05) held exec forever on this peek. The whole request is bounded too.
+	requestCtx, cancel := context.WithTimeout(ctx, max(timeout, daemonSnapshotLookupTimeout))
+	defer cancel()
+	return client.Snapshot(requestCtx)
 }
