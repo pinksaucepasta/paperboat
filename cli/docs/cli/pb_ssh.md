@@ -10,6 +10,8 @@ Forwarding follows the machine's sshd: port and agent forwarding work as it allo
 
 On Windows, Git for Windows' own ssh cannot use the Paperboat agent: to run git over ssh to your machines, point Git at the built-in OpenSSH once with `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe`. pb ssh doctor says so when it applies.
 
+On Windows, `pb ssh <machine> -- <ssh options> ...` run from a PowerShell pipeline or background job can hang after the command finishes (a Win32-OpenSSH issue: ssh.exe waits on an open input pipe). Run it from cmd with `<NUL`, or from an interactive console.
+
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```

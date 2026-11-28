@@ -168,6 +168,8 @@ API and preview wildcard names, then owner IP rules and `--host-header` checked 
 
 ## Terminal, console and CLI
 
+- Post-launch, critical auth code (X-29 Windows-client scripted case, found 2026-11-27 by COV-B, receipt clean-smoke-1127/receipts/x29-win-client-agent): run `pb ssh m -- <ssh options> <cmd>` inside pb's own SSH client on Windows (accept -A/-n/-o, pb-side agent forwarding) instead of ssh.exe. Cause: with stdin a PowerShell pipe or job, Win32-OpenSSH ssh.exe gets exit-status and channel close, then stays in chan_shutdown_write and never exits; plain ssh.exe without pb does the same (with or without -n), `cmd /c "... <NUL"` exits. Giving ssh.exe NUL for -n alone did not fix it (pb's own stdin pipe still matters). Documented in cli/README.md and `pb ssh --help`.
+
 ### CLI UX review and fixes — before customizable shortcuts
 
 Recorded 2026-09-08 by Codex from the user's direction.

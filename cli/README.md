@@ -117,6 +117,8 @@ first argument alongside machine names.
 
 Managed SSH defaults to the target's registered OS account, including `DOMAIN\user` on Windows. Quote an explicit qualified target in your shell, for example `pb ssh 'DOMAIN\user@homelab'`.
 
+On Windows, `pb ssh <machine> -- <ssh options> ...` run from a PowerShell pipeline or background job can hang after the command finishes (a Win32-OpenSSH issue: ssh.exe waits on an open input pipe). Run it from cmd with `<NUL`, or from an interactive console.
+
 `{1}`, `{2}`, etc. substitute positional arguments as literal text, including inside
 `machine:{2}`. `{args}` must occupy a whole argument and inserts the remaining arguments
 in their original order. Missing or unused arguments fail before execution. There is
