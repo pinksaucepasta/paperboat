@@ -8,8 +8,9 @@ reset, removal) and so that no run depends on, or fills up, a retained account.
   xos_fleet.py down STATE_DIR              uninstall the three and delete the account (which revokes its machines)
   xos_fleet.py run  BUILD_DIR -- cmd...    up, run cmd with that environment, down on every exit (also on failure)
 
-Environment: XPLAT_L_SSH, XPLAT_MAC_SSH, SMOKE_WINDOWS_SSH (three runners that never had pb), SMOKE_BROWSER_HOST (a
-Linux runner with google-chrome, not one of the three: no browser runs on the controller). BUILD_DIR holds
+Environment: XPLAT_L_SSH, XPLAT_MAC_SSH, SMOKE_WINDOWS_SSH (three runners that never had pb; XOS_DEVICES=L,W or L,M
+makes a two-machine fleet), SMOKE_BROWSER_HOST (a host with Chrome, SMOKE_BROWSER_BIN when it is not `google-chrome`,
+not one of the three: no browser runs on the controller). BUILD_DIR holds
 pb-linux-amd64, pb-darwin-arm64 and pb-windows-amd64.exe. STATE_DIR is made mode 700; it holds the account's session,
 its login and the vault password and recovery code (all 600, never printed) until `down` removes it.
 """
@@ -29,7 +30,15 @@ sys.path.insert(0, str(HERE))
 import dev_targets  # noqa: E402
 
 BINARIES = {'L': 'pb-linux-amd64', 'M': 'pb-darwin-arm64', 'W': 'pb-windows-amd64.exe'}
-HOSTS = ('XPLAT_L_SSH', 'XPLAT_MAC_SSH', 'SMOKE_WINDOWS_SSH')
+HOSTS = {'L': 'XPLAT_L_SSH', 'M': 'XPLAT_MAC_SSH', 'W': 'SMOKE_WINDOWS_SSH'}
+
+
+def wanted():
+    """The fleet's devices (XOS_DEVICES, default L,M,W). L is the controller and is always one of them."""
+    keys = tuple(k for k in os.environ.get('XOS_DEVICES', 'L,M,W').split(',') if k)
+    if 'L' not in keys or any(k not in HOSTS for k in keys):
+        raise SystemExit('XOS_DEVICES must name L and only L, M, W')
+    return keys
 
 
 def say(text):
@@ -61,8 +70,9 @@ def node(state, script, *args, timeout=900):
 
 def exports(state):
     meta = json.loads((state / 'fleet.json').read_text())
-    return {'XPLAT_L_SSH': meta['XPLAT_L_SSH'], 'XPLAT_L_HOST': meta['XPLAT_L_SSH'], 'XPLAT_MAC_SSH': meta['XPLAT_MAC_SSH'],
-            'SMOKE_WINDOWS_SSH': meta['SMOKE_WINDOWS_SSH'], 'XPLAT_CONTROLLER': 'L', 'XPLAT_PREFIX': meta['prefix'],
+    return {'XPLAT_L_SSH': meta['XPLAT_L_SSH'], 'XPLAT_L_HOST': meta['XPLAT_L_SSH'], 'XPLAT_MAC_SSH': meta.get('XPLAT_MAC_SSH', ''),
+            'SMOKE_WINDOWS_SSH': meta.get('SMOKE_WINDOWS_SSH', ''), 'XPLAT_CONTROLLER': 'L', 'XPLAT_PREFIX': meta['prefix'],
+            'XPLAT_DEVICES': ','.join(meta['devices']),
             'XPLAT_L_NAME': meta['prefix'] + '-l', 'XPLAT_M_NAME': meta['prefix'] + '-m', 'XPLAT_W_NAME': meta['prefix'] + '-w',
             'XPLAT_VAULT_PW': str(state / 'vault.pw'), 'XPLAT_VAULT_RECOVERY': str(state / 'vault.recovery'),
             'XPLAT_BUILD_DIR': meta['build'], 'CX_VERSION': meta['version'],
@@ -72,10 +82,10 @@ def exports(state):
             'XPLAT_BUILD_W': meta['build'] + '/' + BINARIES['W']}
 
 
-def devices(state):
+def devices(state, keys=None):
     os.environ.update(exports(state))
     import xplat_fleet as fleet
-    return fleet, fleet.fleet(('L', 'M', 'W'))
+    return fleet, fleet.fleet(tuple(keys or json.loads((state / 'fleet.json').read_text())['devices']))
 
 
 def enroll(fleet, state, key, dev, binary):
@@ -125,7 +135,8 @@ def make_vault(state, targets):
 
 
 def up(state, build):
-    missing = [name for name in HOSTS if not os.environ.get(name)]
+    keys = wanted()
+    missing = [HOSTS[k] for k in keys if not os.environ.get(HOSTS[k])]
     if missing:
         raise SystemExit('set ' + ', '.join(missing))
     build = Path(build).resolve()
@@ -135,7 +146,8 @@ def up(state, build):
     version = os.environ.get('CX_VERSION') or build.name
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     prefix = 'test-cx-' + secrets.token_hex(3)  # never test-NNNN-*: those names are the protected fleet's
-    (state / 'fleet.json').write_text(json.dumps({**{n: os.environ[n] for n in HOSTS}, 'prefix': prefix, 'build': str(build), 'version': version}))
+    (state / 'fleet.json').write_text(json.dumps({**{HOSTS[k]: os.environ[HOSTS[k]] for k in keys}, 'devices': list(keys), 'prefix': prefix,
+                                                  'build': str(build), 'version': version}))
     for attempt in (1, 2):  # the sign-up code mail sometimes never arrives: one more account is tried
         try:
             node(state, 'fresh_account.mjs', 'signup', str(state / 'account'))
@@ -154,11 +166,14 @@ def up(state, build):
 
 def down(state):
     """Every step runs even when an earlier one failed; exit status 1 names what is left."""
+    for name in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):  # a second signal must not stop the account's removal
+        signal.signal(name, signal.SIG_IGN)
     left = []
     if (state / 'fleet.json').is_file():
-        fleet, targets = devices(state)
-        for key, dev in targets.items():
-            try:
+        for key in json.loads((state / 'fleet.json').read_text())['devices']:
+            try:  # one unreachable runner must not keep the others, or the account, from being removed
+                fleet, targets = devices(state, (key,))
+                dev = targets[key]
                 fleet.uninstall(dev)
                 say('%s uninstalled' % key)
             except Exception as error:  # noqa: BLE001 - the account deletion below still revokes the machine
@@ -199,7 +214,8 @@ def main():
     if len(argv) > 3 and argv[0] == 'run' and argv[2] == '--':
         import tempfile
         state = Path(tempfile.mkdtemp(prefix='xos-fleet-'))
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # a killed run still removes its account
+        for name in (signal.SIGTERM, signal.SIGHUP):  # a killed run still removes its account
+            signal.signal(name, lambda *_: sys.exit(143))
         code = 1
         try:
             up(state, argv[1])
