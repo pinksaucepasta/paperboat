@@ -1164,6 +1164,7 @@ class TerminalFamilyInPowerShell(unittest.TestCase):
         with patch.object(terminal_matrix, 'TARGET', 'windows'), \
                 patch.dict(windows_target._platforms, {(str(terminal_matrix.PB), 'windows'): True}):
             client = terminal_matrix.Client(self.fake_cmd())
+            client.wait_raw = lambda *timeout: None  # as above: the fake console stays in line mode
             try:
                 client.resize(31, 97)
                 client.ready()
