@@ -147,7 +147,12 @@ def join_cgroup():
     done = sudo('sh', '-c', 'mkdir -p %s && echo %d > %s/cgroup.procs' % (mine, os.getpid(), mine))
     if done.returncode:
         raise RuntimeError('could not move this check into a cgroup of its own: ' + done.stderr.strip())
-    atexit.register(sudo, 'sh', '-c', 'echo %d > %s%s/cgroup.procs && rmdir %s' % (os.getpid(), CGROUPS, home, mine))
+    atexit.register(leave_cgroup, mine, '%s%s' % (CGROUPS, home))
+
+
+def leave_cgroup(mine, home):
+    """Moves everything in the check's cgroup back and removes it: the shell doing so is in it too (it inherited it)."""
+    sudo('sh', '-c', 'for p in $(cat %s/cgroup.procs); do echo $p >%s/cgroup.procs; done 2>/dev/null; rmdir %s' % (mine, home, mine))
 
 
 def unit_cut(*action, failsafe=900):
