@@ -73,7 +73,7 @@ describe("viewer policy", () => {
 describe("viewer save failures", () => {
   test("says how to limit a live public preview instead of the server sentence", () => {
     expect(viewerSaveMessage({ code: "edge_policy_transition_required" })).toBe(
-      "To limit who can open this preview, publish it again with --allow <emails/domains>.",
+      "A public preview takes a list of emails or domains as it runs; to make it private or team-only, publish it again.",
     )
     expect(viewerSaveMessage({ code: "viewer_policy_conflict" })).toBeNull()
     expect(viewerSaveMessage(new Error("boom"))).toBeNull()

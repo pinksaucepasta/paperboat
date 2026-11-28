@@ -8,7 +8,7 @@ export const maxViewers = 100
 
 /** What a save the server refuses as `edge_policy_transition_required` says instead of the server's sentence. */
 export const edgePolicyTransitionMessage =
-  "To limit who can open this preview, publish it again with --allow <emails/domains>."
+  "A public preview takes a list of emails or domains as it runs; to make it private or team-only, publish it again."
 
 /** The sentence for a save refused as an unsupported edge transition, or null for any other error. */
 export const viewerSaveMessage = (error: unknown): string | null =>
