@@ -263,7 +263,10 @@ func recordingsList(c *command.Context) error {
 	if err != nil {
 		return err
 	}
-	page, err := client.ListRecordings(c.Context, team, strings.TrimSpace(c.String("machine")), limit, 0)
+	page, err := client.ListRecordings(c.Context, team, strings.TrimSpace(c.String("machine")), limit)
+	if errors.Is(err, api.ErrRecordingListStalled) {
+		return usageError{err: err, publicMessage: "The server repeated a page of recordings, so the list could not be read to the end. Run the command again.", refusal: true}
+	}
 	if err != nil {
 		return err
 	}
