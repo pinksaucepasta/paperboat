@@ -61,6 +61,14 @@ async function reauthenticate(page, { email, password, mailToken }) {
   // loads: each field is filled once, when it shows.
   const code = 'input[inputmode="numeric"]:visible, input[name="code"]:visible, input[autocomplete="one-time-code"]:visible'
   const done = new Set()
+  // what the sign-in pages loaded and posted, for a run that does not come back: no query strings, no bodies
+  const trace = []
+  page.on("response", (r) => {
+    const request = r.request()
+    if (!request.isNavigationRequest() && request.method() === "GET") return
+    const u = new URL(r.url())
+    if (!/sentry|posthog|ingest/.test(u.host + u.pathname)) trace.push(`${request.method()} ${u.host}${u.pathname} ${r.status()}`)
+  })
   const deadline = Date.now() + 420000 // the live console compiles the callback route on first use (minutes on a busy dev server)
   while (Date.now() < deadline) {
     await page.waitForTimeout(3000)
@@ -112,6 +120,10 @@ async function reauthenticate(page, { email, password, mailToken }) {
   // which account the form names, never the values themselves
   const form = await page.evaluate((expected) => [...document.querySelectorAll("input")].filter((i) => i.offsetParent !== null)
     .map((i) => `${i.name}:${i.value.length}${i.name === "email" && i.value ? (i.value === expected ? " (this account)" : " (ANOTHER address)") : ""}`).join(" "), email).catch(() => "")
+  // the failure's error text is cut to its last 300 characters, so the requests go to a file beside the row logs
+  const logs = new URL("./results/fixture-checks/", import.meta.url)
+  mkdirSync(logs, { recursive: true })
+  writeFileSync(new URL(`sign-in-trace-${Date.now()}.log`, logs), `${trace.join("\n")}\nform inputs: ${form}\nsteps: ${[...done].join(",")}\n`, { mode: 0o600 })
   console.error(`sign-in form inputs: ${form}`)
   throw new Error(`signing in again did not come back to the console: at ${new URL(page.url()).host}${new URL(page.url()).pathname} after ${[...done].join(",") || "no step"}: ${text.replace(/[^\s@]+@[^\s@]+/g, "<email>").replace(/\s+/g, " ").slice(0, 200)}`)
 }
