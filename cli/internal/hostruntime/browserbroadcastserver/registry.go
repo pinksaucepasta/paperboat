@@ -34,7 +34,7 @@ const CarrierHeader = "X-Paperboat-Runtime-Carrier"
 // maxSubscribers bounds one session's browser attachments over all carriers.
 const maxSubscribers = 100
 
-// A machine holds a carrier on each edge of its pair, and a browser may attach through any of them. An edge only
+// Registry publishes browser output per carrier. A machine holds a carrier on each edge of its pair, and a browser may attach through any of them. An edge only
 // forwards the records its own carrier receives, so output is published per carrier: on the one each browser came
 // through. Publishing on one chosen carrier left every browser on another edge attached but silent.
 type Registry struct {

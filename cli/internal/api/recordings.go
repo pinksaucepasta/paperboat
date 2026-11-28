@@ -15,7 +15,7 @@ var errInvalidReplay = errors.New("paperboat-server returned an invalid replay a
 // recordingPageLimit is the most recordings one request may ask for; the server refuses more.
 const recordingPageLimit = 200
 
-// ErrRecordingListStalled: a later page held nothing new, so reading on would not reach the end.
+// ErrRecordingListStalled reports that a later page held nothing new, so reading on would not reach the end.
 var ErrRecordingListStalled = errors.New("paperboat-server repeated a page of recordings")
 
 // ListRecordings reads at most maxItems of a team's recordings this account may see, in the server's order,
