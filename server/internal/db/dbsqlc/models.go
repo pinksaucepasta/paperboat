@@ -2632,6 +2632,8 @@ type RuntimeCarrierAttachment struct {
 	AgentCapabilities      []string
 	PreviousAdmission      []byte
 	PreviousUntil          sql.NullTime
+	AttachedAt             time.Time
+	EverReady              bool
 }
 
 type SelfhostInstallation struct {
@@ -2656,6 +2658,13 @@ type SelfhostPlacement struct {
 	ResourceKind   string
 	ResourceID     string
 	InstallationID string
+}
+
+type SelfhostPlacementHandoff struct {
+	ResourceKind string
+	ResourceID   string
+	FromNodeID   string
+	Until        time.Time
 }
 
 type SelfhostPoolPolicy struct {

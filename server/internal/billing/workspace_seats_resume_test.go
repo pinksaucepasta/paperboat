@@ -44,8 +44,7 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := 0
-	var webhookErr func(bool) error
-	webhookErr = func(must bool) error {
+	webhookErr := func(must bool) error {
 		t.Helper()
 		n++
 		var event billing.StripeWebhook
@@ -74,7 +73,6 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 	fake.subs[sub.ID] = cancelled
 	webhook()
 	scheduled(2, "while cancelling")
-	before := len(fake.reductions)
 	// The customer keeps the plan.
 	resumed := fake.subs[sub.ID]
 	resumed.CancelAtPeriodEnd = false
@@ -86,7 +84,7 @@ func TestSeatReductionSurvivesCancelAndResume(t *testing.T) {
 		t.Fatal("a failed reschedule acknowledged the event")
 	}
 	scheduled(2, "after a failed reschedule")
-	before = len(fake.reductions)
+	before := len(fake.reductions)
 	webhook()
 	if len(fake.reductions) != before+1 {
 		t.Fatalf("keeping the plan did not schedule the reduction again: %+v", fake.reductions)

@@ -160,6 +160,7 @@ func removeDiagnosticFile(path string, owner diagnosticOwner) error {
 func replaceDiagnosticNote(from, to string) error {
 	deadline := time.Now().Add(noteReplaceBudget)
 	for {
+		//paperboat:allow-source-policy atomic-replacement owner=diagnostics reason=same-directory-note-swap-with-busy-retry
 		err := os.Rename(from, to)
 		busy := errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_SHARING_VIOLATION)
 		if err == nil || !busy || time.Now().After(deadline) {

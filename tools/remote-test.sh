@@ -58,6 +58,8 @@ shift 2
 if [ "$module" = cli ] && ! sudo -n true 2>/dev/null; then
   echo "remote-test: warning: $(hostname) has no passwordless sudo; cli root-updater and isolated-filesystem tests will fail here, run cli on tools/ci-test.sh or a host with passwordless sudo" >&2
 fi
+# Pool runners (GitHub hosted images) keep Go in the tool cache instead.
+for toolcache in "$HOME"/hostedtoolcache/go/1.27.4/*/bin; do [ -d "$toolcache" ] && PATH=$toolcache:$PATH; done
 export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=local
 # Keep each job’s build cache separate from other jobs and the host default.
 export GOCACHE=$HOME/.cache/go-build-$worktree

@@ -60,6 +60,7 @@ func waitThenRemoveStaged(directory string, pid int, poll, bound time.Duration) 
 		if time.Now().After(deadline) {
 			return false
 		}
+		//paperboat:allow-source-policy sleep owner=update reason=bounded-poll-in-detached-cleanup-helper
 		time.Sleep(poll)
 	}
 	return removeOwnStagedUpdate(directory)

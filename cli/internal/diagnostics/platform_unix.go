@@ -114,7 +114,10 @@ func removeDiagnosticFile(path string, owner diagnosticOwner) error {
 	return syncDirectory(filepath.Dir(path))
 }
 
-func replaceDiagnosticNote(from, to string) error { return os.Rename(from, to) }
+func replaceDiagnosticNote(from, to string) error {
+	//paperboat:allow-source-policy atomic-replacement owner=diagnostics reason=same-directory-note-swap
+	return os.Rename(from, to)
+}
 
 // segmentInUse reports a delete refused because another process has the file open; Unix deletes open files.
 func segmentInUse(error) bool { return false }

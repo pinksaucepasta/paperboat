@@ -7,7 +7,11 @@ import { createHmac } from "node:crypto"
 import { readFileSync } from "node:fs"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
-const origin = process.env.ADMIN_ORIGIN.replace(/\/$/, "")
+const origin = (process.env.ADMIN_ORIGIN ?? "").replace(/\/$/, "")
+if (!origin) {
+  console.log("FAIL  setup  (ADMIN_ORIGIN is not set: add smoke.SMOKE_ADMIN_ORIGIN to the development targets file)")
+  process.exit(1)
+}
 const [email, password, key] = readFileSync(process.env.OPERATOR_CRED, "utf8").split("\n").map((line) => line.trim())
 const pages = ["/", "/overview", "/users", "/teams", "/machines", "/billing", "/money", "/traffic", "/analytics", "/capacity", "/fleet", "/infrastructure",
   "/releases", "/security", "/ip-blocks", "/abuse", "/support", "/announcements", "/notices", "/status", "/sentry", "/backups", "/audit", "/operators"]

@@ -38,12 +38,13 @@ func pairPreflightServerURL(serverURL string) (string, error) {
 // client configuration. Everything else (no answer, 5xx, 429, a proxy's 401/403/407) is left to the pairing.
 func checkServerIsAPI(ctx context.Context, client *http.Client, serverURL string) error {
 	if client == nil {
-		client = http.DefaultClient
+		client = newLoginHTTPClient()
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	recorder := &statusRecorder{next: client.Transport, limit: serverProbeMaxBody}
 	if recorder.next == nil {
+		//paperboat:allow-source-policy default-http owner=auth reason=nil-transport-means-standard-transport
 		recorder.next = http.DefaultTransport
 	}
 	recorded := *client

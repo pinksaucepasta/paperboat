@@ -3,7 +3,11 @@
 // usage: ORIGIN=<console origin> MARKETING_ORIGIN=<site> [PW_MODULE=...] node console_site.mjs
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 const origin = process.env.ORIGIN
-const site = (process.env.MARKETING_ORIGIN ?? "https://paperboat.cloud").replace(/\/$/, "")
+const site = (process.env.MARKETING_ORIGIN ?? "").replace(/\/$/, "")
+if (!site) {
+  console.log("FAIL  setup  (MARKETING_ORIGIN is not set: add smoke.SMOKE_MARKETING_ORIGIN to the development targets file)")
+  process.exit(1)
+}
 const legal = [["terms", "Terms of Service"], ["privacy", "Privacy Policy"], ["acceptable-use", "Acceptable Use Policy"], ["refunds", "Refund Policy"], ["subprocessors", "Subprocessors"], ["dpa", "Data Processing Addendum"]]
 let failed = 0
 const log = (ok, step, detail = "") => {

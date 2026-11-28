@@ -621,7 +621,7 @@ def console_site(m):
     regions (create, rename, remove) and GitHub connect up to GitHub's own sign-in with the refusals of /github/connect and
     /github/callback."""
     f = fx()
-    results = [console_rows.script(m, 'site', 'console_site.mjs', state='', env={'MARKETING_ORIGIN': f.ENV.get('SMOKE_MARKETING_ORIGIN', 'https://paperboat.cloud')}, timeout=600)]
+    results = [console_rows.script(m, 'site', 'console_site.mjs', state='', env={'MARKETING_ORIGIN': f.ENV.get('SMOKE_MARKETING_ORIGIN', '')}, timeout=600)]
     _, state = m.account('site')
     results.append(console_rows.script(m, 'regions', 'console_regions.mjs', state=state, timeout=600))
     results.append(console_rows.script(m, 'github-connect', 'console_github.mjs', state=state, timeout=600))
@@ -690,7 +690,7 @@ def admin_panel(m):
     deployment. Operator only; its write actions are checked by admin/scripts/check-admin.mjs against a fixture."""
     f = fx()
     return console_rows.verdict('admin-panel', [console_rows.script(m, 'admin', 'console_admin.mjs', state='', env={
-        'ADMIN_ORIGIN': f.ENV.get('SMOKE_ADMIN_ORIGIN', 'https://admin.pprbt.dev'),
+        'ADMIN_ORIGIN': f.ENV.get('SMOKE_ADMIN_ORIGIN', ''),
         'OPERATOR_CRED': os.path.expanduser(f.ENV.get('SMOKE_OPERATOR_CRED', '~/.config/paperboat-dev/operator-cred'))}, timeout=900)])
 
 

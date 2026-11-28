@@ -38,8 +38,8 @@ check metric-label 'WithLabelValues\(' || status=1
 check tailscale-import '"tailscale\.com/' || status=1
 # The CLI runs on user machines: peer credentials, config dirs and file replacement need an owner.
 if [ "$module" = cli ]; then
-	check raw-peercred 'Getsockopt(Ucred|Xucred)|SO_PEERCRED|LOCAL_PEERCRED'
-	check raw-user-path 'os\.User(Config|Cache)Dir\('
-	check atomic-replacement 'os\.CreateTemp\(|os\.Rename\('
+	check raw-peercred 'Getsockopt(Ucred|Xucred)|SO_PEERCRED|LOCAL_PEERCRED' || status=1
+	check raw-user-path 'os\.User(Config|Cache)Dir\(' || status=1
+	check atomic-replacement 'os\.CreateTemp\(|os\.Rename\(' || status=1
 fi
 exit $status
