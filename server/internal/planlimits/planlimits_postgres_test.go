@@ -316,7 +316,8 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 	refused(t, check(t, store, personal, PublicTCP), Free, 0)
 	// Only live ones count on Pro below: delete the pre-existing one.
 	exec(`UPDATE paperboat.tunnel_routes SET desired_state='deleted',deleted_at=now() WHERE tunnel_id=$1`, first)
-	// Self-hosted edge: unlimited, not counted.
+	// Free on a self-hosted tunnel edge (the workspace edge mode decides where its tunnels are served; a
+	// self-host placement exists only in that mode): public TCP is allowed on any plan, not counted.
 	tunnelTCP("")
 	refused(t, check(t, store, personal, PublicTCP), Free, 0)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(capability,mode,scope_kind,scope_id,installation_ids) VALUES('tunnel','self-hosted-only','account',$1,'{}')`, user)
