@@ -178,6 +178,8 @@ Exact hosts beat one-label wildcards. Within one host, the longest path prefix
 then route priority wins. A public `tcp` route reserves a stable managed-hostname
 port and carries opaque bytes; the application supplies its own authentication and
 optional TLS. It has no HTTP path and does not use Paperboat's private-access helper.
+Public `tcp` routes need Pro (Pro 10, Team 10 per paid seat; a self-hosted tunnel edge is not
+limited). On Free, use a `tcp_private` route and `pb access tunnel` (see Private TCP).
 A `tls` route is TLS pass-through: the edge reads only the TLS ClientHello, picks the route by
 the server name (SNI) the client sends, and forwards the encrypted bytes unchanged. Your origin
 presents its own certificate and ends TLS, so Paperboat cannot read the traffic or add its own login

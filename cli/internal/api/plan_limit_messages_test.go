@@ -29,6 +29,10 @@ func TestPlanLimitRefusalsNameTheLimitAndTheWayOut(t *testing.T) {
 	if !strings.Contains(tcp, "allows 1 public TCP tunnels") || !strings.Contains(tcp, "own tunnel edge") || !strings.HasSuffix(tcp, "https://console.example.test/billing") {
 		t.Fatalf("public TCP: %q", tcp)
 	}
+	free := apiErrorMessageFor("public_tcp_limit_reached", http.StatusConflict, map[string]any{"limit": float64(0), "billing_url": "https://console.example.test/billing"})
+	if !strings.HasPrefix(free, "Public TCP tunnels need Pro; use private access through pb") || !strings.Contains(free, "pb access tunnel") || !strings.HasSuffix(free, "https://console.example.test/billing") {
+		t.Fatalf("public TCP on Free: %q", free)
+	}
 	for _, code := range []string{"machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached"} {
 		if (&APIError{Code: code}).PublicCode() != code {
 			t.Fatalf("%s is not a public code", code)

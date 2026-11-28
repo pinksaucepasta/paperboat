@@ -127,6 +127,11 @@ func PlanLimitRefusal(status int, code string, details map[string]any) *APIError
 func planLimitMessage(code string, details map[string]any, billing string) string {
 	limit, _ := details["limit"].(float64)
 	message := apiErrorMessage(code, http.StatusConflict)
+	if code == "public_tcp_limit_reached" && details != nil && limit == 0 {
+		if _, ok := details["limit"]; ok {
+			message = "Public TCP tunnels need Pro; use private access through pb (a tcp_private route opened with `pb access tunnel`), upgrade, or run your own tunnel edge (self-hosted tunnels are not limited)."
+		}
+	}
 	if limit >= 1 && limit == float64(int64(limit)) {
 		switch code {
 		case "machine_limit_reached":
