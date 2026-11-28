@@ -255,6 +255,27 @@ export const meQuery = queryOptions({
   staleTime: 5 * minute,
 })
 
+/**
+ * Who is signed in, if anyone, for pages a signed-out visitor may open (analytics on the guest
+ * join page): a 401 answers null instead of sending them to sign-in. Pages that need an account
+ * keep using meQuery, which does.
+ */
+export async function optionalMe(signal?: AbortSignal): Promise<Me | null> {
+  const response = await send("/api/v1/me", { signal, headers: { accept: "application/json" } })
+  if (response.status === 401) return null
+  const body = (await response.json().catch(() => null)) as { data?: Me } | null
+  if (!response.ok || !body || body.data === undefined)
+    throw new ApiError(response.status, "unavailable", "Paperboat is temporarily unavailable.")
+  return checked(undefined, "me", body.data)
+}
+
+export const optionalMeQuery = queryOptions({
+  queryKey: [...queryKeys.me, "optional"] as const,
+  queryFn: ({ signal }) => optionalMe(signal),
+  staleTime: 5 * minute,
+  retry: false,
+})
+
 /** The server's published URLs and domains (the discovery response every client reads). */
 export type ClientConfiguration = Data<"/v1/client-configuration">
 

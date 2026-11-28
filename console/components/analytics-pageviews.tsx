@@ -2,12 +2,12 @@
 
 import { useParams, usePathname } from "next/navigation"
 import { useEffect } from "react"
-import { meQuery, useApiQuery } from "@/lib/api"
+import { optionalMeQuery, useApiQuery } from "@/lib/api"
 import { pageleave, pageview, routePath } from "@/lib/analytics"
 
-/** Sends the console's `$pageview` for each page (route template, no ids) and `$pageleave` when it is left. Renders nothing. */
+/** Signed-out visitors (guests on /terminal/{id}) send nothing and are not sent to sign-in. Sends the console's `$pageview` for each page (route template, no ids) and `$pageleave` when it is left. Renders nothing. */
 export function AnalyticsPageviews() {
-  const account = useApiQuery(meQuery).data?.id
+  const account = useApiQuery(optionalMeQuery).data?.id
   const pathname = usePathname()
   const params = useParams()
   const route = routePath(pathname, params)
