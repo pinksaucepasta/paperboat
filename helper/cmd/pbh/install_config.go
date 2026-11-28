@@ -110,6 +110,29 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode, region stri
 	return c, nil
 }
 
+// browserAccessNotice names what an edge with browser access still needs: browsers sign in only on preview and
+// tunnel hostnames, so without those base domains browser access has nothing to apply to.
+func browserAccessNotice(c selfhost.Config) string {
+	if !c.BrowserAccess {
+		return ""
+	}
+	edge := false
+	for _, component := range c.Components {
+		edge = edge || component.Capability == "tunnel"
+	}
+	var missing []string
+	if c.PreviewDomain == "" {
+		missing = append(missing, "--preview-domain")
+	}
+	if c.TunnelDomain == "" {
+		missing = append(missing, "--tunnel-domain")
+	}
+	if !edge || len(missing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Browser access is on, but this edge has no %s: browsers cannot sign in to private previews or tunnels until it does. Reinstall with %s set (or --browser-access=false to turn browser access off).", strings.Join(missing, " or "), strings.Join(missing, " and "))
+}
+
 // regionName is the rule the server enforces at enrol (selfhost.validRegion).
 var regionName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 

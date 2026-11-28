@@ -203,7 +203,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs.String("preview-domain", "", "preview base domain")
 	fs.String("tunnel-domain", "", "durable tunnel base domain")
 	fs.String("runtime-domain", "", "runtime base domain")
-	fs.Bool("browser-access", false, "let browsers sign in to private previews and tunnels through the console")
+	fs.Bool("browser-access", true, "let browsers sign in to private previews and tunnels through the console (on by default for a new install; turn off with --browser-access=false; an existing install keeps its setting)")
 	fs.String("control-ca", "", "CA certificate file for a private control plane (default: public roots)")
 	dir := fs.String("state-dir", defaultState, "protected installation directory")
 	noService := fs.Bool("no-service", false, "initialize without systemd (isolated testing)")
@@ -279,6 +279,9 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		}
 		if err := checkClaimListen(c.Listen); err != nil {
 			return err
+		}
+		if notice := browserAccessNotice(c); notice != "" {
+			fmt.Fprintln(out, notice)
 		}
 		if c, err = stageInstallFiles(*dir, fs, c); err != nil {
 			return err

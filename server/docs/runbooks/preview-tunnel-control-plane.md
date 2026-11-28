@@ -421,8 +421,11 @@ host-only `__Host-` cookies (Secure, Path=/, no Domain), and the edge refuses
 cookie-carrying requests that a sibling preview/tunnel host or another site
 started other than as a top-level document navigation (Sec-Fetch-Site). Listing
 the base domain on the PSL later adds browser-level isolation and needs no code
-change. These APIs do not provision DNS/TLS. Enable it on an installation with
-`pbh install --browser-access`. The console the browser signs in at is the
+change. These APIs do not provision DNS/TLS. A new `pbh install` turns browser
+access on by default; turn it off with `pbh install --browser-access=false`. An
+existing installation keeps its recorded setting on upgrade; reinstall to change
+it. Browser access needs the edge's `--preview-domain` and `--tunnel-domain`;
+`pbh install` names whichever is missing. The console the browser signs in at is the
 server's `PAPERBOAT_BROWSER_LOGIN_ORIGIN` (first origin): the server returns it
 on every begin and accepts a handoff only from it, so an edge has no console
 address of its own to get wrong.
