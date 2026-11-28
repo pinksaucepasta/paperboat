@@ -336,6 +336,8 @@ func (l SDKLimits) valid() bool {
 
 // PublicTCPLimit is the concurrent public raw-TCP tunnel limit: Free and Pro per personal workspace, a team
 // gets TeamPerSeat for every paid seat, pooled. A workspace on its own (self-hosted) edge is not limited.
+// Free is 0 by default (user decision 2026-11-28): public TCP tunnels need Pro; Free uses private access through pb.
+// Only new ones are refused: a Free workspace's public TCP tunnels made before keep serving until stopped.
 type PublicTCPLimit struct {
 	Free        int `json:"free"`
 	Pro         int `json:"pro"`
@@ -668,7 +670,7 @@ func Default() Config {
 		},
 		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, PeerNetworkConfigMaxInflight: 64, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, BrowserBeginPerMinute: 60, BrowserBeginBurst: 20, BrowserBeginGlobalPerMinute: 3000, BrowserBeginGlobalBurst: 500, BrowserBeginMaxLive: 20000, TunnelAddressPerMinute: 6, TunnelAddressBurst: 10, SelfhostPortProbePerMinute: 6, SelfhostPortProbeBurst: 12, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, TeamPerSeatBytes: 100_000_000_000, RelayMbitFree: 10, RelayMbitPaid: 100, TerminalMbit: 10}, TopupMaxQuantity: 100, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
+		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, TeamPerSeatBytes: 100_000_000_000, RelayMbitFree: 10, RelayMbitPaid: 100, TerminalMbit: 10}, TopupMaxQuantity: 100, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 0, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
@@ -872,7 +874,7 @@ func (c Config) Validate() error {
 	if !c.Billing.FairUse.valid() {
 		errs = append(errs, fmt.Errorf("billing fair-use speeds are invalid"))
 	}
-	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 || l.SelfHostedCeiling < l.Publications.TeamCeiling || l.PublicTCP.Free < 1 || l.PublicTCP.Pro < l.PublicTCP.Free || l.PublicTCP.TeamPerSeat < 1 {
+	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 || l.SelfHostedCeiling < l.Publications.TeamCeiling || l.PublicTCP.Free < 0 || l.PublicTCP.Pro < 1 || l.PublicTCP.Pro < l.PublicTCP.Free || l.PublicTCP.TeamPerSeat < 1 {
 		errs = append(errs, fmt.Errorf("billing.limits: each plan limit needs free > 0, pro >= free and team_ceiling >= pro, and viewers_per_shared_terminal > 0"))
 	}
 	if c.UserMachines.ExpiredAccessSessionRetention < time.Hour {

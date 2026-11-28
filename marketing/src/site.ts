@@ -102,7 +102,7 @@ export const addons = { sso: 100, scim: 100, both: 150, yearlyMonths: 10 }
 export const addonPrices = `SSO $${addons.sso}/mo, SCIM $${addons.scim}/mo, both $${addons.both}/mo`
 
 /** Public raw-TCP tunnel addresses per plan (server config billing.limits.public_tcp). */
-export const publicTcp = ["1", "10", "10 per seat"] as const
+export const publicTcp = ["0", "10", "10 per seat"] as const
 
 
 /** The mark: a paper boat on a 10 × 6 cell grid, 60 units per cell (brand guidelines 02). */

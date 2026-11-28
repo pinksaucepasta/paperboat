@@ -25,6 +25,9 @@ func writePlanLimitReached(w http.ResponseWriter, r *http.Request, err error) bo
 	return true
 }
 
+// PublicTCPNeedsPro answers a public TCP tunnel on a plan that includes none (Free).
+const PublicTCPNeedsPro = "Public TCP tunnels need Pro; use private access through pb (a tcp_private route opened with `pb access tunnel`), upgrade your plan, or run your own tunnel edge (self-hosted tunnels are not limited)."
+
 func planLimitMessage(l *planlimits.LimitError) string {
 	switch l.Kind {
 	case planlimits.Machines:
@@ -32,6 +35,9 @@ func planLimitMessage(l *planlimits.LimitError) string {
 	case planlimits.Publications:
 		return fmt.Sprintf("This workspace has reached its plan's limit of %d active previews and tunnels. Stop one you no longer need, or upgrade your plan.", l.Limit)
 	case planlimits.PublicTCP:
+		if l.Limit == 0 {
+			return PublicTCPNeedsPro
+		}
 		return fmt.Sprintf("This workspace has reached its plan's limit of %d public TCP tunnels. Stop one you no longer need, upgrade your plan, or run your own tunnel edge (self-hosted tunnels are not limited).", l.Limit)
 	default:
 		return fmt.Sprintf("This workspace has reached its plan's limit of %d open browser terminals. Close one, or upgrade your plan.", l.Limit)
