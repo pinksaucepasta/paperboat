@@ -13,6 +13,15 @@ import (
 // On Linux and macOS a fresh pb install could not tell "no server anywhere" and went on to the install lock
 // and a sudo prompt; a computer with no saved configuration and no installed service has a definite none.
 func TestInheritedInstallServerOnAFreshComputer(t *testing.T) {
+	// The installed-service check refuses a group- or world-writable executable, and this test binary is the
+	// executable: under umask 002 (the pool runners) it was rwxrwxr-x and the answer became "cannot tell".
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(executable, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
