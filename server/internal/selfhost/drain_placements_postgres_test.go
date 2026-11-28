@@ -117,6 +117,65 @@ func TestOwnerDrainMoveRepinsPublicationsToASibling(t *testing.T) {
 	}
 }
 
+// F1 follow-up: drain-and-move keeps the old node's route until the sibling is observed serving it or the drain
+// deadline passes, whichever comes first, while DNS and publication edges already point at the sibling only.
+func TestOwnerDrainMoveKeepsTheOldRouteUntilTheSiblingServes(t *testing.T) {
+	f := newPinFixture(t, true)
+	route := "pin_route_" + f.stamp
+	eligible := func(node string) (ok bool) {
+		t.Helper()
+		if err := f.store.Pool().QueryRow(t.Context(), `SELECT paperboat.node_route_eligible($1,$2,$3)`, node, f.owner, route).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if !eligible(f.first.NodeID) {
+		t.Fatal("pinned node not eligible before the drain")
+	}
+	if _, err := f.service.DrainScoped(t.Context(), f.owner, f.first.InstallationID, false, true); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.exec(`DELETE FROM paperboat.selfhost_placement_handoffs WHERE resource_id=$1`, f.tunnel) })
+	if got := f.edgeNodes(); !slices.Equal(got, []string{f.sibling.NodeID}) {
+		t.Fatalf("publication edges after the move: %v (DNS must not keep the draining node)", got)
+	}
+	if got := f.expectedValues(); !slices.Equal(got, []string{"93.184.216.42"}) {
+		t.Fatalf("domain records after the move: %v", got)
+	}
+	if !eligible(f.first.NodeID) {
+		t.Fatal("drain-move cut the old node's route before the sibling served it")
+	}
+	if !eligible(f.sibling.NodeID) {
+		t.Fatal("sibling not eligible after the move")
+	}
+	// The sibling observed serving the tunnel ends the handoff.
+	endpoint, endpointRoute := f.tunnel, route
+	f.exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,(SELECT created_by_host_id FROM paperboat.tunnels WHERE id=$1),'public','persistent',$1)`, endpoint, f.owner)
+	f.exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,'handoff.example.test','http',$1)`, endpointRoute, endpoint)
+	t.Cleanup(func() { f.exec(`DELETE FROM paperboat.endpoints WHERE id=$1`, endpoint) })
+	// Another route of the same tunnel served on the sibling does not end this route's handoff.
+	other := "pin_route_other_" + f.stamp
+	f.exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','other.example.test','http','127.0.0.1:3001','actor','actor')`, other, f.tunnel)
+	f.exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,'other-handoff.example.test','http',$1)`, other, endpoint)
+	f.exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,'epoch_handoff','session_handoff_other',true,now())`, other, endpoint, f.sibling.NodeID)
+	if !eligible(f.first.NodeID) {
+		t.Fatal("another route served on the sibling ended this route's handoff")
+	}
+	f.exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,'epoch_handoff','session_handoff',true,now())`, endpointRoute, endpoint, f.sibling.NodeID)
+	if eligible(f.first.NodeID) {
+		t.Fatal("old node kept the route after the sibling served it")
+	}
+	f.exec(`DELETE FROM paperboat.endpoint_edge_assignments WHERE route_id=$1 AND edge_node_id=$2`, endpointRoute, f.sibling.NodeID)
+	if !eligible(f.first.NodeID) {
+		t.Fatal("handoff lost while the sibling was not serving yet")
+	}
+	// The drain deadline passing ends it too.
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET drain_deadline=now()-interval '1 second' WHERE id=$1`, f.first.NodeID)
+	if eligible(f.first.NodeID) {
+		t.Fatal("old node kept the route after the drain deadline")
+	}
+}
+
 func TestOwnerPlainDrainKeepsPins(t *testing.T) {
 	f := newPinFixture(t, true)
 	before := f.expectedValues()

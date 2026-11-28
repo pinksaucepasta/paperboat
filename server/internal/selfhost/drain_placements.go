@@ -63,8 +63,21 @@ func repinPlacementsOffNode(ctx context.Context, tx *db.Tx, node string) error {
 		if err != nil {
 			return err
 		}
-		if _, err = setPlacementTx(ctx, tx, p.owner, p.kind, table, p.id, &sibling); err != nil && !errors.Is(err, ErrPlacementDomainRequired) {
+		if _, err = setPlacementTx(ctx, tx, p.owner, p.kind, table, p.id, &sibling); err != nil {
+			if errors.Is(err, ErrPlacementDomainRequired) {
+				continue
+			}
 			return fmt.Errorf("move %s %s to a sibling server: %w", p.kind, p.id, err)
+		}
+		// The drained node keeps serving this publication until the sibling serves it or the drain deadline passes
+		// (selfhost_placement_handoffs, migration 532); DNS already points at the sibling.
+		if _, err = tx.Exec(ctx, `DELETE FROM paperboat.selfhost_placement_handoffs WHERE resource_kind=$1 AND resource_id=$2 AND until<=now()`, p.kind, p.id); err != nil {
+			return fmt.Errorf("drop expired handoffs of %s %s: %w", p.kind, p.id, err)
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO paperboat.selfhost_placement_handoffs(resource_kind,resource_id,from_node_id,until)
+ SELECT $1,$2,id,drain_deadline FROM paperboat.control_tunnel_nodes WHERE id=$3 AND drain_deadline IS NOT NULL
+ ON CONFLICT(resource_kind,resource_id,from_node_id) DO UPDATE SET until=excluded.until`, p.kind, p.id, node); err != nil {
+			return fmt.Errorf("record the handoff of %s %s: %w", p.kind, p.id, err)
 		}
 	}
 	return nil
