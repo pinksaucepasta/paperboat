@@ -291,6 +291,8 @@ func TestPeerPinMismatchAndUnknownNodeRefused(t *testing.T) {
 	b.src.setPeers()
 	a.start()
 	b.start()
+	// The mesh loads its directory and holder seed after start returns; until then a visitor gets the unknown-name 404.
+	eventually(t, "a to list b as the holder", func() bool { return holdersOf(a, appName) == "edge-b" })
 	status, _, _, err := visit(t, a, appName, c.page.pool)
 	if err != nil || status != 503 {
 		t.Fatalf("visit with a mismatched pin: %d %v", status, err)
@@ -302,6 +304,7 @@ func TestPeerPinMismatchAndUnknownNodeRefused(t *testing.T) {
 
 	// With the right pin but b not knowing a: b's server side refuses a's certificate.
 	a.src.setPeers(b.peer())
+	eventually(t, "a to apply b's own pin", func() bool { return a.mesh.PeerPin("edge-b") == b.pin && holdersOf(a, appName) == "edge-b" })
 	if status, _, _, err = visit(t, a, appName, c.page.pool); err != nil || status != 503 {
 		t.Fatalf("visit to a node that does not know us: %d %v", status, err)
 	}
@@ -396,9 +399,12 @@ func TestForwardIdleLinkReconnects(t *testing.T) {
 		t.Fatalf("first visit: %d %v", status, err)
 	}
 	// The link a dials to b dies (a middlebox timed it out): both sides withdraw, then a redials.
+	dead := b.mesh.LiveLink("edge-a")
 	a.dropLinks()
+	// Until b notices the cut it still counts the dead link and lists a's names, so wait for the replacement itself.
 	eventually(t, "the link to come back and b to relearn a's names", func() bool {
-		return b.mesh.Stats().Links == 1 && holdersOf(b, appName) == "edge-a"
+		link := b.mesh.LiveLink("edge-a")
+		return link != nil && link != dead && holdersOf(b, appName) == "edge-a"
 	})
 	if status, _, _, err := visit(t, b, appName, c.holder.pool); err != nil || status != 200 {
 		t.Fatalf("visit after the link came back: %d %v", status, err)
