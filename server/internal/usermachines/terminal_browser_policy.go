@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
-	"net/mail"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -16,10 +14,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
-	"golang.org/x/net/idna"
+	"github.com/pinksaucepasta/paperboat/shared/viewerallow"
 )
-
-const terminalBrowserAccessEmailLimit = 100
 
 var (
 	ErrTerminalBrowserPolicyInvalid                   = errors.New("terminal browser access policy is invalid")
@@ -236,18 +232,18 @@ WHERE s.id=$1 AND s.deleted_at IS NULL`, sessionID, accountID).Scan(
 	if actorIsOwner {
 		decision.Role = TerminalBrowserRoleOwner
 	} else {
-		verifiedEmail, emailErr := normalizeVerifiedWorkOSEmail(actorEmail)
+		verifiedEmail, emailOK := viewerallow.Terminal.Email(actorEmail)
 		if audience == "team" && member && ownerMember && teamPaid && decision.TeamID != "" && decision.TeamGeneration > 0 {
 			decision.Role = TerminalBrowserRoleViewer
-		} else if actorVerified && emailErr == nil {
+		} else if actorVerified && emailOK {
 			switch audience {
 			case "specific_emails":
-				if terminalBrowserEmailAllowed(allowed, verifiedEmail) {
+				if viewerallow.Terminal.Allows(allowed, verifiedEmail) {
 					decision.Role = TerminalBrowserRoleViewer
 				}
 			}
 		}
-		if decision.Role == TerminalBrowserRoleViewer && actorVerified && emailErr == nil && slices.Contains(interactive, verifiedEmail) {
+		if decision.Role == TerminalBrowserRoleViewer && actorVerified && emailOK && slices.Contains(interactive, verifiedEmail) {
 			decision.Role = TerminalBrowserRoleInteractive
 		}
 		if decision.Role == "" {
@@ -362,15 +358,10 @@ func normalizeTerminalBrowserPolicy(sessionID string, in TerminalBrowserAccessPo
 	out := TerminalBrowserAccessPolicy{TerminalSessionID: sessionID, Audience: strings.TrimSpace(in.Audience),
 		TeamID: strings.TrimSpace(in.TeamID)}
 	var err error
-	out.AllowedEmails, err = normalizeTerminalBrowserEmailPatterns(in.AllowedEmails)
-	if err != nil {
-		return TerminalBrowserAccessPolicy{}, err
+	if out.AllowedEmails, err = viewerallow.Terminal.Canonical(in.AllowedEmails); err != nil {
+		return TerminalBrowserAccessPolicy{}, ErrTerminalBrowserPolicyInvalid
 	}
-	out.InteractiveEmails, err = normalizeTerminalBrowserEmails(in.InteractiveEmails)
-	if err != nil {
-		return TerminalBrowserAccessPolicy{}, err
-	}
-	if len(out.AllowedEmails) > terminalBrowserAccessEmailLimit || len(out.InteractiveEmails) > terminalBrowserAccessEmailLimit {
+	if out.InteractiveEmails, err = viewerallow.Terminal.Emails(in.InteractiveEmails); err != nil {
 		return TerminalBrowserAccessPolicy{}, ErrTerminalBrowserPolicyInvalid
 	}
 
@@ -388,7 +379,7 @@ func normalizeTerminalBrowserPolicy(sessionID string, in TerminalBrowserAccessPo
 			return TerminalBrowserAccessPolicy{}, ErrTerminalBrowserPolicyInvalid
 		}
 		for _, email := range out.InteractiveEmails {
-			if !terminalBrowserEmailAllowed(out.AllowedEmails, email) {
+			if !viewerallow.Terminal.Allows(out.AllowedEmails, email) {
 				return TerminalBrowserAccessPolicy{}, ErrTerminalBrowserPolicyInvalid
 			}
 		}
@@ -396,79 +387,6 @@ func normalizeTerminalBrowserPolicy(sessionID string, in TerminalBrowserAccessPo
 		return TerminalBrowserAccessPolicy{}, ErrTerminalBrowserPolicyInvalid
 	}
 	return out, nil
-}
-
-func normalizeTerminalBrowserEmails(values []string) ([]string, error) {
-	if len(values) > terminalBrowserAccessEmailLimit {
-		return nil, ErrTerminalBrowserPolicyInvalid
-	}
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		email, err := normalizeVerifiedWorkOSEmail(value)
-		if err != nil {
-			return nil, ErrTerminalBrowserPolicyInvalid
-		}
-		if _, exists := seen[email]; exists {
-			return nil, ErrTerminalBrowserPolicyInvalid
-		}
-		seen[email] = struct{}{}
-		out = append(out, email)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-func normalizeVerifiedWorkOSEmail(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if len(value) < 3 || len(value) > 254 || strings.ContainsAny(value, "*?\r\n\x00") {
-		return "", ErrTerminalBrowserPolicyInvalid
-	}
-	parsed, err := mail.ParseAddress(value)
-	if err != nil || parsed.Address != value || strings.Count(value, "@") != 1 {
-		return "", ErrTerminalBrowserPolicyInvalid
-	}
-	local, domain, found := strings.Cut(value, "@")
-	if !found || local == "" || domain == "" || strings.ContainsAny(domain, "* /\\") {
-		return "", ErrTerminalBrowserPolicyInvalid
-	}
-	asciiDomain, err := normalizeTerminalBrowserDomain(domain)
-	if err != nil {
-		return "", ErrTerminalBrowserPolicyInvalid
-	}
-	return local + "@" + asciiDomain, nil
-}
-
-func normalizeTerminalBrowserDomain(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" || strings.HasPrefix(value, "@") || strings.ContainsAny(value, "*@ /\\\r\n\x00") || strings.HasSuffix(value, ".") {
-		return "", ErrTerminalBrowserPolicyInvalid
-	}
-	ascii, err := idna.Lookup.ToASCII(value)
-	if err != nil {
-		return "", ErrTerminalBrowserPolicyInvalid
-	}
-	ascii = strings.ToLower(ascii)
-	if ascii == "" || len(ascii) > 253 || !strings.Contains(ascii, ".") {
-		return "", ErrTerminalBrowserPolicyInvalid
-	}
-	labels := strings.Split(ascii, ".")
-	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return "", ErrTerminalBrowserPolicyInvalid
-		}
-		for _, char := range label {
-			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
-				return "", ErrTerminalBrowserPolicyInvalid
-			}
-		}
-	}
-	return ascii, nil
-}
-
-func verifiedEmailHasExactDomain(email, domain string) bool {
-	local, candidate, found := strings.Cut(email, "@")
-	return found && local != "" && candidate == domain
 }
 
 func terminalBrowserPoliciesEqual(a, b TerminalBrowserAccessPolicy) bool {
@@ -485,41 +403,6 @@ func sameTerminalBrowserDecision(want, got TerminalBrowserDecision) bool {
 		want.MembershipGeneration == got.MembershipGeneration && want.BindingGeneration == got.BindingGeneration
 }
 
-// A wildcard is only the entire local part. Domain matching is exact.
-func normalizeTerminalBrowserEmailPatterns(values []string) ([]string, error) {
-	if len(values) > terminalBrowserAccessEmailLimit {
-		return nil, ErrTerminalBrowserPolicyInvalid
-	}
-	out := make([]string, 0, len(values))
-	seen := make(map[string]bool, len(values))
-	for _, value := range values {
-		value = strings.ToLower(strings.TrimSpace(value))
-		var normalized string
-		var err error
-		if strings.HasPrefix(value, "*@") {
-			var domain string
-			domain, err = normalizeTerminalBrowserDomain(strings.TrimPrefix(value, "*@"))
-			normalized = "*@" + domain
-		} else {
-			normalized, err = normalizeVerifiedWorkOSEmail(value)
-		}
-		if err != nil || seen[normalized] {
-			return nil, ErrTerminalBrowserPolicyInvalid
-		}
-		seen[normalized] = true
-		out = append(out, normalized)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-func terminalBrowserEmailAllowed(patterns []string, email string) bool {
-	for _, pattern := range patterns {
-		if pattern == email || strings.HasPrefix(pattern, "*@") && verifiedEmailHasExactDomain(email, strings.TrimPrefix(pattern, "*@")) {
-			return true
-		}
-	}
-	return false
-}
 func (s *Service) resolveTerminalBrowserDecision(ctx context.Context, want TerminalBrowserDecision) (TerminalBrowserDecision, error) {
 	if want.GuestSessionID != "" {
 		return s.ResolveTerminalGuestRole(ctx, want.GuestSessionID, want.SessionID)

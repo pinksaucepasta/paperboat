@@ -12,7 +12,6 @@ import {
   type ViewerTarget,
 } from "@/lib/tunnels"
 import {
-  addViewers,
   isLimitedPublicRoute,
   savedViewers,
   viewerListProblem,
@@ -22,7 +21,7 @@ import {
 import { ErrorMessage } from "@/components/error-reference"
 import { LoadError } from "@/components/load-error"
 import { Section } from "@/components/section"
-import { ChipField } from "@/components/tunnels/ip-rules"
+import { AccessList } from "@/components/access-list"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -169,11 +168,10 @@ function ViewerForm({
         {teamAudience && (
           <p className="text-sm text-muted-foreground">A team can open this now. Saving replaces it with this list.</p>
         )}
-        <ChipField
-          label="Email addresses and domains"
-          field={`viewers-${target.routeId}`}
-          stateKey={`${key}:typed`}
-          placeholder="name@example.com or *@example.com"
+        <AccessList
+          entries={draft}
+          disabled={save.isPending}
+          onChange={setDraft}
           hint={
             open
               ? "Anyone with the address can open it now. Add people to limit it to you and them."
@@ -181,8 +179,6 @@ function ViewerForm({
                 ? "They sign in with a verified email, and also need the team’s access. You can always open it."
                 : "They sign in with a verified email. Leave empty so only you can open it."
           }
-          values={draft}
-          onChange={(values) => setDraft(addViewers([], values))}
         />
         {problem && <FieldError>{problem}</FieldError>}
         {save.isError && (
