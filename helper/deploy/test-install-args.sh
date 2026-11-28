@@ -55,4 +55,16 @@ until(b"Choose 1-3 [3]: "); os.write(fd, b"2\n")
 until(b"Install an edge on this host? [Y/n] "); os.write(fd, b"y\n")
 until(b"STUB curl")
 PY
+# Elevation (only as a normal user): a passwordless sudo is never asked to validate (-v would prompt);
+# a sudo that needs a password still prompts once with -v.
+if [ "$(id -u)" -ne 0 ]; then
+  printf '#!/bin/sh\necho "sudo $*" >> "$sudo_log"\n[ "$*" = "-n true" ] && exit "${sudo_n_rc:-0}"\n[ "$1" = -v ] && exit "${sudo_v_rc:-0}"\nexit 0\n' > "$tmp/bin/sudo"
+  export sudo_log=$tmp/sudo.log
+  : > "$sudo_log"; out=$(sudo_v_rc=1 run --relay || true)
+  grep -q 'STUB curl' <<< "$out" || fail "passwordless sudo stopped early: $out"
+  ! grep -qx 'sudo -v' "$sudo_log" || fail "passwordless sudo was asked to validate: $(cat "$sudo_log")"
+  : > "$sudo_log"; out=$(sudo_n_rc=1 run --relay || true)
+  grep -qx 'sudo -v' "$sudo_log" || fail "password sudo did not prompt: $(cat "$sudo_log")"
+  grep -q 'STUB curl' <<< "$out" || fail "password sudo stopped early: $out"
+fi
 echo "ok"
