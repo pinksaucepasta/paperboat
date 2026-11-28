@@ -84,16 +84,18 @@ type Authorization struct {
 	BrowserInspector    bool
 	BrowserRecording    bool // a browser E2E connection replaying one recording (ResourceID)
 	BrowserAttachmentID string
-	PolicyGeneration    uint64
-	ResourceID          string
-	OperationID         string
-	RequestID           string
-	RequestHash         string
-	IdempotencyKey      string
-	ExpiresAt           time.Time
-	Revoked             *atomic.Bool
-	RevokedSignal       <-chan struct{}
-	Value               any
+	// BrowserCarrier is the runtime carrier a browser connection arrived on: its shared output goes out there.
+	BrowserCarrier   string
+	PolicyGeneration uint64
+	ResourceID       string
+	OperationID      string
+	RequestID        string
+	RequestHash      string
+	IdempotencyKey   string
+	ExpiresAt        time.Time
+	Revoked          *atomic.Bool
+	RevokedSignal    <-chan struct{}
+	Value            any
 	// Resume is set on a connection admitted to move an attachment without a credential.
 	Resume *TerminalResume
 }

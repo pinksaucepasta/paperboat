@@ -35,16 +35,18 @@ type PolicyResolver interface {
 }
 
 type CredentialAuthorizer struct {
-	Verifier      CredentialVerifier
-	Resolver      PolicyResolver
-	Token         string
-	Revocations   CredentialRevocationWatcher
-	mu            sync.Mutex
-	verified      *auth.Claims
-	jti           string
-	revoked       *atomic.Bool
-	revokedSignal <-chan struct{}
-	release       func()
+	Verifier    CredentialVerifier
+	Resolver    PolicyResolver
+	Token       string
+	Revocations CredentialRevocationWatcher
+	// browserCarrier is set once by BindBrowserCarrier before the connection is served.
+	browserCarrier string
+	mu             sync.Mutex
+	verified       *auth.Claims
+	jti            string
+	revoked        *atomic.Bool
+	revokedSignal  <-chan struct{}
+	release        func()
 }
 
 func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Frame) (Authorization, error) {
@@ -142,6 +144,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		BrowserInspector:    browserInspector,
 		BrowserRecording:    browserRecording,
 		BrowserAttachmentID: claims.BrowserAttachmentID,
+		BrowserCarrier:      a.browserCarrier,
 		PolicyGeneration:    uint64(claims.PolicyGeneration),
 		ResourceID:          resourceID,
 		OperationID:         claims.OperationID,
@@ -179,6 +182,9 @@ const (
 	BrowserChannelInspector = "inspector"
 	BrowserChannelRecording = recording.TicketRole
 )
+
+// BindBrowserCarrier records the runtime carrier the browser connection arrived on.
+func (a *CredentialAuthorizer) BindBrowserCarrier(carrier string) { a.browserCarrier = carrier }
 
 // BrowserTerminalPublicKeySHA256 verifies the browser terminal, inspector or recording replay
 // credential before TLS starts and returns its browser client certificate pin and its channel

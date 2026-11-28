@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcastserver"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
@@ -152,6 +153,9 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	if err != nil || authorizer == nil {
 		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
+	}
+	if bound, ok := authorizer.(interface{ BindBrowserCarrier(string) }); ok {
+		bound.BindBrowserCarrier(request.Header.Get(browserbroadcastserver.CarrierHeader))
 	}
 	keyAuthorizer, ok := authorizer.(BrowserTerminalCredentialKey)
 	if !ok {

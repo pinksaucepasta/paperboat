@@ -27,15 +27,29 @@ var ErrUnavailable = errors.New("browser terminal broadcast unavailable")
 // it ends, so never pass a request- or deadline-scoped context.
 type OpenPublisher func(context.Context, string) (io.WriteCloser, error)
 
+// CarrierHeader names, on a request the machine's runtime carrier forwards to its own listener, the carrier it
+// arrived on. The carrier's forwarder sets it, replacing anything the client sent.
+const CarrierHeader = "X-Paperboat-Runtime-Carrier"
+
+// maxSubscribers bounds one session's browser attachments over all carriers.
+const maxSubscribers = 100
+
+// A machine holds a carrier on each edge of its pair, and a browser may attach through any of them. An edge only
+// forwards the records its own carrier receives, so output is published per carrier: on the one each browser came
+// through. Publishing on one chosen carrier left every browser on another edge attached but silent.
 type Registry struct {
 	manager    session.Service
 	signingKey func(context.Context) (ed25519.PrivateKey, error)
 	mu         sync.Mutex
-	open       OpenPublisher
-	sessions   map[string]*publication
+	// carriers opens a carrier's output stream; the empty name is SetPublisher's single carrier.
+	carriers map[string]OpenPublisher
+	sessions map[publicationKey]*publication
 }
 
+type publicationKey struct{ sessionID, carrier string }
+
 type publication struct {
+	carrier       string
 	sessionID     string
 	generation    uint64
 	attachmentID  string
@@ -60,17 +74,41 @@ func NewRegistry(manager session.Service, signingKey func(context.Context) (ed25
 	if manager == nil || signingKey == nil {
 		return nil, ErrUnavailable
 	}
-	return &Registry{manager: manager, signingKey: signingKey, sessions: make(map[string]*publication)}, nil
+	return &Registry{manager: manager, signingKey: signingKey, carriers: make(map[string]OpenPublisher), sessions: make(map[publicationKey]*publication)}, nil
 }
 
-// SetPublisher replaces the output stream opener when the runtime carrier
-// changes. Existing publications close, which makes browsers reconnect and
-// obtain a fresh screen checkpoint and epoch from the new carrier.
+// SetPublisher replaces every carrier with one unnamed output stream opener, or with none. Existing publications
+// close, which makes browsers reconnect and obtain a fresh screen checkpoint and epoch.
 func (r *Registry) SetPublisher(open OpenPublisher) {
 	r.mu.Lock()
-	r.open = open
+	r.carriers = make(map[string]OpenPublisher)
+	if open != nil {
+		r.carriers[""] = open
+	}
 	old := r.sessions
-	r.sessions = make(map[string]*publication)
+	r.sessions = make(map[publicationKey]*publication)
+	r.mu.Unlock()
+	for _, p := range old {
+		r.stop(p)
+	}
+}
+
+// SetCarrier adds one runtime carrier's output stream opener, or removes the carrier when open is nil. Only that
+// carrier's publications close (their browsers reconnect); browsers on other carriers keep their output.
+func (r *Registry) SetCarrier(carrier string, open OpenPublisher) {
+	r.mu.Lock()
+	if open == nil {
+		delete(r.carriers, carrier)
+	} else {
+		r.carriers[carrier] = open
+	}
+	var old []*publication
+	for key, p := range r.sessions {
+		if key.carrier == carrier {
+			old = append(old, p)
+			delete(r.sessions, key)
+		}
+	}
 	r.mu.Unlock()
 	for _, p := range old {
 		r.stop(p)
@@ -78,8 +116,8 @@ func (r *Registry) SetPublisher(open OpenPublisher) {
 }
 
 // Join returns an initial key update and later rotations for one authenticated
-// browser attachment. The caller must close the stream with Leave.
-func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64, attachmentID string) (<-chan Epoch, error) {
+// browser attachment, which arrived on the named carrier. The caller must close the stream with Leave.
+func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64, attachmentID, carrier string) (<-chan Epoch, error) {
 	if r == nil || ctx == nil || sessionID == "" || generation == 0 || attachmentID == "" {
 		return nil, ErrUnavailable
 	}
@@ -88,13 +126,31 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.open == nil {
+	open := r.carriers[carrier]
+	if open == nil {
 		return nil, ErrUnavailable
 	}
-	if p := r.sessions[sessionID]; p != nil {
+	joined := 0
+	for key, p := range r.sessions {
+		if key.sessionID != sessionID {
+			continue
+		}
+		p.mu.Lock()
+		joined += len(p.subscribers)
+		taken := p.subscribers[attachmentID] != nil
+		p.mu.Unlock()
+		if taken {
+			return nil, ErrUnavailable
+		}
+	}
+	if joined >= maxSubscribers {
+		return nil, ErrUnavailable
+	}
+	key := publicationKey{sessionID, carrier}
+	if p := r.sessions[key]; p != nil {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		if p.generation != generation || len(p.subscribers) >= 100 || p.subscribers[attachmentID] != nil {
+		if p.generation != generation {
 			return nil, ErrUnavailable
 		}
 		updates := make(chan Epoch, 1)
@@ -107,14 +163,14 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	}
 	var workerKey ed25519.PrivateKey
 	defer func() { clearPrivateKey(workerKey) }()
-	key, err := r.signingKey(ctx)
+	signing, err := r.signingKey(ctx)
 	if err != nil {
 		return nil, classifiedFailure(err, streamOpenStage, sessionCode)
 	}
-	if len(key) != ed25519.PrivateKeySize {
+	if len(signing) != ed25519.PrivateKeySize {
 		return nil, ErrUnavailable
 	}
-	workerKey = append(ed25519.PrivateKey(nil), key...)
+	workerKey = append(ed25519.PrivateKey(nil), signing...)
 	epoch, err := browserbroadcast.NewEpoch()
 	if err != nil {
 		return nil, classifiedFailure(err, streamOpenStage, sessionCode)
@@ -126,7 +182,7 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	runCtx, cancel := context.WithCancel(diagnosticCtx)
 	// The stream lives as long as the publication, not the joining browser's request: the carrier resets a
 	// stream whose open context ends, which dropped every browser 10 s after the first one attached.
-	publisher, err := r.open(runCtx, sessionID)
+	publisher, err := open(runCtx, sessionID)
 	if err != nil {
 		cancel()
 		return nil, classifiedFailure(err, streamOpenStage, transportCode)
@@ -138,8 +194,8 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	}
 	updates := make(chan Epoch, 1)
 	updates <- epoch
-	p := &publication{sessionID: sessionID, generation: generation, attachmentID: producerAttachment, epoch: epoch, subscribers: map[string]chan Epoch{attachmentID: updates}, stream: publisher, cancel: cancel, diagnosticCtx: diagnosticCtx}
-	r.sessions[sessionID] = p
+	p := &publication{carrier: carrier, sessionID: sessionID, generation: generation, attachmentID: producerAttachment, epoch: epoch, subscribers: map[string]chan Epoch{attachmentID: updates}, stream: publisher, cancel: cancel, diagnosticCtx: diagnosticCtx}
+	r.sessions[key] = p
 	go r.publish(runCtx, p, workerKey)
 	workerKey = nil
 	return updates, nil
@@ -158,14 +214,30 @@ func (r *Registry) Attached() int {
 	return count
 }
 
-// Lags reports how often the session's shared output dropped a backlog (see publication.lags).
-func (r *Registry) Lags(sessionID string) uint64 {
+// Lags reports how often the shared output on the attachment's carrier dropped a backlog (see publication.lags).
+func (r *Registry) Lags(sessionID, attachmentID string) uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if p := r.sessions[sessionID]; p != nil {
+	if p, _ := r.holderLocked(sessionID, attachmentID); p != nil {
 		return p.lags.Load()
 	}
 	return 0
+}
+
+// holderLocked finds the session's publication that feeds the attachment. The caller holds r.mu.
+func (r *Registry) holderLocked(sessionID, attachmentID string) (*publication, publicationKey) {
+	for key, p := range r.sessions {
+		if key.sessionID != sessionID {
+			continue
+		}
+		p.mu.Lock()
+		held := p.subscribers[attachmentID] != nil
+		p.mu.Unlock()
+		if held {
+			return p, key
+		}
+	}
+	return nil, publicationKey{}
 }
 
 func (r *Registry) Leave(sessionID, attachmentID string) {
@@ -173,7 +245,7 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 		return
 	}
 	r.mu.Lock()
-	p := r.sessions[sessionID]
+	p, key := r.holderLocked(sessionID, attachmentID)
 	if p == nil {
 		r.mu.Unlock()
 		return
@@ -188,7 +260,7 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 	delete(p.subscribers, attachmentID)
 	close(updates)
 	if len(p.subscribers) == 0 {
-		delete(r.sessions, sessionID)
+		delete(r.sessions, key)
 		p.mu.Unlock()
 		r.mu.Unlock()
 		r.stop(p)
@@ -199,7 +271,7 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 	// remaining viewer's authenticated inner TLS stream.
 	next, err := browserbroadcast.NewEpoch()
 	if err != nil {
-		delete(r.sessions, sessionID)
+		delete(r.sessions, key)
 		p.mu.Unlock()
 		r.mu.Unlock()
 		reportPublisherFailure(p.diagnosticCtx, deliveryStage, err)
@@ -217,7 +289,7 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 		}
 	}
 	if len(p.subscribers) == 0 {
-		delete(r.sessions, sessionID)
+		delete(r.sessions, key)
 		p.mu.Unlock()
 		r.mu.Unlock()
 		r.stop(p)
@@ -247,8 +319,8 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 	defer func() {
 		clearPrivateKey(key)
 		r.mu.Lock()
-		if r.sessions[p.sessionID] == p {
-			delete(r.sessions, p.sessionID)
+		if key := (publicationKey{p.sessionID, p.carrier}); r.sessions[key] == p {
+			delete(r.sessions, key)
 		}
 		r.mu.Unlock()
 		r.stop(p)

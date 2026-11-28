@@ -475,7 +475,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				copy(data[17:], epoch.Key[:])
 				return protocol.BinaryFrame{Channel: protocol.TerminalBroadcastKey, StartSequence: s.checkpointSequence, Data: data}, nil
 			case <-time.After(time.Second):
-				if lags := s.broadcast.Lags(s.sessionID); lags != s.lagsSeen {
+				if lags := s.broadcast.Lags(s.sessionID, s.attachmentID); lags != s.lagsSeen {
 					// Shared output was dropped; a later record would show the gap, but none may come.
 					s.lagsSeen = lags
 					if err := s.loadScreen(); err != nil {

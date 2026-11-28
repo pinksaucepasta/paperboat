@@ -72,7 +72,7 @@ func TestOnePublisherServesOneHundredParticipantsAndRotatesOnDeparture(t *testin
 		if _, err := manager.AttachLiveParticipantAtGeneration(created.ID, session.Participant{AttachmentID: id, AccountID: fmt.Sprintf("account_%03d", i), ClientID: id, Role: role, ConnectedAt: time.Now(), Browser: true}, created.Generation); err != nil {
 			t.Fatalf("participant %d: %v", i, err)
 		}
-		updates, err := r.Join(context.Background(), created.ID, created.Generation, id)
+		updates, err := r.Join(context.Background(), created.ID, created.Generation, id, "")
 		if err != nil {
 			t.Fatalf("join %d: %v", i, err)
 		}
@@ -91,7 +91,7 @@ func TestOnePublisherServesOneHundredParticipantsAndRotatesOnDeparture(t *testin
 	if opens.Load() != 1 {
 		t.Fatalf("publisher opens=%d", opens.Load())
 	}
-	if _, err := r.Join(context.Background(), created.ID, created.Generation, "browser_overflow"); !errors.Is(err, ErrUnavailable) {
+	if _, err := r.Join(context.Background(), created.ID, created.Generation, "browser_overflow", ""); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("101st participant accepted: %v", err)
 	}
 	_ = first
@@ -259,7 +259,7 @@ func TestPublisherFailoverClosesOldEpochAndStartsFreshOutput(t *testing.T) {
 	var opens atomic.Int32
 	open := func(context.Context, string) (io.WriteCloser, error) { opens.Add(1); return discardPublisher{}, nil }
 	registry.SetPublisher(open)
-	oldUpdates, err := registry.Join(context.Background(), created.ID, created.Generation, "viewer_old")
+	oldUpdates, err := registry.Join(context.Background(), created.ID, created.Generation, "viewer_old", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestPublisherFailoverClosesOldEpochAndStartsFreshOutput(t *testing.T) {
 	if _, ok := <-oldUpdates; ok {
 		t.Fatal("old edge retained an output key stream")
 	}
-	newUpdates, err := registry.Join(context.Background(), created.ID, created.Generation, "viewer_new")
+	newUpdates, err := registry.Join(context.Background(), created.ID, created.Generation, "viewer_new", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestPublisherDeliveryFailureIsCapturedOnceWithSafeCauseAndReference(t *test
 	reference := supportref.New()
 	joinCtx := supportref.WithContext(context.Background(), reference)
 	attachTestViewer(t, manager, created.ID, created.Generation, "browser_viewer")
-	joinUpdates, err := registry.Join(joinCtx, created.ID, created.Generation, "browser_viewer")
+	joinUpdates, err := registry.Join(joinCtx, created.ID, created.Generation, "browser_viewer", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestPublisherDeliveryFailureIsCapturedOnceWithSafeCauseAndReference(t *test
 	healthy := &signalPublisher{writes: make(chan struct{}, 4), closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return healthy, nil })
 	attachTestViewer(t, manager, created.ID, created.Generation, "browser_recovered")
-	recovered, err := registry.Join(joinCtx, created.ID, created.Generation, "browser_recovered")
+	recovered, err := registry.Join(joinCtx, created.ID, created.Generation, "browser_recovered", "")
 	if err != nil {
 		t.Fatalf("same registry did not accept a fresh viewer after publisher failure: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestPublisherWriteContractFailuresAreCapturedAndRecover(t *testing.T) {
 			failed := test.open()
 			registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return failed, nil })
 			attachTestViewer(t, manager, sessionID, generation, "browser_failed")
-			updates, err := registry.Join(joinCtx, sessionID, generation, "browser_failed")
+			updates, err := registry.Join(joinCtx, sessionID, generation, "browser_failed", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -446,7 +446,7 @@ func TestPublisherWriteContractFailuresAreCapturedAndRecover(t *testing.T) {
 			healthy := &signalPublisher{writes: make(chan struct{}, 4), closed: make(chan struct{})}
 			registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return healthy, nil })
 			attachTestViewer(t, manager, sessionID, generation, "browser_recovered")
-			recovered, err := registry.Join(joinCtx, sessionID, generation, "browser_recovered")
+			recovered, err := registry.Join(joinCtx, sessionID, generation, "browser_recovered", "")
 			if err != nil {
 				t.Fatalf("same registry did not recover: %v", err)
 			}
@@ -480,7 +480,7 @@ func TestPublisherPureCancellationIsQuietButMixedFailureIsObserved(t *testing.T)
 	ordinary := &causePublisher{failure: context.Canceled, closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return ordinary, nil })
 	attachTestViewer(t, manager, sessionID, generation, "browser_cancelled")
-	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_cancelled"); err != nil {
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_cancelled", ""); err != nil {
 		t.Fatal(err)
 	}
 	writeTestViewer(t, manager, sessionID, generation, "browser_cancelled", 1)
@@ -492,7 +492,7 @@ func TestPublisherPureCancellationIsQuietButMixedFailureIsObserved(t *testing.T)
 	mixed := &causePublisher{failure: errors.Join(context.Canceled, uncomparablePublisherError("private uncomparable marker"), syscall.EIO), closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return mixed, nil })
 	attachTestViewer(t, manager, sessionID, generation, "browser_mixed")
-	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_mixed"); err != nil {
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_mixed", ""); err != nil {
 		t.Fatal(err)
 	}
 	writeTestViewer(t, manager, sessionID, generation, "browser_mixed", 1)
@@ -510,7 +510,7 @@ func TestPublisherPureCancellationIsQuietButMixedFailureIsObserved(t *testing.T)
 	healthy := &signalPublisher{writes: make(chan struct{}, 4), closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return healthy, nil })
 	attachTestViewer(t, manager, sessionID, generation, "browser_recovered")
-	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_recovered"); err != nil {
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_recovered", ""); err != nil {
 		t.Fatalf("same registry did not recover after mixed failure: %v", err)
 	}
 	writeTestViewer(t, manager, sessionID, generation, "browser_recovered", 1)
@@ -531,7 +531,7 @@ func TestPublisherLeaveReportsCloseFailureAndRecovers(t *testing.T) {
 	failed := &closeFailurePublisher{closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return failed, nil })
 	attachTestViewer(t, manager, sessionID, generation, "browser_leaving")
-	updates, err := registry.Join(joinCtx, sessionID, generation, "browser_leaving")
+	updates, err := registry.Join(joinCtx, sessionID, generation, "browser_leaving", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +555,7 @@ func TestPublisherLeaveReportsCloseFailureAndRecovers(t *testing.T) {
 	healthy := &signalPublisher{writes: make(chan struct{}, 4), closed: make(chan struct{})}
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return healthy, nil })
 	attachTestViewer(t, manager, sessionID, generation, "browser_recovered")
-	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_recovered"); err != nil {
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_recovered", ""); err != nil {
 		t.Fatalf("same registry did not recover after cleanup failure: %v", err)
 	}
 	writeTestViewer(t, manager, sessionID, generation, "browser_recovered", 1)
@@ -752,7 +752,7 @@ func TestPublisherStreamOutlivesTheJoiningRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	request, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	if _, err := r.Join(request, created.ID, created.Generation, browser.AttachmentID); err != nil {
+	if _, err := r.Join(request, created.ID, created.Generation, browser.AttachmentID, ""); err != nil {
 		t.Fatal(err)
 	}
 	streamCtx := <-opened
@@ -775,7 +775,7 @@ func TestSharedOutputCountsDroppedBacklogs(t *testing.T) {
 	attachTestViewer(t, manager, sessionID, generation, "browser_a")
 	joinCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_a"); err != nil {
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_a", ""); err != nil {
 		t.Fatal(err)
 	}
 	// The edge stream is not read: ~3 MB echoed by cat exceeds the 1 MiB attachment queue. Lines stay under
@@ -797,7 +797,77 @@ func TestSharedOutputCountsDroppedBacklogs(t *testing.T) {
 		return snapshot.LatestSequence > 2<<20
 	})
 	go func() { _, _ = io.Copy(io.Discard, reader) }()
-	waitUntil(t, "a dropped backlog to be counted", func() bool { return registry.Lags(sessionID) != 0 })
+	waitUntil(t, "a dropped backlog to be counted", func() bool { return registry.Lags(sessionID, "browser_a") != 0 })
+}
+
+// recordingPublisher counts the records one carrier's output stream received.
+type recordingPublisher struct {
+	written atomic.Int64
+	closed  atomic.Bool
+}
+
+func (p *recordingPublisher) Write(data []byte) (int, error) {
+	p.written.Add(int64(len(data)))
+	return len(data), nil
+}
+func (p *recordingPublisher) Close() error { p.closed.Store(true); return nil }
+
+// A machine holds a carrier on each edge of its pair and each edge forwards only what its own carrier receives, so a
+// browser on either edge must get the output on its carrier. One chosen publisher left browsers on the other edge
+// attached but silent until a reload happened to land on the chosen edge (console terminal, COV-C C1).
+func TestEveryCarrierFeedsItsOwnBrowsers(t *testing.T) {
+	manager, sessionID, generation, registry := newPublisherTestSession(t)
+	streams := map[string]*recordingPublisher{"edge_a": {}, "edge_b": {}}
+	for carrier, stream := range streams {
+		registry.SetCarrier(carrier, func(context.Context, string) (io.WriteCloser, error) { return stream, nil })
+	}
+	defer registry.SetPublisher(nil)
+	joinCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	updates := map[string]<-chan Epoch{}
+	for carrier, browser := range map[string]string{"edge_a": "browser_a", "edge_b": "browser_b"} {
+		attachTestViewer(t, manager, sessionID, generation, browser)
+		joined, err := registry.Join(joinCtx, sessionID, generation, browser, carrier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updates[carrier] = joined
+	}
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_a", "edge_b"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("an attachment joined twice: %v", err)
+	}
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_c", "edge_c"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("a browser joined a carrier the machine does not hold: %v", err)
+	}
+	epochA, epochB := <-updates["edge_a"], <-updates["edge_b"]
+	if epochA.ID == epochB.ID || epochA.Key == epochB.Key || registry.Attached() != 2 {
+		t.Fatalf("carriers share an output key, or attached=%d", registry.Attached())
+	}
+	writeTestViewer(t, manager, sessionID, generation, "browser_a", 1)
+	waitUntil(t, "output on both carriers", func() bool {
+		return streams["edge_a"].written.Load() > 0 && streams["edge_b"].written.Load() > 0
+	})
+
+	// Losing one carrier ends only its browsers: they reconnect, the others keep their output.
+	registry.SetCarrier("edge_a", nil)
+	if _, ok := <-updates["edge_a"]; ok {
+		t.Fatal("the removed carrier kept its browser's key stream")
+	}
+	if !streams["edge_a"].closed.Load() || streams["edge_b"].closed.Load() {
+		t.Fatal("removing a carrier closed the wrong output stream")
+	}
+	select {
+	case _, ok := <-updates["edge_b"]:
+		t.Fatalf("removing the other carrier disturbed this browser (open=%v)", ok)
+	default:
+	}
+	before := streams["edge_b"].written.Load()
+	writeTestViewer(t, manager, sessionID, generation, "browser_a", 2)
+	waitUntil(t, "output to keep flowing on the kept carrier", func() bool { return streams["edge_b"].written.Load() > before })
+	registry.Leave(sessionID, "browser_b")
+	if registry.Attached() != 0 || !streams["edge_b"].closed.Load() {
+		t.Fatalf("the last browser left its publication running: attached=%d", registry.Attached())
+	}
 }
 
 // waitUntil returns the moment condition holds; the bound only ends a test that would never succeed.
@@ -823,7 +893,7 @@ func TestAttachedCountsBrowsersUntilTheyLeave(t *testing.T) {
 	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return healthy, nil })
 	for _, browser := range []string{"browser_a", "browser_b"} {
 		attachTestViewer(t, manager, id, generation, browser)
-		if _, err := registry.Join(context.Background(), id, generation, browser); err != nil {
+		if _, err := registry.Join(context.Background(), id, generation, browser, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

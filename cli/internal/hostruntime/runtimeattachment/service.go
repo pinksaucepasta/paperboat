@@ -470,9 +470,8 @@ func (s *Service) run(ctx context.Context) {
 			wantedCount = len(wanted)
 			for key, item := range lives {
 				if carrierRetired(item.active.Pool().State() == connector.DataCarrierPoolReady, wanted[key], len(lives)) {
-					if publisherKey == key && s.broadcaster != nil {
-						diagnosticlog.TryInfo("browser output publisher stopped: carrier unwanted or pool not ready", "wanted", wanted[key], "pool_state", string(item.active.Pool().State()))
-						s.broadcaster.SetPublisher(nil)
+					diagnosticlog.TryInfo("runtime carrier retired", "wanted", wanted[key], "pool_state", string(item.active.Pool().State()))
+					if publisherKey == key {
 						publisherKey = ""
 					}
 					if closeErr := s.closeLive(item); closeErr != nil {
@@ -505,6 +504,10 @@ func (s *Service) run(ctx context.Context) {
 				}
 				delete(retries, key)
 				lives[key] = item
+				// Each terminal carrier publishes the output of the browsers that reach the machine through it.
+				if s.broadcaster != nil && item.open != nil {
+					s.broadcaster.SetCarrier(key, item.open)
+				}
 			}
 			for key := range retries {
 				if !wanted[key] {
@@ -529,18 +532,11 @@ func (s *Service) run(ctx context.Context) {
 					}
 				}
 			}
-			// A carrier that cannot carry terminals (a customer-run edge) never publishes their output.
+			// publisherKey is the active edge's carrier, the one readiness waits for. A carrier that cannot carry
+			// terminals (a customer-run edge) is never it.
 			if chosen == nil || chosen.open == nil || response.ActiveEdgeNodeID != chosenAdmission.Binding.EdgeNodeID || response.ActiveEdgeProcessEpoch != chosenAdmission.Binding.EdgeProcessEpoch {
-				if publisherKey != "" && s.broadcaster != nil {
-					diagnosticlog.TryInfo("browser output publisher stopped: no live carrier for the active edge", "chosen", chosen != nil)
-					s.broadcaster.SetPublisher(nil)
-					publisherKey = ""
-				}
-			} else if publisherKey != chosen.key {
-				if s.broadcaster != nil {
-					diagnosticlog.TryInfo("browser output publisher moved to another carrier", "had_publisher", publisherKey != "")
-					s.broadcaster.SetPublisher(chosen.open)
-				}
+				publisherKey = ""
+			} else {
 				publisherKey = chosen.key
 			}
 		}
@@ -551,9 +547,8 @@ func (s *Service) run(ctx context.Context) {
 			if item.active.Pool().State() == connector.DataCarrierPoolReady {
 				continue
 			}
-			if publisherKey == key && s.broadcaster != nil {
-				diagnosticlog.TryInfo("browser output publisher stopped: its carrier pool is not ready", "pool_state", string(item.active.Pool().State()))
-				s.broadcaster.SetPublisher(nil)
+			diagnosticlog.TryInfo("runtime carrier closed: its pool is not ready", "pool_state", string(item.active.Pool().State()))
+			if publisherKey == key {
 				publisherKey = ""
 			}
 			if closeErr := s.closeLive(item); closeErr != nil {
@@ -820,7 +815,7 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string, t
 			defer cancel()
 			return nil, streamOpenFailure(errors.Join(registerErr, carrier.Release(cleanup)))
 		}
-		forwarder := runtimeOriginForwarder()
+		forwarder := runtimeOriginForwarder(key)
 		route := hoststate.TunnelConfigRoute{ID: b.RouteID, Protocol: "http", MatchType: "exact", MatchHostname: a.Hostname, OriginScheme: "http", OriginAddress: s.config.ListenAddress, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, MaxConcurrentStreams: 256, DesiredState: "active"}
 		var startErr error
 		streams, startErr = forwarder.StartFrom(ctx, registration, carrier.Identity, []hoststate.TunnelConfigRoute{route})
@@ -879,8 +874,10 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string, t
 // runtimeOriginForwarder serves the machine's own runtime listener over the carrier. The control
 // plane's requests to it (inbox listing, read and delete) carry X-Paperboat-* headers that the
 // forwarder would strip for a user's origin.
-func runtimeOriginForwarder() tunnelmanager.OriginStreamForwarder {
-	return tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{KeepControlPlaneHeaders: true}}
+func runtimeOriginForwarder(carrier string) tunnelmanager.OriginStreamForwarder {
+	stamp := http.Header{}
+	stamp.Set(browserbroadcastserver.CarrierHeader, carrier)
+	return tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{KeepControlPlaneHeaders: true, Stamp: stamp}}
 }
 
 // sendGoaways tells every edge of a live carrier, in parallel, that it is going away.
@@ -939,6 +936,9 @@ func (s *Service) awaitHandover(ctx context.Context, start, quietSince time.Time
 func (s *Service) closeLive(l *live) error {
 	if l == nil {
 		return nil
+	}
+	if s.broadcaster != nil {
+		s.broadcaster.SetCarrier(l.key, nil) // its browsers reconnect; other carriers keep publishing
 	}
 	// No goaway here: the carrier is shared and refcounted (previews hold it too), so retiring
 	// this live does not close it; a goaway would leave the edge treating a carrier still in use as
