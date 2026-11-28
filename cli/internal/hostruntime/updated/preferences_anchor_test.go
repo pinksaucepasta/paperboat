@@ -3,7 +3,10 @@
 package updated
 
 import (
+	"bytes"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,5 +121,18 @@ func TestUnchangedSettingsKeepMissedWindowDue(t *testing.T) {
 	state, _ = autoupdate.LoadMaintenanceState(path)
 	if due, _ := settings.Due(path, now, state, active); due {
 		t.Fatal("re-enabled after today's window: installs at once")
+	}
+}
+
+func TestLogWindowEndedNamesTheReason(t *testing.T) {
+	var out bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&out, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	logWindowEnded("no update available", autoupdate.Preferences{LocalTime: "04:00"}, "2026.11.27.0")
+	for _, want := range []string{"automatic update window recorded without installing", `reason="no update available"`, "local_time=04:00", "version=2026.11.27.0"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("log %q lacks %q", out.String(), want)
+		}
 	}
 }

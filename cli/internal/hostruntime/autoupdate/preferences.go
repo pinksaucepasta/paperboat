@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -121,6 +122,8 @@ func (p Preferences) Due(path string, now time.Time, state MaintenanceState, act
 		return true, nil
 	}
 	if p.Enabled && state.Active != active {
+		// Also after a completed update (the record still names the previous executable): not necessarily a skipped window.
+		slog.Info("automatic update record moved to the active version; this window does not install", "reason", "the record names another version (none yet, a version installed outside a window, or a completed update)", "local_time", p.LocalTime, "first_record", state.Active == "")
 		return false, SaveMaintenanceState(path, p, now, false, active)
 	}
 	return false, nil

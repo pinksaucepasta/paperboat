@@ -72,6 +72,7 @@ func (c *windowsController) automaticCheck(ctx context.Context) (autoupdate.Resu
 		return result, err
 	}
 	if response.Candidate == nil {
+		logWindowEnded("no candidate (no update available, or the installation is not committed yet)", settings, result.Version)
 		return result, autoupdate.SaveMaintenanceState(statePath, settings, now, false, active)
 	}
 	if err := autoupdate.SaveMaintenanceState(statePath, settings, now, true, active); err != nil {
@@ -82,6 +83,9 @@ func (c *windowsController) automaticCheck(ctx context.Context) (autoupdate.Resu
 		return result, err
 	}
 	result.Version, result.Updated = response.Version, response.Updated
+	if !response.Updated && !response.Pending {
+		logWindowEnded("activation did not start", settings, response.Version)
+	}
 	if err := autoupdate.SaveMaintenanceState(statePath, settings, now, false, active); err != nil {
 		return result, err
 	}
@@ -114,6 +118,7 @@ func (c *windowsController) handoffAutomaticActivation(ctx context.Context, laun
 		return err
 	}
 	if !settings.Enabled {
+		logWindowEnded("automatic updates switched off before the activation started", settings, "")
 		return nil
 	}
 	return c.handoffActivation(ctx, launch)

@@ -57,6 +57,12 @@ func anchorMaintenanceWindow(root string, previous autoupdate.Preferences, previ
 	slog.Info("automatic update window recorded at settings change", "local_time", settings.LocalTime)
 }
 
+// logWindowEnded names why an automatic update window ended without installing, so a missed update can be explained
+// from the updater's log (smoke 1127 AU3/AU3M had no trace of which path ended the window).
+func logWindowEnded(reason string, settings autoupdate.Preferences, version string) {
+	slog.Info("automatic update window recorded without installing", "reason", reason, "local_time", settings.LocalTime, "version", version)
+}
+
 // machineZone is the machine's local calendar; tests set it instead of time.Local, which every live timer reads.
 var machineZone = time.Local
 

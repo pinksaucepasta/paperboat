@@ -79,15 +79,21 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 		return result, err
 	}
 	if candidate.ID == "" {
+		logWindowEnded("no update available", settings, result.Version)
 		return result, autoupdate.SaveMaintenanceState(statePath, settings, now, false, active)
 	}
 	if err := autoupdate.SaveMaintenanceState(statePath, settings, now, true, active); err != nil {
 		return result, err
 	}
+	before := s.currentManager().ActiveVersion()
 	installed, err := s.queueActivationWithApproval(ctx, candidate.ID, false, false)
 	if err != nil {
 		return result, err
 	}
 	result.Version, result.Updated = installed.Version, installed.Updated
+	// A started activation returns the candidate's version (Updated stays false until the helper reports back).
+	if !installed.Updated && installed.Version == before {
+		logWindowEnded("activation did not start (no release for this machine, or an activation already in progress)", settings, installed.Version)
+	}
 	return result, autoupdate.SaveMaintenanceState(statePath, settings, now, false, active)
 }
