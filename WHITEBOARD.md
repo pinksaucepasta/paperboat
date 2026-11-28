@@ -4,9 +4,6 @@ Everything here is after launch unless its group says otherwise (user decision 2
 
 ## Soon: right after the smoke
 
-### A viewer list saved during an edge outage waits for the edge's next refresh (P3b)
-When an edge cannot reach the server it keeps renewing its last public decisions locally. A list saved on a public preview (or a public tunnel made private) in that time leaves the old public access on that edge until it refreshes; the sign-in mark arrives with the same refresh. The docs say "changes apply when the edge next reaches Paperboat". Fix options: let public decisions lapse at their expiry during an outage (costs availability), or carry a "listed" flag to pb in the lease/route generation so pb refuses anonymous streams itself.
-
 ### Unverified first sign-up can claim an address (L36)
 A new WorkOS subject with email_verified=false still creates an account (WorkOS SSO and test fixtures report unverified, so refusing it locked out real users and was reverted). Such an account then blocks the verified owner's x+tag/exact sign-up with 409. Fix after launch: let a verified sign-up take over an address held only by an unverified account that never verified, or require verification per auth method.
 

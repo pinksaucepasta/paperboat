@@ -35,7 +35,7 @@ pb tunnel create <name> [flags]
 ### Options
 
 ```
-      --allow strings       let these people open the private HTTP tunnel too, after signing in: email addresses or *@domain (comma-separated or repeatable; implies --private; changes apply when the edge next reaches Paperboat, usually within 10 s)
+      --allow strings       let these people open the private HTTP tunnel too, after signing in: email addresses or *@domain (comma-separated or repeatable; implies --private)
       --domain strings      custom domain to add after creation (repeatable)
       --duration duration   tunnel lifetime (default: the tunnel does not expire)
       --from string         origin URL: http, https, h2c, tcp or unix (instead of --port)
