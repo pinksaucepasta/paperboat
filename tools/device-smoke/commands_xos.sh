@@ -21,13 +21,53 @@ mkdir -p "$CX_OUT" && export SMOKE_RESULTS_DIR="$CX_OUT"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30)
 failed=0 names=()
 
+# the shard's result row of a step (shard-lists/final-smoke-wide-CX*.list; shard-guard.py fails a run without it)
+row_of() {
+  case $1 in
+  sweep-?) echo "command-sweep:${1##*-}" ;;
+  rows-?) echo "command-rows:${1##*-}" ;;
+  env-command-rows-?) echo "xos-env-command-rows:${1##*-}" ;;
+  X-19-private-access) echo xos-private-access ;;
+  relay-data-path) echo relay-data-path ;;
+  X-17-exec) echo xos-exec ;;
+  X-16-terminal) echo xos-terminal ;;
+  X-24-keys) echo xos-keys ;;
+  terminal-close) echo xos-term-close ;;
+  X-18-ssh-family) echo xos-ssh ;;
+  X-29-forwarding) echo xos-ssh-forwarding ;;
+  X-28-plain-ssh) echo xos-plain-ssh ;;
+  X-14-15-send) echo xos-send ;;
+  X-20-tunnel-origins) echo xos-tunnel-origins ;;
+  C304-C305-extend-policy) echo xos-tunnel-extend-policy ;;
+  X-40-names) echo xos-names ;;
+  X-01-10-config-sync) echo xos-config ;;
+  config-first-sync) echo xos-config-firstsync ;;
+  X-11-env-delivery) echo xos-env ;;
+  X-11-env-in-connect) echo xos-env-connect ;;
+  X-30-env-plain-ssh) echo xos-env-plain-ssh ;;
+  X-12-env-scopes) echo xos-env-scopes ;;
+  X-13-env-vault) echo xos-env-vault ;;
+  X-41-removal) echo xos-removal ;;
+  X-41-tunnel-preview-exec) echo xos-removal-extras ;;
+  X-41-local-names) echo xos-removal-names ;;
+  X-41-env) echo xos-removal-env ;;
+  X-41-config-sync) echo xos-removal-config ;;
+  *) echo "xos-$1" ;;
+  esac
+}
+result() { printf '%-28s %-5s %6ss  %s\n' "$1" "$2" "$3" "$4"; } # smoke's result-line format
+
 step() { # NAME TIMEOUT command...
-  local name=$1 limit=$2 rc=0; shift 2
+  local name=$1 limit=$2 rc=0 t0=$SECONDS why; shift 2
+  local log="$CX_OUT/$part-$name.log"
   echo "--- $part/$name started $(date -u +%H:%M:%S)"
-  (cd "$HERE" && timeout "$limit" "$@") >"$CX_OUT/$part-$name.log" 2>&1 || rc=$?
-  if [ $rc = 0 ]; then echo "PASS $part/$name"; else
-    echo "FAIL $part/$name (exit $rc) log $CX_OUT/$part-$name.log"; failed=$((failed + 1)); names+=("$name")
-    grep -E '^FAIL|"status": "FAIL"|Traceback|Error:' "$CX_OUT/$part-$name.log" | cut -c1-300 | head -40
+  (cd "$HERE" && timeout "$limit" "$@") >"$log" 2>&1 || rc=$?
+  if [ $rc = 0 ]; then result "$(row_of "$name")" PASS $((SECONDS - t0)) "$part/$name log $log"; else
+    why=$(grep -m1 -E '^FAIL|"status": "FAIL"|Traceback|Error:' "$log" | tr '\t' ' ' | cut -c1-300)
+    [ $rc != 124 ] || why="time limit ${limit} s. $why"
+    result "$(row_of "$name")" FAIL $((SECONDS - t0)) "$part/$name exit $rc log $log. $why"
+    failed=$((failed + 1)); names+=("$name")
+    grep -E '^FAIL|"status": "FAIL"|Traceback|Error:' "$log" | cut -c1-300 | head -40 | sed 's/^/    /'
   fi
 }
 
@@ -80,8 +120,8 @@ term) # X-16 (and the join leg of X-25), X-24 keys, closing a terminal
   step terminal-close 600 python3 xplat_term_close.py --devices L,M
   ;;
 ssh) # X-18, X-29, X-28 (and the hook part of X-30)
-  prepare_mac || echo "FAIL $part/prepare-mac"
-  step X-18-ssh-family 1800 python3 xplat_ssh.py --devices L,M,W
+  prepare_mac || { result xos-prepare-mac FAIL 0 "new SSH host keys on $XPLAT_MAC_SSH failed"; failed=$((failed + 1)); names+=(prepare-mac); }
+  step X-18-ssh-family 3600 python3 xplat_ssh.py --devices L,M,W
   step X-29-forwarding 1500 python3 xpc_ssh.py --devices L,M,W
   step X-28-plain-ssh 1200 python3 xpc_plainssh.py --devices L,M,W --only config,ssh,hook,doctor
   ;;
