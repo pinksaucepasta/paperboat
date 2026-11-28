@@ -379,6 +379,35 @@ export const saveIpRules = (kind: "tunnel" | "preview", id: string, rules: IPRul
     body: JSON.stringify(rules),
   })
 
+export type ViewerPolicy = Data<"/v1/browser-access/policies/{resource_kind}/{resource_id}/{route_id}">
+/** One route of a preview or tunnel: a viewer policy is kept per route. */
+export type ViewerTarget = { kind: "tunnel" | "preview"; id: string; routeId: string }
+
+const viewerPolicyPath = ({ kind, id, routeId }: ViewerTarget) =>
+  `browser-access/policies/${kind}/${encodeURIComponent(id)}/${encodeURIComponent(routeId)}`
+
+// Keyed under the resource, so a change to the tunnel (such as its access mode) reads the policy again.
+export const viewerPolicyQuery = (target: ViewerTarget) =>
+  queryOptions({
+    queryKey: [target.kind, target.id, "viewers", target.routeId] as const,
+    queryFn: ({ signal }) => api<ViewerPolicy>(viewerPolicyPath(target), { signal }),
+  })
+
+/** Replaces the route's whole policy; a stale `expected_generation` is refused as `viewer_policy_conflict`. */
+export const saveViewerPolicy = (
+  target: ViewerTarget,
+  mutation: {
+    audience: "owner" | "specific_emails" | "public"
+    allowed_emails?: string[]
+    expected_generation: number
+  },
+) =>
+  api<ViewerPolicy>(viewerPolicyPath(target), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(mutation),
+  })
+
 /** Why a move to a new address was undone, in words (the codes are the server's operation error codes). */
 export function addressChangeReason(code: string | undefined): string {
   switch (code) {

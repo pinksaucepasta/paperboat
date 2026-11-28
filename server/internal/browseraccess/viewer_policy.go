@@ -3,16 +3,13 @@ package browseraccess
 import (
 	"context"
 	"errors"
-	"net/mail"
-	"net/netip"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
-	"golang.org/x/net/idna"
+	"github.com/pinksaucepasta/paperboat/shared/viewerallow"
 )
 
 const (
@@ -106,7 +103,7 @@ func (s *Service) SetViewerPolicy(ctx context.Context, in SetViewerPolicyRequest
 				return err
 			}
 		}
-		if err = ensurePolicyEdgeMode(ctx, tx, in.ResourceKind, in.RouteID, target.mode, policy.Audience); err != nil {
+		if err = ensurePolicyEdgeMode(in.ResourceKind, target.mode, policy.Audience); err != nil {
 			return err
 		}
 		var generation int64
@@ -215,26 +212,20 @@ func normalizeViewerPolicy(in SetViewerPolicyRequest) (ViewerPolicy, error) {
 		}
 		p.TeamID = in.TeamID
 	case AudienceSpecificEmails:
-		if in.TeamID != "" || in.EmailDomain != "" || len(in.AllowedEmails) == 0 || len(in.AllowedEmails) > 100 {
+		if in.TeamID != "" || in.EmailDomain != "" {
 			return ViewerPolicy{}, ErrInvalid
 		}
-		seen := make(map[string]struct{}, len(in.AllowedEmails))
-		for _, raw := range in.AllowedEmails {
-			address, ok := canonicalEmail(raw)
-			if !ok {
-				return ViewerPolicy{}, ErrInvalid
-			}
-			if _, exists := seen[address]; exists {
-				return ViewerPolicy{}, ErrInvalid
-			}
-			seen[address] = struct{}{}
-			p.AllowedEmails = append(p.AllowedEmails, address)
+		// Exact addresses and "*@domain" entries.
+		entries, err := viewerallow.Canonical(in.AllowedEmails)
+		if err != nil {
+			return ViewerPolicy{}, ErrInvalid
 		}
+		p.AllowedEmails = entries
 	case AudienceEmailDomain:
 		if in.TeamID != "" || len(in.AllowedEmails) != 0 {
 			return ViewerPolicy{}, ErrInvalid
 		}
-		domain, ok := canonicalDomain(in.EmailDomain)
+		domain, ok := viewerallow.Domain(in.EmailDomain)
 		if !ok {
 			return ViewerPolicy{}, ErrInvalid
 		}
@@ -245,61 +236,6 @@ func normalizeViewerPolicy(in SetViewerPolicyRequest) (ViewerPolicy, error) {
 	return p, nil
 }
 
-func canonicalEmail(raw string) (string, bool) {
-	if len(raw) == 0 || len(raw) > 254 || strings.TrimSpace(raw) != raw || strings.Contains(raw, "*") || !utf8.ValidString(raw) {
-		return "", false
-	}
-	for _, r := range raw {
-		if r <= 0x20 || r == 0x7f {
-			return "", false
-		}
-	}
-	parsed, err := mail.ParseAddress(raw)
-	if err != nil || parsed.Address != raw || strings.Count(raw, "@") != 1 {
-		return "", false
-	}
-	local, domain, found := strings.Cut(raw, "@")
-	if !found || local == "" {
-		return "", false
-	}
-	for _, r := range local {
-		if r > 0x7f {
-			return "", false
-		}
-	}
-	canonical, ok := canonicalDomain(domain)
-	if !ok {
-		return "", false
-	}
-	return strings.ToLower(local) + "@" + canonical, true
-}
-
-func canonicalDomain(raw string) (string, bool) {
-	if raw == "" || strings.TrimSpace(raw) != raw || strings.ContainsAny(raw, "*/\\:@%?#\r\n\t ") || strings.HasSuffix(raw, ".") || !utf8.ValidString(raw) {
-		return "", false
-	}
-	for _, r := range raw {
-		if r == 0x7f || r < 0x20 {
-			return "", false
-		}
-	}
-	lower := strings.ToLower(raw)
-	ascii, err := idna.Lookup.ToASCII(lower)
-	if err != nil || ascii == "" || len(ascii) > 253 || strings.Contains(ascii, "..") {
-		return "", false
-	}
-	ascii = strings.ToLower(ascii)
-	if _, err := netip.ParseAddr(ascii); err == nil {
-		return "", false
-	}
-	for _, label := range strings.Split(ascii, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return "", false
-		}
-	}
-	return ascii, true
-}
-
 func loadPolicyTarget(ctx context.Context, tx *db.Tx, kind, id, route string, now time.Time) (policyTarget, error) {
 	var target policyTarget
 	var err error
@@ -307,7 +243,7 @@ func loadPolicyTarget(ctx context.Context, tx *db.Tx, kind, id, route string, no
 	case "tunnel":
 		err = tx.QueryRow(ctx, `SELECT t.account_id,t.access_mode,t.generation,r.generation,COALESCE(t.expires_at,$3::timestamptz+interval '100 years') FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE t.id=$1 AND r.id=$2 AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$3) AND r.desired_state='active' AND r.deleted_at IS NULL AND r.protocol='http' FOR UPDATE OF t,r`, id, route, now).Scan(&target.owner, &target.mode, &target.resourceGeneration, &target.routeGeneration, &target.expires)
 	case "preview":
-		err = tx.QueryRow(ctx, `SELECT p.account_id,p.access_mode,p.generation,x.route_generation,LEAST(p.lease_deadline,COALESCE(p.user_deadline,p.lease_deadline),x.expires_at) FROM preview_leases p JOIN preview_routes x ON x.preview_id=p.id AND x.account_id=p.account_id WHERE p.id=$1 AND x.route_id=$2 AND p.terminal_state='active' AND p.lease_deadline>$3 AND x.state='ready' AND x.expires_at>$3 FOR UPDATE OF p`, id, route, now).Scan(&target.owner, &target.mode, &target.resourceGeneration, &target.routeGeneration, &target.expires)
+		err = tx.QueryRow(ctx, `SELECT p.account_id,p.access_mode,p.generation,x.route_generation,LEAST(p.lease_deadline,COALESCE(p.user_deadline,p.lease_deadline),x.expires_at) FROM preview_leases p JOIN preview_routes x ON x.preview_id=p.id AND x.account_id=p.account_id WHERE p.id=$1 AND x.route_id=$2 AND p.terminal_state='active' AND p.lease_deadline>$3 AND x.state='ready' AND x.expires_at>$3 AND NOT EXISTS (SELECT 1 FROM lazy_access_policies lp WHERE 'https://'||lp.hostname=p.endpoint) FOR UPDATE OF p`, id, route, now).Scan(&target.owner, &target.mode, &target.resourceGeneration, &target.routeGeneration, &target.expires)
 	default:
 		return target, ErrInvalid
 	}
@@ -359,34 +295,71 @@ func requireBoundPolicyTeam(ctx context.Context, tx *db.Tx, actor, kind, id, own
 	return nil
 }
 
-func ensurePolicyEdgeMode(ctx context.Context, tx *db.Tx, kind, route, nativeMode, audience string) error {
-	if kind == "preview" {
-		if nativeMode == "public" {
-			if audience != AudiencePublic {
-				return ErrPolicyEdgeTransition
-			}
-			return nil
-		}
-		if audience != AudienceOwner {
-			return ErrPolicyWidening
-		}
-		return nil
-	}
-	if kind != "tunnel" {
+func ensurePolicyEdgeMode(kind, nativeMode, audience string) error {
+	if kind != "preview" && kind != "tunnel" {
 		return ErrInvalid
 	}
-	if nativeMode == "public" {
-		// Only public HTTP tunnel routes can be converted into an edge restricted
-		// serving mode. The route assignment worker carries the exact policy
-		// generation and waits for its fenced replacement to become ready.
+	if kind == "preview" && nativeMode == "public" {
+		if audience != AudiencePublic {
+			return ErrPolicyEdgeTransition
+		}
 		return nil
 	}
-	if audience != AudienceOwner {
-		// No ACL-intersection exists yet for native private/team routes. Until it
-		// does, do not let browser-only selectors add another principal.
+	if !audienceWithinNativeMode(nativeMode, audience) {
 		return ErrPolicyWidening
 	}
 	return nil
+}
+
+// audienceWithinNativeMode reports whether a viewer policy audience may be configured on, and admit viewers to, a
+// resource of this native access mode. A public HTTP tunnel route takes every audience (the route assignment worker
+// carries the exact policy generation and waits for its fenced replacement). A private resource takes its owner, or a
+// list of the people who may sign in; it is never made public or opened to a team. A team resource takes only its
+// owner: nothing intersects a browser selector with its team grants. A public preview is not restricted by a policy.
+func audienceWithinNativeMode(nativeMode, audience string) bool {
+	switch nativeMode {
+	case "public":
+		return true
+	case "private":
+		return audience == AudienceOwner || audience == AudienceSpecificEmails || audience == AudienceEmailDomain
+	case "team":
+		return audience == AudienceOwner
+	default:
+		return false
+	}
+}
+
+// privateGoverningTeam is the Team whose rules a private resource's viewers must also pass: the resource's owning
+// Team, or the owning machine's. Empty means a personal resource.
+func privateGoverningTeam(ctx context.Context, tx *db.Tx, a authority) (string, error) {
+	if a.ownerTeam != "" {
+		return a.ownerTeam, nil
+	}
+	var team *string
+	if err := tx.QueryRow(ctx, `SELECT owner_team_id FROM user_machines WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL AND deleted_at IS NULL`, a.machine, a.owner).Scan(&team); err != nil {
+		return "", mapMissing(err)
+	}
+	if team == nil {
+		return "", nil
+	}
+	return *team, nil
+}
+
+// requireWithinViewerPolicy refuses an account that a configured viewer policy does not admit. It only narrows: the
+// caller has already authorized the account by the resource's own rules, and keeps that authority.
+func requireWithinViewerPolicy(ctx context.Context, tx *db.Tx, a authority, account string) error {
+	if a.kind != "preview" && a.kind != "tunnel" {
+		return nil
+	}
+	p := ViewerPolicy{ResourceKind: a.kind, ResourceID: a.id, RouteID: a.route, OwnerAccountID: a.owner}
+	if err := readViewerPolicy(ctx, tx, &p); err != nil {
+		return err
+	}
+	if !p.Configured {
+		return nil
+	}
+	_, err := applyViewerPolicy(ctx, tx, a, account)
+	return err
 }
 
 func readViewerPolicy(ctx context.Context, tx *db.Tx, out *ViewerPolicy) error {
@@ -434,26 +407,20 @@ func applyViewerPolicy(ctx context.Context, tx *db.Tx, a authority, account stri
 		if a.nativeMode == "" {
 			a.nativeMode = a.mode
 		}
+		// A resource made private or team after a wider policy was saved keeps a stored audience that no longer
+		// applies. It admits nobody but the owner.
+		if a.nativeMode != "public" && !audienceWithinNativeMode(a.nativeMode, p.Audience) {
+			p.Audience, p.AllowedEmails, p.EmailDomain, p.TeamID = AudienceOwner, nil, "", ""
+		}
+		// Rows written before these rules, or a native mode that changed since, fail closed.
+		if !audienceWithinNativeMode(a.nativeMode, p.Audience) || a.kind == "preview" && a.nativeMode == "public" && p.Audience != AudiencePublic {
+			return a, ErrNotAuthorized
+		}
 		if a.kind == "tunnel" {
-			if a.nativeMode != "public" && p.Audience != AudienceOwner {
-				// Until the native ACL can be intersected with viewer selectors,
-				// configured non-owner audiences may not widen a native private/team
-				// route. Fail closed for legacy rows written before this guard existed.
-				return a, ErrNotAuthorized
-			}
-			if p.Audience == AudiencePublic && a.nativeMode != "public" {
-				return a, ErrNotAuthorized
-			}
 			// The audience is enforced here as a browser grant. The edge only needs
 			// to know whether the route is public or requires an authenticated grant;
 			// selected-team membership is not a native team grant.
 			a.mode = effectiveTunnelViewerMode(p.Audience)
-		} else if a.nativeMode == "public" {
-			if p.Audience != AudiencePublic {
-				return a, ErrNotAuthorized
-			}
-		} else if p.Audience != AudienceOwner {
-			return a, ErrNotAuthorized
 		}
 	}
 	var actorEmail string
@@ -487,11 +454,7 @@ WHERE t.team_id=$1 AND t.deleted_at IS NULL AND NOT t.suspended`, p.TeamID, acco
 			}
 			a.policyTeam = p.TeamID
 		case AudienceSpecificEmails:
-			if !emailVerified {
-				return a, ErrNotAuthorized
-			}
-			canonical, ok := canonicalEmail(actorEmail)
-			if !ok || !containsEmail(p.AllowedEmails, canonical) {
+			if !emailVerified || !viewerallow.Allows(p.AllowedEmails, actorEmail) {
 				return a, ErrNotAuthorized
 			}
 		case AudienceEmailDomain:
@@ -499,12 +462,28 @@ WHERE t.team_id=$1 AND t.deleted_at IS NULL AND NOT t.suspended`, p.TeamID, acco
 				return a, ErrNotAuthorized
 			}
 			_, domain, found := strings.Cut(actorEmail, "@")
-			canonical, ok := canonicalDomain(domain)
+			canonical, ok := viewerallow.Domain(domain)
 			if !found || !ok || canonical != p.EmailDomain {
 				return a, ErrNotAuthorized
 			}
 		default:
 			return a, ErrNotAuthorized
+		}
+	}
+	// On a private resource that a Team governs, a listed viewer must also pass that Team's own rules: the list
+	// narrows who may open it and never adds someone the Team would refuse.
+	if account != a.owner && a.nativeMode == "private" && (a.kind == "tunnel" || a.kind == "preview") {
+		team, teamErr := privateGoverningTeam(ctx, tx, a)
+		if teamErr != nil {
+			return a, teamErr
+		}
+		if team != "" {
+			native := a
+			native.mode = a.nativeMode
+			if native, err = applyPrincipal(ctx, tx, native, account); err != nil {
+				return a, err
+			}
+			a.team, a.td = native.team, native.td
 		}
 	}
 	a.policyAudience = p.Audience
@@ -538,13 +517,4 @@ func sameViewerPolicyTeam(a authority, team *string, teamGeneration, membershipG
 		teamGeneration != nil && *teamGeneration == a.policyTeamGeneration &&
 		membershipGeneration != nil && *membershipGeneration == a.policyMembershipGeneration &&
 		bindingGeneration != nil && *bindingGeneration == a.policyBindingGeneration
-}
-
-func containsEmail(list []string, value string) bool {
-	for _, candidate := range list {
-		if candidate == value {
-			return true
-		}
-	}
-	return false
 }

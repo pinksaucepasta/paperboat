@@ -3,7 +3,7 @@
 import { ArrowSquareOutIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useApiQuery, useMachines } from "@/lib/api"
-import { hostOf, originLabel, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
+import { hostOf, isRouting, originLabel, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
 import { CopyRow } from "@/components/copy-button"
 import { BindingDns } from "@/components/domains/dns-records"
 import { Detail } from "@/components/machine-overview"
@@ -13,6 +13,7 @@ import { Time } from "@/components/time"
 import { ended, PreviewStatus } from "@/components/tunnels/preview-list"
 import { IpRules } from "@/components/tunnels/ip-rules"
 import { ShareWithTeam } from "@/components/tunnels/share-with-team"
+import { ViewerAccess } from "@/components/tunnels/viewer-access"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/lib/use-now"
@@ -110,7 +111,7 @@ function Loaded({ preview }: { preview: Preview }) {
             {originLabel(preview.target)}
           </Detail>
           <Detail label="Who can open it">
-            {preview.access_mode === "private" ? "Only you, after signing in" : "Anyone with the address"}
+            {preview.access_mode === "private" ? "You and allowed viewers, after signing in" : "Anyone with the address"}
           </Detail>
           <Detail label="Created">{preview.created_at ? <Time iso={preview.created_at} /> : undefined}</Detail>
           <Detail label={over ? "Ended" : "Ends"}>
@@ -148,6 +149,13 @@ function Loaded({ preview }: { preview: Preview }) {
           <p className="border-b border-divider py-3 text-sm text-muted-foreground">None besides its address.</p>
         )}
       </Section>
+
+      {!over && preview.access_mode === "private" && preview.route_id && isRouting(preview) && (
+        <ViewerAccess
+          target={{ kind: "preview", id: preview.id, routeId: preview.route_id }}
+          teamOwned={Boolean(preview.owner_team_id)}
+        />
+      )}
 
       <IpRules kind="preview" id={preview.id} />
 

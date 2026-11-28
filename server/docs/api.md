@@ -77,12 +77,26 @@ ownership, readiness, authorization and recovery.
 
 `GET|PUT /v1/browser-access/policies/{resource_kind}/{resource_id}/{route_id}` manages
 the browser audience for one exact preview or tunnel route. Writes require the owner or
-authorized resource manager, a browser session, CSRF protection, and `expected_generation`
-(use `0` for the first save). Audiences are `owner`, `team`, `specific_emails`,
-`email_domain`, or `public`; owners always retain access. Team viewers must be current
-direct members of the selected team. Email and domain viewers need a verified current
-WorkOS email; domain matching is exact after `@`. The policy grants browser viewing only
-and does not change native access.
+authorized resource manager and `expected_generation` (use `0` for the first save), from a
+browser session with CSRF protection or a `pb` sign-in with the `previews:write` or
+`tunnels:write` scope of that kind (reads: the `:read` scope). API tokens are refused.
+Audiences are `owner`, `team`, `specific_emails`, `email_domain`, or `public`; owners
+always retain access. An `allowed_emails` entry of `specific_emails` is an exact address or
+`*@domain`, which admits every address at exactly that domain (never a subdomain). The
+domain has at least two labels, a bare `*` is refused, and a list holds 1 to 100 entries.
+Team viewers must be current direct members of the selected team. Email and domain viewers
+need a verified current WorkOS email. The policy grants browser viewing only: private
+access from a machine (`pb access`) stays with the account that owns the resource.
+
+A private preview or private HTTP tunnel route takes `owner`, `specific_emails` or
+`email_domain`; `public` and `team` are refused with `409 native_access_widening_denied`.
+When a team owns it, or owns its machine, a listed viewer must also have that team's access
+to it, so the list only narrows. A team resource takes only `owner`; a public preview takes
+only `public`. A lazy preview has no viewer policy. A policy also narrows machine
+credentials, and never adds one.
+
+`pb preview --allow` and `pb tunnel create --allow` create the resource private and then save
+this policy, so it is open to nobody but its owner until the list is in place.
 
 Changes revoke existing browser sessions. Native-public HTTP tunnel routes can switch
 between public and restricted browser audiences. The saved tunnel policy reports

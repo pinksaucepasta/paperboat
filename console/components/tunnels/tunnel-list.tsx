@@ -160,7 +160,7 @@ function Row({ tunnel, machineName }: { tunnel: Tunnel; machineName?: string }) 
               </Link>
               {tunnel.access_mode === "private" && (
                 <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
-                  Only you
+                  Private
                 </Badge>
               )}
             </div>

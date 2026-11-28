@@ -30,6 +30,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 ### Options
 
 ```
+      --allow strings        let these people open the private preview too, after signing in: email addresses or *@domain (comma-separated or repeatable; implies --private)
       --background           hand the preview to this computer's background service and return once ready (default lifetime 30m)
       --domain stringArray   attach a verified custom domain (repeatable)
       --ephemeral            use the temporary preview lifecycle

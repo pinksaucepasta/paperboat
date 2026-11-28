@@ -67,12 +67,14 @@ function RulesForm({ kind, id, saved }: { kind: "tunnel" | "preview"; id: string
       <div className="flex flex-col gap-4 pt-3">
         <ChipField
           label="Allow"
+          field="ip-rules-allow"
           hint="Only these addresses can open it. Leave empty to allow everyone."
           values={draft.allow}
           onChange={(allow) => setDraft({ ...draft, allow })}
         />
         <ChipField
           label="Deny"
+          field="ip-rules-deny"
           hint="These addresses are always refused."
           values={draft.deny}
           onChange={(deny) => setDraft({ ...draft, deny })}
@@ -87,25 +89,31 @@ function RulesForm({ kind, id, saved }: { kind: "tunnel" | "preview"; id: string
   )
 }
 
-/** Addresses or CIDR ranges as chips: Enter, comma, space or leaving the field adds what's typed. */
-function ChipField({
+/** A list as chips (addresses, CIDR ranges, emails): Enter, comma, space or leaving the field adds what's typed. */
+export function ChipField({
   label,
   hint,
   values,
   onChange,
+  field,
+  stateKey = "tunnels/ip-rules.tsx:typed",
+  placeholder = "203.0.113.7 or 10.0.0.0/8",
 }: {
+  /** The input's element id. */
+  field: string
+  stateKey?: string
+  placeholder?: string
   label: string
   hint: string
   values: string[]
   onChange: (values: string[]) => void
 }) {
-  const [typed, setTyped] = useShellState("tunnels/ip-rules.tsx:typed", "")
+  const [typed, setTyped] = useShellState(stateKey, "")
   const commit = () => {
     const entries = typed.split(/[\s,]+/).filter(Boolean)
     setTyped("")
     if (entries.length) onChange([...new Set([...values, ...entries])])
   }
-  const field = `ip-rules-${label.toLowerCase()}`
   return (
     <Field className="gap-1.5">
       <FieldLabel htmlFor={field}>{label}</FieldLabel>
@@ -126,7 +134,7 @@ function ChipField({
         <Input
           id={field}
           value={typed}
-          placeholder={values.length ? "" : "203.0.113.7 or 10.0.0.0/8"}
+          placeholder={values.length ? "" : placeholder}
           onChange={(event) => setTyped(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === "," || event.key === " ") {

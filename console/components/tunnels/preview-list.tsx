@@ -277,7 +277,7 @@ function Row({ preview, now, machineName }: { preview: Preview; now: number; mac
           )}
           {preview.access_mode === "private" && (
             <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
-              Only you
+              Private
             </Badge>
           )}
         </div>

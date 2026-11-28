@@ -57,6 +57,7 @@ const (
 	commandRejectUpdatePlatform
 	commandRejectHostLocalSendNoSession
 	commandRejectMacRootInstall
+	commandRejectPreviewAllowList
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -71,7 +72,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectMacRootInstall
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectPreviewAllowList
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -83,6 +84,12 @@ func (e commandRejection) Error() string {
 		return "The preview's time limit ended before it was ready. Retry with a longer --ttl; publishing can take up to a minute."
 	case commandRejectPreviewTimeout:
 		return "The preview did not become ready in time and was stopped. Retry; run pb doctor if this continues."
+	case commandRejectPreviewAllowList:
+		reason := ""
+		if e.detail != "" {
+			reason = " (server answer: " + e.detail + ")"
+		}
+		return "The --allow list could not be saved" + reason + ", so the preview was stopped. Nobody but you could open it. Run `pb login` if this computer is not signed in, then retry."
 	case commandRejectPreviewDomainTimeout:
 		return "The customer domain did not become ready. Verify the displayed DNS records and certificate status, then retry."
 	case commandRejectConfigRepositoryEmpty:
