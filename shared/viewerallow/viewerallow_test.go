@@ -34,12 +34,9 @@ func TestEntryRefuses(t *testing.T) {
 		"*@company.com/path", "*@company.com:443", "*@127.0.0.1", "*@[127.0.0.1]", "*@ company.com", " *@company.com",
 		"*@company.com ", "*@company.com\n", "*@company.com,evil.com", "*@a@company.com", "*@-company.com",
 		"Display Name <person@company.com>", "<person@company.com>", "person@company.com,other@company.com",
-		"\"a@b\"@company.com", "pérson@company.com", "person@company", // single-label exact address is checked below
+		"\"a@b\"@company.com", "pérson@company.com", "person@company", "a?b@company.com",
 		"*@" + long + long + long + long + "example",
 	} {
-		if raw == "person@company" {
-			continue
-		}
 		if got, ok := Entry(raw); ok {
 			t.Errorf("Entry(%q) = %q, want refusal", raw, got)
 		}
@@ -103,5 +100,34 @@ func TestAllows(t *testing.T) {
 	// An entry is compared whole: nothing in a stored list acts as a pattern but the "*@domain" form.
 	if Allows([]string{"*", "*@*", "@company.com", "company.com"}, "anyone@company.com") {
 		t.Error("a malformed stored entry admitted an address")
+	}
+}
+
+// Terminal sharing keeps its older input handling; TestTerminalBrowserAllowListUnchangedByViewerAllow in
+// server/internal/usermachines holds the full recorded table.
+func TestTerminalRules(t *testing.T) {
+	for raw, want := range map[string]string{
+		"  Ann@Example.COM ": "ann@example.com",
+		"jöe@x.com":          "jöe@x.com",
+		"ann@1.2.3.4":        "ann@1.2.3.4",
+	} {
+		if got, ok := Terminal.Entry(raw); !ok || got != want {
+			t.Errorf("Terminal.Entry(%q) = %q, %v; want %q", raw, got, ok, want)
+		}
+		if _, ok := Entry(raw); ok {
+			t.Errorf("Entry(%q) admitted a terminal-only form", raw)
+		}
+	}
+	if got, err := Terminal.Canonical(nil); err != nil || got == nil || len(got) != 0 {
+		t.Errorf("Terminal.Canonical(nil) = %#v, %v; want an empty list", got, err)
+	}
+	if got, err := Terminal.Canonical([]string{"b@x.com", "*@x.com", "a@x.com"}); err != nil || strings.Join(got, ",") != "*@x.com,a@x.com,b@x.com" {
+		t.Errorf("Terminal.Canonical sorts: %v, %v", got, err)
+	}
+	if _, err := Terminal.Emails([]string{"*@x.com"}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("Terminal.Emails took a wildcard: %v", err)
+	}
+	if !Terminal.Allows([]string{"*@company.com"}, "Person@Company.com") || Terminal.Allows([]string{"*@company.com"}, "p@sub.company.com") {
+		t.Error("Terminal.Allows does not match exactly one domain")
 	}
 }

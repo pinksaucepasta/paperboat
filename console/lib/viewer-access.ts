@@ -1,5 +1,5 @@
 /*
- * Who can open a private preview or an HTTP tunnel route in a browser: the owner, plus an allow list of email
+ * Who can open a terminal, a private preview or an HTTP tunnel route in a browser: the owner, plus an allow list of email
  * addresses and "*@domain" entries (the server's viewer policy). The server checks every entry again.
  */
 
@@ -23,17 +23,13 @@ export type ViewerPolicyView = {
   native_access_mode: "public" | "private" | "team"
 }
 
-// One "@", no spaces or list separators, and "*" only as the whole name before it. A wildcard's domain has a dot.
-const address = /^[^\s@*,;<>()"]+@[^\s@*,;<>()"/:]+$/
+// One "@", no spaces or list separators, and "*" only as the whole name before it. A domain has a dot. The one
+// check for terminal sharing, previews and tunnels (components/access-list.tsx); the server checks again.
+const address = /^[^\s@*,;<>()"]+@[^\s@*,;<>()"/:.]+(\.[^\s@*,;<>()"/:.]+)+$/
 const wildcard = /^\*@[^\s@*,;<>()"/:.]+(\.[^\s@*,;<>()"/:.]+)+$/
 
 export const isViewerEntry = (entry: string) =>
   entry.length <= 254 && (entry.startsWith("*") ? wildcard.test(entry) : address.test(entry))
-
-/** The list with new entries added, lower-cased as the server stores them, without repeats. */
-export const addViewers = (list: string[], entries: string[]) => [
-  ...new Set([...list, ...entries.map((entry) => entry.toLowerCase())]),
-]
 
 /** Why this list cannot be saved, or null. */
 export function viewerListProblem(list: string[]): string | null {
