@@ -524,7 +524,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			reporter.ObserveFailure(ctx, phase, cause)
 		}
 	}, PreviewHTTPSAuthority: func(ctx context.Context, host string) error {
-		if ingressAuthority.PreviewSignIn(host) {
+		if ingressAuthority.PreviewSignIn(host) && !ingressAuthority.Withheld(host) {
 			// A listed public preview has no public decision; its live public carrier route owns the name, and
 			// every request then signs in.
 			return previewHTTPSMatcher.AuthorizeSignInHTTPS(host)
